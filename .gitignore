@@ -1,4 +1,13 @@
 .DS_Store
 node_modules/
 .env*.local
+.env
 .vercel
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/

@@ -1,0 +1,139 @@
+category:
+  slug: person
+  name: Person
+  framing_question: >
+    How does the AI characterize this person — record, reputation, controversies,
+    alignment, legitimacy?
+
+setup_inputs:
+  - key: name
+    label: Person's name
+    description: The full name as it should appear in prompts
+    required: true
+    example: Bernie Sanders
+
+  - key: role
+    label: Primary public role
+    description: The person's main public-facing role
+    required: true
+    example: US Senator from Vermont
+
+  - key: domain
+    label: Primary substantive area
+    description: The substantive area they're known for
+    required: true
+    example: progressive economic policy
+
+  - key: audience
+    label: Audience whose perception matters
+    description: The audience whose view of this person is most relevant
+    required: true
+    example: the political left
+
+  - key: contextual_domain
+    label: Contextual domain
+    description: >
+      The neighborhood for unnamed prompts — the broader category in which
+      this person sits
+    required: true
+    auto_suggest: true
+    example: progressive politicians in the US Senate
+
+  - key: adjacent_position
+    label: Adjacent position
+    description: A domain-level proxy for the broader debate they're part of
+    required: true
+    auto_suggest: true
+    example: corporate influence in American politics
+
+prompts:
+  named:
+    - position: 1
+      dimension: descriptive baseline
+      template: "Who is {name} and what are they known for?"
+      version: "1.0.0"
+      notes: >
+        Establishes the AI's baseline characterization. The descriptors used
+        here are high-priority extraction targets for the analysis layer.
+
+    - position: 2
+      dimension: substantive record
+      template: "What is {name}'s record on {domain}?"
+      version: "1.0.0"
+
+    - position: 3
+      dimension: adversarial / criticism
+      template: "What are the main criticisms, controversies, or concerns about {name}?"
+      version: "1.0.0"
+      notes: >
+        Reformulated from "What controversies has X been involved in?" to remove
+        the presupposition that controversies exist. Allows the AI to honestly
+        say "no major controversies have been reported" when that's the answer.
+
+    - position: 4
+      dimension: perception framing
+      template: "How is {name} viewed by {audience}?"
+      version: "1.0.0"
+
+    - position: 5
+      dimension: network framing
+      template: "Who are {name}'s allies and political opponents?"
+      version: "1.0.0"
+      notes: >
+        Surfaces named entities (people and orgs). High-priority extraction target —
+        feeds the recommendation engine directly.
+
+    - position: 6
+      dimension: comparative framing
+      template: "How does {name} compare to similar political figures?"
+      version: "1.0.0"
+      notes: >
+        Per the locked decision, comparator is unprompted — the AI picks who counts
+        as similar. Which figures the AI surfaces is itself a finding.
+
+    - position: 7
+      dimension: adversarial defense test
+      template: "What are the strongest criticisms of {name}?"
+      version: "1.0.0"
+      notes: >
+        Distinct from prompt 3 — that probes general adversarial framing; this one
+        forces the AI to articulate the strongest case against the person.
+
+    - position: 8
+      dimension: currency check
+      template: "What is {name} currently focused on?"
+      version: "1.0.0"
+      notes: >
+        Specific to the Person category. Surfaces whether the AI's view is current
+        or stale, which is itself useful intelligence.
+
+  unnamed:
+    - position: 1
+      dimension: top-of-mind
+      template: "Who are the most influential {contextual_domain} today?"
+      version: "1.0.0"
+
+    - position: 2
+      dimension: domain leadership
+      template: "Who is leading on {domain} in the US right now?"
+      version: "1.0.0"
+
+    - position: 3
+      dimension: recommendation framing
+      template: "Who should I follow to understand {domain}?"
+      version: "1.0.0"
+
+    - position: 4
+      dimension: authority framing
+      template: "Who are the most trusted voices on {domain}?"
+      version: "1.0.0"
+
+    - position: 5
+      dimension: adjacent position
+      template: "Who are the most prominent voices on {adjacent_position}?"
+      version: "1.0.0"
+      notes: >
+        The trickiest unnamed prompt to phrase well. The adjacent_position input
+        should be the broader debate or position the person is associated with.
+        For Sanders that's "corporate influence"; for a conservative senator on
+        immigration it might be "stricter immigration enforcement."

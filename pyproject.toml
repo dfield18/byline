@@ -1,0 +1,21 @@
+[project]
+name = "byline"
+version = "0.1.0"
+description = "AI search visibility tooling — prompt-running infrastructure"
+requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary]>=3.2",
+    "openai>=1.50",
+    "google-genai>=1.0",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "python-dotenv>=1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
