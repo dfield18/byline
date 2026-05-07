@@ -46,15 +46,29 @@ setup_inputs:
     auto_suggest: true
     example: corporate influence in American politics
 
+  - key: pronoun_subject
+    label: Subject pronoun
+    description: The subject pronoun used for this person (he, she, or they)
+    required: true
+    example: he
+
+  - key: pronoun_be
+    label: Pronoun "be" conjugation
+    description: The matching "be" conjugation in question form (is for he/she, are for they)
+    required: true
+    example: is
+
 prompts:
   named:
     - position: 1
       dimension: descriptive baseline
-      template: "Who is {name} and what are they known for?"
-      version: "1.0.0"
+      template: "Who is {name} and what {pronoun_be} {pronoun_subject} known for?"
+      version: "1.0.1"
       notes: >
         Establishes the AI's baseline characterization. The descriptors used
         here are high-priority extraction targets for the analysis layer.
+        v1.0.1: replaced singular-they with subject-aware pronoun fields for
+        natural-sounding renders (e.g., "what is he known for").
 
     - position: 2
       dimension: substantive record
