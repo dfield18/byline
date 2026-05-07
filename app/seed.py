@@ -46,8 +46,8 @@ CATEGORIES: list[tuple[str, str, str]] = [
 
 # Update these identifiers as new stable models ship.
 MODELS: list[tuple[str, str, str, str, str | None]] = [
-    ("chatgpt", "openai", "ChatGPT (GPT-5.2)", "gpt-5.2", None),
-    ("gemini", "google", "Gemini 2.5 Pro", "gemini-2.5-pro", None),
+    ("chatgpt", "openai", "ChatGPT (GPT-5 Mini)", "gpt-5-mini", None),
+    ("gemini", "google", "Gemini 2.5 Flash", "gemini-2.5-flash", None),
 ]
 
 

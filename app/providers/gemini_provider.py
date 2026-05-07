@@ -14,9 +14,10 @@ from app.providers.base import Provider, ProviderResponse
 
 load_dotenv()
 
-# Approximate per-1M-token pricing for Gemini 2.5 Pro. Update when pricing changes.
-_PRICE_PER_1M_INPUT = Decimal("1.25")
-_PRICE_PER_1M_OUTPUT = Decimal("10.00")
+# Per-1M-token pricing for gemini-2.5-flash (paid tier, standard).
+# Source: https://ai.google.dev/pricing — update when pricing changes.
+_PRICE_PER_1M_INPUT = Decimal("0.30")
+_PRICE_PER_1M_OUTPUT = Decimal("2.50")
 _PER_TOKEN = Decimal(1_000_000)
 
 

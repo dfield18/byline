@@ -12,9 +12,10 @@ from app.providers.base import Provider, ProviderResponse
 
 load_dotenv()
 
-# Approximate per-1M-token pricing for GPT-5.2. Update when OpenAI changes pricing.
-_PRICE_PER_1M_INPUT = Decimal("1.25")
-_PRICE_PER_1M_OUTPUT = Decimal("10.00")
+# Approximate per-1M-token pricing for gpt-5-mini. Estimate — calibrate against
+# the OpenAI billing dashboard after a few runs and update if needed.
+_PRICE_PER_1M_INPUT = Decimal("0.25")
+_PRICE_PER_1M_OUTPUT = Decimal("2.00")
 _PER_TOKEN = Decimal(1_000_000)
 
 
