@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import warnings
 from decimal import Decimal
 from typing import Any
 
@@ -32,6 +33,7 @@ class GeminiProvider(Provider):
         params: dict[str, Any],
         *,
         enable_grounding: bool = True,
+        reasoning_enabled: bool = False,
     ) -> ProviderResponse:
         start = time.perf_counter()
 
@@ -42,6 +44,22 @@ class GeminiProvider(Provider):
             config_kwargs["max_output_tokens"] = params["max_tokens"]
         if enable_grounding:
             config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+
+        # Disable internal thinking on Flash variants when reasoning_enabled=False.
+        # Pro variants don't fully support disabling thinking; warn and pass through.
+        thinking_config_applied: dict[str, Any] | None = None
+        if not reasoning_enabled:
+            if "flash" in self.model_identifier.lower():
+                config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+                thinking_config_applied = {"thinking_budget": 0}
+            else:
+                warnings.warn(
+                    f"reasoning_enabled=False is not fully supported on "
+                    f"{self.model_identifier!r} (non-Flash variant); passing through "
+                    f"without thinking_config",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
@@ -54,7 +72,11 @@ class GeminiProvider(Provider):
         except Exception as e:
             return ProviderResponse(
                 text=None,
-                metadata={"grounding_enabled": enable_grounding},
+                metadata={
+                    "grounding_enabled": enable_grounding,
+                    "reasoning_enabled": reasoning_enabled,
+                    "thinking_config_applied": thinking_config_applied,
+                },
                 success=False,
                 error=str(e),
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -107,6 +129,8 @@ class GeminiProvider(Provider):
             "grounding_enabled": enable_grounding,
             "search_queries": search_queries,
             "citations": citations,
+            "reasoning_enabled": reasoning_enabled,
+            "thinking_config_applied": thinking_config_applied,
         }
 
         return ProviderResponse(

@@ -37,6 +37,7 @@ class OpenAIProvider(Provider):
         params: dict[str, Any],
         *,
         enable_grounding: bool = True,
+        reasoning_enabled: bool = False,
     ) -> ProviderResponse:
         start = time.perf_counter()
 
@@ -51,12 +52,26 @@ class OpenAIProvider(Provider):
         if enable_grounding:
             kwargs["tools"] = [{"type": "web_search"}]
 
+        # Pick the lowest reasoning effort compatible with the request when
+        # reasoning_enabled=False, on gpt-5 family. The web_search tool rejects
+        # effort="minimal" with a 400, so use "low" when grounding is on; "minimal"
+        # otherwise. Other model families silently omit the param to avoid 400.
+        reasoning_param_applied: dict[str, Any] | None = None
+        if not reasoning_enabled and self.model_identifier.startswith("gpt-5"):
+            effort = "low" if enable_grounding else "minimal"
+            kwargs["reasoning"] = {"effort": effort}
+            reasoning_param_applied = {"effort": effort}
+
         try:
             response = self._client.responses.create(**kwargs)
         except Exception as e:
             return ProviderResponse(
                 text=None,
-                metadata={"grounding_enabled": enable_grounding},
+                metadata={
+                    "grounding_enabled": enable_grounding,
+                    "reasoning_enabled": reasoning_enabled,
+                    "reasoning_param_applied": reasoning_param_applied,
+                },
                 success=False,
                 error=str(e),
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -118,6 +133,8 @@ class OpenAIProvider(Provider):
             "grounding_enabled": enable_grounding,
             "search_queries": search_queries,
             "citations": citations,
+            "reasoning_enabled": reasoning_enabled,
+            "reasoning_param_applied": reasoning_param_applied,
         }
 
         return ProviderResponse(

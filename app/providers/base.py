@@ -33,5 +33,6 @@ class Provider(ABC):
         params: dict[str, Any],
         *,
         enable_grounding: bool = True,
+        reasoning_enabled: bool = False,
     ) -> ProviderResponse:
         ...
