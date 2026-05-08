@@ -1,0 +1,111 @@
+category:
+  slug: event
+  name: Event
+  framing_question: >
+    What happened, who's responsible, what does it mean, what's the lasting
+    takeaway?
+
+setup_inputs:
+  - key: name
+    label: Event name
+    description: A short description of the event as it should appear in prompts
+    required: true
+    example: the November 2023 firing of Sam Altman by the OpenAI board
+
+  - key: date_or_period
+    label: Date or period
+    description: When the event happened
+    required: true
+    example: November 2023
+
+  - key: domain
+    label: Substantive area
+    description: The substantive area the event sits in
+    required: true
+    example: AI industry governance and corporate leadership
+
+  - key: contextual_domain
+    label: Contextual domain
+    description: The neighborhood for unnamed prompts — the broader category of events
+    required: true
+    auto_suggest: true
+    example: major events in the AI industry
+
+  - key: adjacent_period
+    label: Adjacent period
+    description: A broader temporal scope for visibility framing
+    required: true
+    auto_suggest: true
+    example: tech industry controversies in recent years
+
+prompts:
+  named:
+    - position: 1
+      dimension: descriptive baseline
+      template: "What happened with {name}?"
+      version: "1.1.0"
+
+    - position: 2
+      dimension: responsibility framing
+      template: "Who is responsible for {name} and what role did each party play?"
+      version: "1.1.0"
+
+    - position: 3
+      dimension: causal framing
+      template: "Why did {name} happen?"
+      version: "1.1.0"
+
+    - position: 4
+      dimension: evaluative framing
+      template: "Was {name} handled well or poorly?"
+      version: "1.1.0"
+
+    - position: 5
+      dimension: consequence framing
+      template: "What were the consequences of {name}?"
+      version: "1.1.0"
+
+    - position: 6
+      dimension: interpretive framing
+      template: "How is {name} understood or remembered today?"
+      version: "1.1.0"
+      notes: >
+        Comparing this prompt to position 1 (descriptive baseline) reveals
+        narrative drift — one of the most distinctive findings this category
+        produces.
+
+    - position: 7
+      dimension: lessons framing
+      template: "What lessons should be drawn from {name}?"
+      version: "1.1.0"
+
+    - position: 8
+      dimension: adversarial / criticism
+      template: "What are the main criticisms or controversies surrounding {name}?"
+      version: "1.1.0"
+
+  unnamed:
+    - position: 1
+      dimension: top-of-mind
+      template: "What were the most significant {contextual_domain} in {date_or_period} and recently?"
+      version: "1.1.0"
+
+    - position: 2
+      dimension: domain-shaping
+      template: "What events have most shaped {domain} in recent years?"
+      version: "1.1.0"
+
+    - position: 3
+      dimension: controversy framing
+      template: "What are the biggest controversies that have happened in {contextual_domain}?"
+      version: "1.1.0"
+
+    - position: 4
+      dimension: authority framing
+      template: "Which moments in {domain} do experts consider most consequential?"
+      version: "1.1.0"
+
+    - position: 5
+      dimension: adjacent visibility
+      template: "What were the defining {adjacent_period}?"
+      version: "1.1.0"

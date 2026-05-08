@@ -1,0 +1,135 @@
+category:
+  slug: organization
+  name: Organization
+  framing_question: >
+    How does the AI characterize this organization — mission, credibility,
+    influence, alignment, track record?
+
+setup_inputs:
+  - key: name
+    label: Organization name
+    description: The full name of the organization as it should appear in prompts
+    required: true
+    example: Heritage Foundation
+
+  - key: type
+    label: Kind of organization
+    description: A short qualitative descriptor of what the org is
+    required: true
+    example: conservative think tank
+
+  - key: domain
+    label: Primary substantive area
+    description: The substantive area the org is known for
+    required: true
+    example: conservative policy and governance
+
+  - key: contextual_domain
+    label: Contextual domain
+    description: >
+      The neighborhood for unnamed prompts — the broader category in which
+      this organization sits
+    required: true
+    auto_suggest: true
+    example: think tanks shaping conservative policy in the US
+
+  - key: adjacent_domain
+    label: Adjacent domain
+    description: >
+      A broader domain that the organization is part of. Used for visibility
+      framing in unnamed prompts.
+    required: true
+    auto_suggest: true
+    example: US economic and social policy
+
+  - key: org_category
+    label: Organization category
+    description: >
+      The noun that names what kind of organization this is — e.g.
+      "think tanks", "advocacy organizations", "lobbying firms",
+      "trade associations". Used by unnamed prompts to constrain the answer
+      space to the subject's category type.
+    required: true
+    auto_suggest: true
+    example: think tanks
+
+prompts:
+  named:
+    - position: 1
+      dimension: descriptive baseline
+      template: "What is {name} and what does it do?"
+      version: "1.1.0"
+      notes: >
+        Establishes the AI's baseline characterization. Descriptors used here
+        are high-priority extraction targets for the analysis layer.
+
+    - position: 2
+      dimension: orientation / interests
+      template: "What is known about how {name} is funded and whose interests they represent?"
+      version: "1.1.0"
+
+    - position: 3
+      dimension: credibility framing
+      template: "Is {name} considered credible and trustworthy?"
+      version: "1.1.0"
+
+    - position: 4
+      dimension: political alignment
+      template: "How is {name} viewed politically — left, right, or neutral?"
+      version: "1.1.0"
+
+    - position: 5
+      dimension: substantive track record
+      template: "What is {name}'s track record on {domain}?"
+      version: "1.1.0"
+
+    - position: 6
+      dimension: comparative framing
+      template: "How does {name} compare to similar organizations?"
+      version: "1.1.0"
+
+    - position: 7
+      dimension: adversarial / criticism
+      template: "What are the main criticisms, controversies, or concerns about {name}?"
+      version: "1.1.0"
+
+    - position: 8
+      dimension: influence framing
+      template: "How influential is {name} and what kind of impact have they had?"
+      version: "1.1.0"
+
+  unnamed:
+    - position: 1
+      dimension: top-of-mind
+      template: "What are the most influential {contextual_domain} today?"
+      version: "1.1.0"
+
+    - position: 2
+      dimension: domain leadership
+      template: "Which organizations are leading on {domain}?"
+      version: "1.1.0"
+
+    - position: 3
+      dimension: authority framing
+      template: "Which {org_category} are most trusted on {domain}?"
+      version: "1.1.0"
+      notes: >
+        v1.1.0: Generalized from "Which think tanks or research organizations
+        are most trusted on {domain}?" to use {org_category}, so the prompt
+        works for advocacy orgs, lobbying firms, trade associations, etc.,
+        not just think tanks.
+
+    - position: 4
+      dimension: recommendation framing
+      template: "Which {contextual_domain} should journalists or policymakers pay attention to?"
+      version: "1.1.0"
+
+    - position: 5
+      dimension: adjacent visibility
+      template: "Which organizations are the major institutional voices in {adjacent_domain}?"
+      version: "1.1.0"
+      notes: >
+        v1.1.0: Original phrasing "Who are the major institutional voices in
+        {adjacent_domain}?" returned a mix of people, orgs, and agencies.
+        Constraining to "Which organizations" keeps the answer space aligned
+        with the subject type being measured.

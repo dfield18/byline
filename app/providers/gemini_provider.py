@@ -10,7 +10,29 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from app.providers._retry import retry_async
 from app.providers.base import Provider, ProviderResponse
+
+
+_RETRYABLE_GEMINI_SUBSTRINGS = (
+    "429",
+    "rate limit",
+    "resource_exhausted",
+    "503",
+    "502",
+    "504",
+    "unavailable",
+    "deadline_exceeded",
+    "timeout",
+)
+
+
+def _is_retryable_gemini(exc: Exception) -> bool:
+    """The google-genai SDK raises generic errors with HTTP-style messages; we
+    inspect the stringified error rather than depend on a specific class.
+    """
+    message = str(exc).lower()
+    return any(s in message for s in _RETRYABLE_GEMINI_SUBSTRINGS)
 
 
 load_dotenv()
@@ -65,10 +87,13 @@ class GeminiProvider(Provider):
 
         try:
             # genai.Client.aio.* exposes true async methods backed by aiohttp.
-            response = await self._client.aio.models.generate_content(
-                model=self.model_identifier,
-                contents=prompt,
-                config=config,
+            response, retry_count = await retry_async(
+                lambda: self._client.aio.models.generate_content(
+                    model=self.model_identifier,
+                    contents=prompt,
+                    config=config,
+                ),
+                is_retryable=_is_retryable_gemini,
             )
         except Exception as e:
             return ProviderResponse(
@@ -132,6 +157,7 @@ class GeminiProvider(Provider):
             "citations": citations,
             "reasoning_enabled": reasoning_enabled,
             "thinking_config_applied": thinking_config_applied,
+            "retry_count": retry_count,
         }
 
         return ProviderResponse(

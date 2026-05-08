@@ -29,7 +29,7 @@ async def run_refresh(
     verbose: bool = True,
     enable_grounding: bool = True,
     reasoning_enabled: bool = False,
-    max_concurrency: int = 8,
+    max_concurrency: int = 26,
 ) -> int:
     """Run all active prompts × all active models for a subject, concurrently.
 

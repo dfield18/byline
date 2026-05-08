@@ -1,0 +1,135 @@
+category:
+  slug: policy
+  name: Policy
+  framing_question: >
+    How does the AI describe what this policy does, its effects, who supports
+    or opposes it, and the tradeoffs?
+
+setup_inputs:
+  - key: name
+    label: Policy name
+    description: The policy's name as it should appear in prompts
+    required: true
+    example: the Inflation Reduction Act
+
+  - key: type
+    label: Kind of policy
+    description: A short qualitative descriptor (e.g., "federal legislation", "executive order")
+    required: true
+    example: federal legislation
+
+  - key: domain
+    label: Substantive area
+    description: The substantive area the policy operates in
+    required: true
+    example: climate, healthcare, and tax policy
+
+  - key: contextual_domain
+    label: Contextual domain
+    description: >
+      The neighborhood for unnamed prompts — the broader category in which
+      this policy sits
+    required: true
+    auto_suggest: true
+    example: major US federal legislation on climate and healthcare
+
+  - key: problem_addressed
+    label: Problem the policy addresses
+    description: A short description of what problem the policy is meant to solve
+    required: true
+    auto_suggest: true
+    example: climate change, drug pricing, and corporate tax avoidance
+
+  - key: policy_category
+    label: Policy category
+    description: >
+      The noun that names what kind of policy this is — e.g. "laws",
+      "regulations", "proposed bills", "executive orders". Used by unnamed
+      prompts to constrain the answer space to the subject's category type.
+    required: true
+    auto_suggest: true
+    example: laws
+
+prompts:
+  named:
+    - position: 1
+      dimension: descriptive baseline
+      template: "What is {name} and what does it do?"
+      version: "1.1.0"
+
+    - position: 2
+      dimension: favorable case
+      template: "What are the arguments in favor of {name}?"
+      version: "1.1.0"
+      notes: >
+        Asking arguments-for and arguments-against in separate prompts is
+        critical — the asymmetry between the two responses is the core finding
+        for the policy category.
+
+    - position: 3
+      dimension: adversarial case
+      template: "What are the arguments against {name}?"
+      version: "1.1.0"
+
+    - position: 4
+      dimension: effects framing
+      template: "What are the expected or actual effects of {name}?"
+      version: "1.1.0"
+
+    - position: 5
+      dimension: coalition framing
+      template: "Who supports and who opposes {name}, and why?"
+      version: "1.1.0"
+      notes: >
+        High-priority extraction target — named entities (supporters and
+        opponents) feed the recommendation engine directly.
+
+    - position: 6
+      dimension: prescriptive framing
+      template: "What should be done with {name} going forward?"
+      version: "1.1.0"
+      notes: >
+        v1.1.0: Combined the spec's two conditional variants (enacted vs
+        proposed) into one neutral prompt that works for both. Per the
+        prompts-config-format guidance, conditional logic is deferred for v1.
+
+    - position: 7
+      dimension: comparative framing
+      template: "How does {name} compare to alternative approaches?"
+      version: "1.1.0"
+
+    - position: 8
+      dimension: adversarial / criticism
+      template: "What are the main criticisms or concerns about {name}?"
+      version: "1.1.0"
+
+  unnamed:
+    - position: 1
+      dimension: top-of-mind
+      template: "What are the most important pieces of {contextual_domain} in recent years?"
+      version: "1.1.0"
+
+    - position: 2
+      dimension: problem-driven
+      template: "What policies have been proposed or enacted to address {problem_addressed}?"
+      version: "1.1.0"
+
+    - position: 3
+      dimension: effectiveness framing
+      template: "Which policies have been most effective at addressing {problem_addressed}?"
+      version: "1.1.0"
+
+    - position: 4
+      dimension: authority framing
+      template: "What do experts identify as the most consequential {contextual_domain}?"
+      version: "1.1.0"
+
+    - position: 5
+      dimension: adjacent visibility
+      template: "What are the major {policy_category} shaping {domain} today?"
+      version: "1.1.0"
+      notes: >
+        v1.1.0: Generalized from "What are the major laws shaping {domain}
+        today?" to use {policy_category}. Subjects that are regulations,
+        executive orders, or proposed bills wouldn't have surfaced under the
+        hardcoded "laws" answer space.

@@ -5,9 +5,28 @@ from decimal import Decimal
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    InternalServerError,
+    RateLimitError,
+)
 
+from app.providers._retry import retry_async
 from app.providers.base import Provider, ProviderResponse
+
+
+_RETRYABLE_OPENAI_EXC = (
+    RateLimitError,
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+)
+
+
+def _is_retryable_openai(exc: Exception) -> bool:
+    return isinstance(exc, _RETRYABLE_OPENAI_EXC)
 
 
 load_dotenv()
@@ -64,7 +83,10 @@ class OpenAIProvider(Provider):
             reasoning_param_applied = {"effort": effort}
 
         try:
-            response = await self._client.responses.create(**kwargs)
+            response, retry_count = await retry_async(
+                lambda: self._client.responses.create(**kwargs),
+                is_retryable=_is_retryable_openai,
+            )
         except Exception as e:
             return ProviderResponse(
                 text=None,
@@ -136,6 +158,7 @@ class OpenAIProvider(Provider):
             "citations": citations,
             "reasoning_enabled": reasoning_enabled,
             "reasoning_param_applied": reasoning_param_applied,
+            "retry_count": retry_count,
         }
 
         return ProviderResponse(

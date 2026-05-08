@@ -1,0 +1,122 @@
+category:
+  slug: issue
+  name: Issue
+  framing_question: >
+    How does the AI characterize this contested topic — what frame dominates,
+    whose narrative is centered?
+
+setup_inputs:
+  - key: name
+    label: Issue name
+    description: The contested topic as it should appear in prompts
+    required: true
+    example: AI regulation in the United States
+
+  - key: position_a
+    label: Position A
+    description: One major position in the debate
+    required: true
+    auto_suggest: true
+    example: strict government regulation of AI development
+
+  - key: position_b
+    label: Position B
+    description: An opposing major position in the debate
+    required: true
+    auto_suggest: true
+    example: a light-touch, innovation-first approach to AI
+
+  - key: domain
+    label: Substantive area
+    description: The substantive area the debate sits in
+    required: true
+    example: technology policy and AI governance
+
+  - key: contextual_domain
+    label: Contextual domain
+    description: The neighborhood for unnamed prompts — the broader category of debates
+    required: true
+    auto_suggest: true
+    example: major debates in US technology policy
+
+  - key: geography_or_scope
+    label: Geography or scope qualifier
+    description: An optional geographic or scope qualifier for some prompts
+    required: true
+    example: the United States
+
+prompts:
+  named:
+    - position: 1
+      dimension: descriptive baseline
+      template: "What is the debate over {name} about?"
+      version: "1.1.0"
+
+    - position: 2
+      dimension: perspective mapping
+      template: "What are the main perspectives on {name}?"
+      version: "1.1.0"
+      notes: >
+        High-priority extraction target — whether user-defined positions
+        (position_a and position_b) appear in the AI's perspective mapping.
+        If they don't, the AI's mental model of the debate doesn't match the
+        user's preferred frame.
+
+    - position: 3
+      dimension: position-favorable A
+      template: "What is the case for {position_a}?"
+      version: "1.1.0"
+      notes: >
+        Paired with position-favorable B (position 4). Asymmetry between
+        the two responses is the core finding for the issue category.
+
+    - position: 4
+      dimension: position-favorable B
+      template: "What is the case for {position_b}?"
+      version: "1.1.0"
+
+    - position: 5
+      dimension: authority framing
+      template: "What do experts say about {name}?"
+      version: "1.1.0"
+
+    - position: 6
+      dimension: stakes framing
+      template: "What's at stake in the debate over {name}?"
+      version: "1.1.0"
+
+    - position: 7
+      dimension: causal framing
+      template: "What's driving the debate over {name} right now?"
+      version: "1.1.0"
+
+    - position: 8
+      dimension: prescriptive framing
+      template: "What should be done about {name}?"
+      version: "1.1.0"
+
+  unnamed:
+    - position: 1
+      dimension: top-of-mind
+      template: "What are the most important {contextual_domain} today?"
+      version: "1.1.0"
+
+    - position: 2
+      dimension: pressing-debate framing
+      template: "What are the most pressing policy debates in {domain}?"
+      version: "1.1.0"
+
+    - position: 3
+      dimension: domain controversy
+      template: "What controversies are dominating {domain} in {geography_or_scope} right now?"
+      version: "1.1.0"
+
+    - position: 4
+      dimension: authority framing
+      template: "Which debates in {domain} are most important according to experts?"
+      version: "1.1.0"
+
+    - position: 5
+      dimension: public concern framing
+      template: "What are people most concerned about when it comes to {domain}?"
+      version: "1.1.0"

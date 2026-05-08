@@ -109,6 +109,59 @@ def _create_subject(category_id: int, name: str, setup_inputs: dict) -> int:
         return cur.fetchone()[0]
 
 
+def _ensure_setup_inputs_complete(subject_id: int, name: str) -> None:
+    """If the subject's setup_inputs is missing keys that the active YAML now
+    declares as required, prompt the user interactively and persist the
+    missing values. This handles the case where a prompts YAML evolves
+    (new variables added) after a subject was originally created.
+    """
+    with get_cursor(commit=False) as cur:
+        cur.execute(
+            """
+            SELECT s.setup_inputs, c.slug
+            FROM subjects s
+            JOIN categories c ON s.category_id = c.id
+            WHERE s.id = %s
+            """,
+            (subject_id,),
+        )
+        current_inputs, category_slug = cur.fetchone()
+
+    setup_inputs_def = _load_setup_inputs_def(category_slug)
+    missing = [
+        si
+        for si in setup_inputs_def
+        if si.get("required", False) and si["key"] not in current_inputs
+    ]
+    if not missing:
+        return
+
+    typer.echo(
+        f"\n'{name}' is missing {len(missing)} setup input(s) required by the "
+        f"current prompts YAML. Fill them in to continue:"
+    )
+    new_values: dict[str, str] = {}
+    for si in missing:
+        key = si["key"]
+        label = si.get("label", key)
+        description = (si.get("description") or "").strip()
+        example = si.get("example")
+        header = label + (f"  (e.g. {example})" if example else "")
+        typer.echo(f"\n{header}")
+        if description:
+            typer.echo(f"  {description}")
+        new_values[key] = typer.prompt(">")
+
+    with get_cursor() as cur:
+        cur.execute(
+            "UPDATE subjects SET setup_inputs = setup_inputs || %s::jsonb WHERE id = %s",
+            (json.dumps(new_values), subject_id),
+        )
+    typer.echo(
+        f"\nUpdated '{name}' with {', '.join(new_values.keys())}."
+    )
+
+
 def _summarize(refresh_run_id: int):
     with get_cursor(commit=False) as cur:
         cur.execute(
@@ -128,9 +181,10 @@ def _summarize(refresh_run_id: int):
 def main(
     name: str = typer.Argument(..., help="Subject name (e.g. 'Bernie Sanders')"),
     max_concurrency: int = typer.Option(
-        8,
+        26,
         "--max-concurrency",
-        help="Max queries running in parallel (default 8).",
+        help="Max queries running in parallel (default 26 — every query in a "
+        "26-query refresh fires at once; floor is the slowest single call).",
     ),
 ) -> None:
     subject_id = _find_subject_by_name(name)
@@ -143,6 +197,7 @@ def main(
         typer.echo(f"\nCreated subject id={subject_id}: {name}")
     else:
         typer.echo(f"\nFound existing subject id={subject_id}: {name}")
+        _ensure_setup_inputs_complete(subject_id, name)
 
     refresh_run_id = asyncio.run(
         run_refresh(subject_id, max_concurrency=max_concurrency)

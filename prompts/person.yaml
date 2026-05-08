@@ -46,6 +46,17 @@ setup_inputs:
     auto_suggest: true
     example: corporate influence in American politics
 
+  - key: role_category
+    label: Role category
+    description: >
+      The noun that names what kind of person this subject is — e.g.
+      "senators", "representatives", "governors", "advocacy leaders", "CEOs".
+      Used by unnamed prompts to constrain the answer space to the subject's
+      category type.
+    required: true
+    auto_suggest: true
+    example: senators
+
   - key: pronoun_subject
     label: Subject pronoun
     description: The subject pronoun used for this person (he, she, or they)
@@ -129,25 +140,43 @@ prompts:
 
     - position: 2
       dimension: domain leadership
-      template: "Who is leading on {domain} in the US right now?"
-      version: "1.0.0"
+      template: "Who are the {role_category} leading on {domain} in the US right now?"
+      version: "1.1.0"
+      notes: >
+        v1.1.0: Added {role_category} constraint to restrict answer space to
+        subject's category type. Original v1.0.0 produced false negatives when
+        broad-domain prompts returned answer spaces (think tanks, scholars,
+        journalists) that didn't naturally include the subject's category.
 
     - position: 3
       dimension: recommendation framing
-      template: "Who should I follow to understand {domain}?"
-      version: "1.0.0"
+      template: "Which {role_category} should I follow to understand {domain}?"
+      version: "1.1.0"
+      notes: >
+        v1.1.0: Added {role_category} constraint to restrict answer space to
+        subject's category type. Original v1.0.0 produced false negatives when
+        broad-domain prompts returned answer spaces that didn't naturally
+        include the subject's category.
 
     - position: 4
       dimension: authority framing
-      template: "Who are the most trusted voices on {domain}?"
-      version: "1.0.0"
+      template: "Who are the most trusted {role_category} on {domain}?"
+      version: "1.1.0"
+      notes: >
+        v1.1.0: Added {role_category} constraint to restrict answer space to
+        subject's category type. Original v1.0.0 produced false negatives when
+        broad-domain prompts returned answer spaces that didn't naturally
+        include the subject's category.
 
     - position: 5
       dimension: adjacent position
-      template: "Who are the most prominent voices on {adjacent_position}?"
-      version: "1.0.0"
+      template: "Who are the most prominent {role_category} on {adjacent_position}?"
+      version: "1.1.0"
       notes: >
-        The trickiest unnamed prompt to phrase well. The adjacent_position input
-        should be the broader debate or position the person is associated with.
-        For Sanders that's "corporate influence"; for a conservative senator on
-        immigration it might be "stricter immigration enforcement."
+        v1.1.0: Added {role_category} constraint to restrict answer space to
+        subject's category type. Original v1.0.0 produced false negatives when
+        broad-domain prompts returned answer spaces that didn't naturally
+        include the subject's category. The adjacent_position input is still
+        the broader debate the person is associated with — for Sanders that's
+        "corporate influence"; for a conservative senator on immigration it
+        might be "stricter immigration enforcement."
