@@ -11,3 +11,6 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# Local-only analytical artifacts (kept on disk, not in git)
+findings/
