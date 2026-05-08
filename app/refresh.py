@@ -9,6 +9,7 @@ across all active models for that subject and stores the responses.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Optional
@@ -126,6 +127,11 @@ def _summarize(refresh_run_id: int):
 
 def main(
     name: str = typer.Argument(..., help="Subject name (e.g. 'Bernie Sanders')"),
+    max_concurrency: int = typer.Option(
+        8,
+        "--max-concurrency",
+        help="Max queries running in parallel (default 8).",
+    ),
 ) -> None:
     subject_id = _find_subject_by_name(name)
     if subject_id is None:
@@ -138,7 +144,9 @@ def main(
     else:
         typer.echo(f"\nFound existing subject id={subject_id}: {name}")
 
-    refresh_run_id = run_refresh(subject_id)
+    refresh_run_id = asyncio.run(
+        run_refresh(subject_id, max_concurrency=max_concurrency)
+    )
     subject_name, status, successful, total, cost, seconds = _summarize(refresh_run_id)
 
     typer.echo(

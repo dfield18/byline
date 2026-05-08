@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from app.providers.base import Provider, ProviderResponse
 
@@ -29,9 +29,10 @@ class OpenAIProvider(Provider):
 
     def __init__(self, model_identifier: str) -> None:
         super().__init__(model_identifier)
-        self._client = OpenAI()
+        # AsyncOpenAI uses httpx.AsyncClient internally — true async I/O.
+        self._client = AsyncOpenAI()
 
-    def query(
+    async def query(
         self,
         prompt: str,
         params: dict[str, Any],
@@ -63,7 +64,7 @@ class OpenAIProvider(Provider):
             reasoning_param_applied = {"effort": effort}
 
         try:
-            response = self._client.responses.create(**kwargs)
+            response = await self._client.responses.create(**kwargs)
         except Exception as e:
             return ProviderResponse(
                 text=None,

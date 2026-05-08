@@ -27,7 +27,7 @@ class GeminiProvider(Provider):
         super().__init__(model_identifier)
         self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-    def query(
+    async def query(
         self,
         prompt: str,
         params: dict[str, Any],
@@ -64,7 +64,8 @@ class GeminiProvider(Provider):
         config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
         try:
-            response = self._client.models.generate_content(
+            # genai.Client.aio.* exposes true async methods backed by aiohttp.
+            response = await self._client.aio.models.generate_content(
                 model=self.model_identifier,
                 contents=prompt,
                 config=config,

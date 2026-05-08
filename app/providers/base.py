@@ -27,7 +27,7 @@ class Provider(ABC):
         self.model_identifier = model_identifier
 
     @abstractmethod
-    def query(
+    async def query(
         self,
         prompt: str,
         params: dict[str, Any],

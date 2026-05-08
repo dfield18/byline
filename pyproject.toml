@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "AI search visibility tooling — prompt-running infrastructure"
 requires-python = ">=3.11"
 dependencies = [
-    "psycopg[binary]>=3.2",
+    "psycopg[binary,pool]>=3.2",
     "openai>=1.50",
     "google-genai>=1.0",
     "pyyaml>=6.0",
