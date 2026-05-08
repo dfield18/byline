@@ -27,5 +27,11 @@ class Provider(ABC):
         self.model_identifier = model_identifier
 
     @abstractmethod
-    def query(self, prompt: str, params: dict[str, Any]) -> ProviderResponse:
+    def query(
+        self,
+        prompt: str,
+        params: dict[str, Any],
+        *,
+        enable_grounding: bool = True,
+    ) -> ProviderResponse:
         ...

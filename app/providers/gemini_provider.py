@@ -26,17 +26,24 @@ class GeminiProvider(Provider):
         super().__init__(model_identifier)
         self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-    def query(self, prompt: str, params: dict[str, Any]) -> ProviderResponse:
+    def query(
+        self,
+        prompt: str,
+        params: dict[str, Any],
+        *,
+        enable_grounding: bool = True,
+    ) -> ProviderResponse:
         start = time.perf_counter()
 
-        config: types.GenerateContentConfig | None = None
         config_kwargs: dict[str, Any] = {}
         if "temperature" in params:
             config_kwargs["temperature"] = params["temperature"]
         if "max_tokens" in params:
             config_kwargs["max_output_tokens"] = params["max_tokens"]
-        if config_kwargs:
-            config = types.GenerateContentConfig(**config_kwargs)
+        if enable_grounding:
+            config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+
+        config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
         try:
             response = self._client.models.generate_content(
@@ -47,7 +54,7 @@ class GeminiProvider(Provider):
         except Exception as e:
             return ProviderResponse(
                 text=None,
-                metadata={},
+                metadata={"grounding_enabled": enable_grounding},
                 success=False,
                 error=str(e),
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -65,14 +72,42 @@ class GeminiProvider(Provider):
             + Decimal(output_tokens) * _PRICE_PER_1M_OUTPUT / _PER_TOKEN
         )
 
+        search_queries: list[str] = []
+        citations: list[dict[str, Any]] = []
+        finish_reason: str | None = None
+
+        if response.candidates:
+            candidate = response.candidates[0]
+            finish_reason_obj = getattr(candidate, "finish_reason", None)
+            if finish_reason_obj is not None:
+                finish_reason = str(finish_reason_obj)
+
+            grounding = getattr(candidate, "grounding_metadata", None)
+            if grounding is not None:
+                queries = getattr(grounding, "web_search_queries", None) or []
+                search_queries = list(queries)
+
+                chunks = getattr(grounding, "grounding_chunks", None) or []
+                for chunk in chunks:
+                    web = getattr(chunk, "web", None)
+                    if web is not None:
+                        citations.append(
+                            {
+                                "uri": getattr(web, "uri", None),
+                                "title": getattr(web, "title", None),
+                            }
+                        )
+
         metadata: dict[str, Any] = {
             "model": self.model_identifier,
             "prompt_tokens": input_tokens,
             "completion_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
+            "finish_reason": finish_reason,
+            "grounding_enabled": enable_grounding,
+            "search_queries": search_queries,
+            "citations": citations,
         }
-        if response.candidates:
-            metadata["finish_reason"] = str(response.candidates[0].finish_reason)
 
         return ProviderResponse(
             text=text,

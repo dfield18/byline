@@ -13,7 +13,12 @@ from app.db import get_connection
 from app.providers import get_provider
 
 
-def run_refresh(subject_id: int, *, verbose: bool = True) -> int:
+def run_refresh(
+    subject_id: int,
+    *,
+    verbose: bool = True,
+    enable_grounding: bool = True,
+) -> int:
     """Run all active prompts × all active models for a subject.
 
     Returns the new refresh_runs.id.
@@ -59,8 +64,12 @@ def run_refresh(subject_id: int, *, verbose: bool = True) -> int:
             raise RuntimeError("no active models")
 
         cur.execute(
-            "INSERT INTO refresh_runs (subject_id, status) VALUES (%s, 'in_progress') RETURNING id",
-            (subject_id,),
+            """
+            INSERT INTO refresh_runs (subject_id, status, grounding_enabled)
+            VALUES (%s, 'in_progress', %s)
+            RETURNING id
+            """,
+            (subject_id, enable_grounding),
         )
         refresh_run_id = cur.fetchone()[0]
         conn.commit()
@@ -87,7 +96,9 @@ def run_refresh(subject_id: int, *, verbose: bool = True) -> int:
             for model_id, model_slug, _provider, _display, model_identifier in models:
                 index += 1
                 provider = provider_instances[model_id]
-                response = provider.query(rendered, request_params)
+                response = provider.query(
+                    rendered, request_params, enable_grounding=enable_grounding
+                )
 
                 cur.execute(
                     """
