@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -18,7 +19,12 @@ import typer
 import yaml
 
 from app.db import get_cursor
+from app.providers import get_provider
 from app.query_engine import run_refresh
+
+
+# Recent news is re-fetched if the cached value is older than this.
+_RECENT_NEWS_MAX_AGE = timedelta(days=7)
 
 
 PROMPTS_DIR = Path("prompts")
@@ -74,25 +80,63 @@ def _load_setup_inputs_def(slug: str) -> list[dict]:
     return data.get("setup_inputs", [])
 
 
+def _solicit_one_input(si: dict) -> tuple[bool, object]:
+    """Prompt the user for one setup_input. Returns (skipped, value).
+
+    - For type=boolean: typer.confirm, returns Python bool.
+    - For optional fields where the user enters nothing: returns (skipped=True, None).
+    - Otherwise: typer.prompt, returns string.
+    """
+    key = si["key"]
+    label = si.get("label", key)
+    description = (si.get("description") or "").strip()
+    example = si.get("example")
+    required = si.get("required", True)
+    field_type = si.get("type", "string")
+
+    header = label
+    if example is not None and field_type != "boolean":
+        header += f"  (e.g. {example})"
+    if not required and field_type != "boolean":
+        header += "  [optional, press Enter to skip]"
+
+    typer.echo(f"\n{header}")
+    if description:
+        typer.echo(f"  {description}")
+
+    if field_type == "boolean":
+        default = bool(example) if isinstance(example, bool) else False
+        return False, typer.confirm(">", default=default)
+
+    if required:
+        return False, typer.prompt(">")
+
+    v = typer.prompt(">", default="", show_default=False)
+    if v.strip():
+        return False, v
+    return True, None
+
+
 def _prompt_for_setup_inputs(setup_inputs_def: list[dict], name: str) -> dict:
-    """Prompt for each setup_input field. Returns the dict to store as JSONB."""
-    values: dict[str, str] = {"name": name}
+    """Prompt for each setup_input field. Returns the dict to store as JSONB.
+
+    Skips: 'name' (already from CLI arg) and 'recent_news' (auto-populated
+    later via web search). Optional fields allow empty input. Boolean fields
+    use typer.confirm.
+    """
+    values: dict = {"name": name}
     typer.echo(
         "\nFill in the setup inputs (these get substituted into prompt templates):"
     )
     for si in setup_inputs_def:
         key = si["key"]
         if key == "name":
-            continue  # already provided as the CLI argument
-        label = si.get("label", key)
-        description = (si.get("description") or "").strip()
-        example = si.get("example")
-
-        header = label + (f"  (e.g. {example})" if example else "")
-        typer.echo(f"\n{header}")
-        if description:
-            typer.echo(f"  {description}")
-        values[key] = typer.prompt(">")
+            continue
+        if key == "recent_news":
+            continue  # populated later by _ensure_recent_news_fresh
+        skipped, value = _solicit_one_input(si)
+        if not skipped:
+            values[key] = value
     return values
 
 
@@ -140,17 +184,14 @@ def _ensure_setup_inputs_complete(subject_id: int, name: str) -> None:
         f"\n'{name}' is missing {len(missing)} setup input(s) required by the "
         f"current prompts YAML. Fill them in to continue:"
     )
-    new_values: dict[str, str] = {}
+    new_values: dict = {}
     for si in missing:
-        key = si["key"]
-        label = si.get("label", key)
-        description = (si.get("description") or "").strip()
-        example = si.get("example")
-        header = label + (f"  (e.g. {example})" if example else "")
-        typer.echo(f"\n{header}")
-        if description:
-            typer.echo(f"  {description}")
-        new_values[key] = typer.prompt(">")
+        skipped, value = _solicit_one_input(si)
+        if not skipped:
+            new_values[si["key"]] = value
+
+    if not new_values:
+        return
 
     with get_cursor() as cur:
         cur.execute(
@@ -160,6 +201,80 @@ def _ensure_setup_inputs_complete(subject_id: int, name: str) -> None:
     typer.echo(
         f"\nUpdated '{name}' with {', '.join(new_values.keys())}."
     )
+
+
+async def _fetch_recent_news_via_web(subject_name: str) -> str | None:
+    """Fetch a short summary of recent news about the subject via grounded LLM.
+
+    Uses Gemini Flash with Google Search grounding (cheapest grounded option).
+    Returns None on any failure; the caller decides whether that's fatal.
+    """
+    provider = get_provider("google", "gemini-2.5-flash")
+    meta_prompt = (
+        f"Briefly summarize the most significant recent news or current events "
+        f"involving {subject_name} from the past 30 days. Focus on substantive "
+        f"policy actions, public statements, legislative work, or notable "
+        f"controversies. Output 2-3 sentences. Just the summary text — no "
+        f"preamble, no introductory phrases."
+    )
+    try:
+        response = await provider.query(
+            meta_prompt, {}, enable_grounding=True, reasoning_enabled=False
+        )
+    except Exception:
+        return None
+    if response.success and response.text:
+        return response.text.strip()
+    return None
+
+
+def _ensure_recent_news_fresh(subject_id: int, name: str) -> None:
+    """Ensure subject's recent_news is at most 7 days old. Re-fetch if stale or
+    missing. Failures are non-fatal: the refresh continues with the previous
+    value (or with the field absent) so a transient web-search outage doesn't
+    block a refresh.
+    """
+    with get_cursor(commit=False) as cur:
+        cur.execute(
+            "SELECT setup_inputs FROM subjects WHERE id = %s",
+            (subject_id,),
+        )
+        inputs = cur.fetchone()[0]
+
+    cached_at_str = inputs.get("recent_news_fetched_at")
+    cached_text = inputs.get("recent_news")
+    if cached_text and cached_at_str:
+        try:
+            cached_at = datetime.fromisoformat(cached_at_str)
+            if datetime.now(timezone.utc) - cached_at < _RECENT_NEWS_MAX_AGE:
+                # Cache hit — within 7 days. No re-fetch.
+                return
+        except (ValueError, TypeError):
+            pass  # malformed timestamp; fall through and refetch
+
+    typer.echo(
+        "\nRefreshing recent_news via web search "
+        f"(cached >7d old or missing for '{name}')..."
+    )
+    fetched = asyncio.run(_fetch_recent_news_via_web(name))
+    if not fetched:
+        if cached_text:
+            typer.echo("  (web search failed; keeping previous value)")
+        else:
+            typer.echo("  (web search failed; recent_news will remain unset)")
+        return
+
+    new_values = {
+        "recent_news": fetched,
+        "recent_news_fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with get_cursor() as cur:
+        cur.execute(
+            "UPDATE subjects SET setup_inputs = setup_inputs || %s::jsonb WHERE id = %s",
+            (json.dumps(new_values), subject_id),
+        )
+    preview = fetched[:140] + ("..." if len(fetched) > 140 else "")
+    typer.echo(f"  fetched: {preview}")
 
 
 def _summarize(refresh_run_id: int):
@@ -198,6 +313,10 @@ def main(
     else:
         typer.echo(f"\nFound existing subject id={subject_id}: {name}")
         _ensure_setup_inputs_complete(subject_id, name)
+
+    # Re-fetch recent_news if cached value is older than 7 days (or missing).
+    # Non-fatal: a web-search failure doesn't block the refresh.
+    _ensure_recent_news_fresh(subject_id, name)
 
     refresh_run_id = asyncio.run(
         run_refresh(subject_id, max_concurrency=max_concurrency)

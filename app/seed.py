@@ -111,10 +111,16 @@ def main(
         typer.echo(f"error: {e}", err=True)
         raise typer.Exit(code=1)
 
-    typer.echo(
-        f"prompts from {yaml_path}: "
-        f"{counts['inserted']} inserted, {counts['versioned']} version-bumped, {counts['noop']} unchanged"
-    )
+    parts = [
+        f"{counts['inserted']} inserted",
+        f"{counts['versioned']} version-bumped",
+        f"{counts['noop']} unchanged",
+    ]
+    if counts.get("deactivated", 0):
+        parts.append(f"{counts['deactivated']} deactivated")
+    if counts.get("inactive_noop", 0):
+        parts.append(f"{counts['inactive_noop']} already-inactive")
+    typer.echo(f"prompts from {yaml_path}: {', '.join(parts)}")
 
 
 if __name__ == "__main__":

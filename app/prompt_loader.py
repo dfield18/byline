@@ -62,6 +62,12 @@ def _validate(data: dict[str, Any]) -> None:
                 raise PromptLoaderError(
                     f"{layer} #{p['position']}: version '{p['version']}' is not semver"
                 )
+            prompt_type = p.get("type", "fixed")
+            if prompt_type not in ("fixed", "generated"):
+                raise PromptLoaderError(
+                    f"{layer} #{p['position']}: type must be 'fixed' or 'generated', "
+                    f"got {prompt_type!r}"
+                )
             template_vars = set(TEMPLATE_VAR_RE.findall(p["template"]))
             unknown = template_vars - valid_vars
             if unknown:
@@ -78,7 +84,13 @@ def _normalize_notes(notes: str | None) -> str | None:
 
 def _upsert(data: dict[str, Any]) -> dict[str, int]:
     slug = data["category"]["slug"]
-    counts = {"inserted": 0, "noop": 0, "versioned": 0}
+    counts = {
+        "inserted": 0,
+        "noop": 0,
+        "versioned": 0,
+        "deactivated": 0,
+        "inactive_noop": 0,
+    }
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -97,10 +109,12 @@ def _upsert(data: dict[str, Any]) -> dict[str, int]:
                     new_template = p["template"]
                     new_dimension = p["dimension"]
                     new_notes = _normalize_notes(p.get("notes"))
+                    new_type = p.get("type", "fixed")
+                    new_active = p.get("active", True)
 
                     cur.execute(
                         """
-                        SELECT id, version, template, dimension, notes
+                        SELECT id, version, template, dimension, notes, type
                         FROM prompts
                         WHERE category_id = %s AND layer = %s AND position = %s AND active = TRUE
                         """,
@@ -108,22 +122,53 @@ def _upsert(data: dict[str, Any]) -> dict[str, int]:
                     )
                     existing = cur.fetchone()
 
+                    # Handle YAML-side deactivation: prompt entry marked
+                    # active: false. Deactivate any existing active row for
+                    # this slot; never insert a new row in this state.
+                    if not new_active:
+                        if existing is None:
+                            counts["inactive_noop"] += 1
+                        else:
+                            retire_reason = (
+                                p.get("retirement_reason")
+                                or "Removed via active:false in YAML"
+                            )
+                            cur.execute(
+                                """
+                                UPDATE prompts
+                                SET active = FALSE,
+                                    deprecated_at = NOW(),
+                                    retirement_reason = %s
+                                WHERE id = %s
+                                """,
+                                (retire_reason, existing[0]),
+                            )
+                            counts["deactivated"] += 1
+                        continue
+
                     if existing is None:
                         cur.execute(
                             """
-                            INSERT INTO prompts (category_id, layer, position, dimension, template, version, notes)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO prompts (
+                                category_id, layer, position, dimension,
+                                template, version, notes, type
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                             """,
-                            (category_id, layer, position, new_dimension, new_template, new_version, new_notes),
+                            (
+                                category_id, layer, position, new_dimension,
+                                new_template, new_version, new_notes, new_type,
+                            ),
                         )
                         counts["inserted"] += 1
                         continue
 
-                    old_id, old_version, old_template, old_dimension, old_notes = existing
+                    old_id, old_version, old_template, old_dimension, old_notes, old_type = existing
                     same_content = (
                         old_template == new_template
                         and old_dimension == new_dimension
                         and _normalize_notes(old_notes) == new_notes
+                        and old_type == new_type
                     )
 
                     if old_version == new_version:
@@ -146,10 +191,16 @@ def _upsert(data: dict[str, Any]) -> dict[str, int]:
                         )
                         cur.execute(
                             """
-                            INSERT INTO prompts (category_id, layer, position, dimension, template, version, notes)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO prompts (
+                                category_id, layer, position, dimension,
+                                template, version, notes, type
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                             """,
-                            (category_id, layer, position, new_dimension, new_template, new_version, new_notes),
+                            (
+                                category_id, layer, position, new_dimension,
+                                new_template, new_version, new_notes, new_type,
+                            ),
                         )
                         counts["versioned"] += 1
 

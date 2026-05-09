@@ -20,6 +20,7 @@ from decimal import Decimal
 from psycopg_pool import AsyncConnectionPool
 
 from app.db import get_database_url
+from app.prompt_generator import generate_natural_prompt, get_generation_model
 from app.providers import get_provider
 
 
@@ -60,7 +61,7 @@ async def run_refresh(
 
                 await cur.execute(
                     """
-                    SELECT id, layer, position, dimension, template, version
+                    SELECT id, layer, position, dimension, template, version, type
                     FROM prompts
                     WHERE category_id = %s AND active = TRUE
                     ORDER BY layer DESC, position
@@ -115,25 +116,89 @@ async def run_refresh(
                 f"(max_concurrency={max_concurrency})"
             )
 
+        # Pre-render all prompts. type='fixed' uses str.format directly.
+        # type='generated' renders the instruction with setup_inputs, then
+        # calls a meta-LLM to produce the actual question. Generation is
+        # done once per (subject, prompt) so both providers see the same
+        # generated text for that slot.
+        prerendered: dict[int, dict] = {}
+        gen_tasks: list = []
+        gen_prompt_ids: list = []
+        for prompt_row in prompts:
+            prompt_id, _layer, _pos, _dim, template, _ver, prompt_type = prompt_row
+            try:
+                instruction_or_prompt = template.format(**setup_inputs)
+            except KeyError as e:
+                prerendered[prompt_id] = {
+                    "rendered": None,
+                    "extra_metadata": {
+                        "prompt_type": prompt_type,
+                        "render_error": f"missing setup_input: {e}",
+                    },
+                    "error": f"missing setup_input: {e}",
+                }
+                continue
+            if prompt_type == "generated":
+                gen_tasks.append(generate_natural_prompt(instruction_or_prompt))
+                gen_prompt_ids.append((prompt_id, instruction_or_prompt))
+            else:
+                prerendered[prompt_id] = {
+                    "rendered": instruction_or_prompt,
+                    "extra_metadata": {"prompt_type": "fixed"},
+                    "error": None,
+                }
+
+        if gen_tasks:
+            if verbose:
+                print(f"  pre-rendering {len(gen_tasks)} generated prompt(s) via meta-LLM...")
+            gen_results = await asyncio.gather(*gen_tasks, return_exceptions=True)
+            for (prompt_id, instruction), gen_result in zip(gen_prompt_ids, gen_results):
+                if isinstance(gen_result, BaseException) or gen_result is None:
+                    error_str = (
+                        f"prompt generation crashed: {gen_result}"
+                        if isinstance(gen_result, BaseException)
+                        else "prompt generation returned empty"
+                    )
+                    prerendered[prompt_id] = {
+                        "rendered": None,
+                        "extra_metadata": {
+                            "prompt_type": "generated",
+                            "generation_instruction_rendered": instruction,
+                            "generation_model": get_generation_model(),
+                        },
+                        "error": error_str,
+                    }
+                else:
+                    prerendered[prompt_id] = {
+                        "rendered": gen_result,
+                        "extra_metadata": {
+                            "prompt_type": "generated",
+                            "generation_instruction_rendered": instruction,
+                            "generation_model": get_generation_model(),
+                        },
+                        "error": None,
+                    }
+
         # 3. Per-(prompt, model) coroutine. Bounded by the semaphore.
         async def run_one(prompt_row, model_row) -> tuple[bool, Decimal]:
-            prompt_id, layer, position, _dimension, template, prompt_version = prompt_row
+            prompt_id, layer, position, _dimension, _template, prompt_version, _ptype = prompt_row
             model_id, model_slug, _provider, _display, model_identifier = model_row
 
             response = None
             unexpected_error: str | None = None
+            pr = prerendered[prompt_id]
+            extra_meta = pr["extra_metadata"]
 
             async with semaphore:
-                try:
-                    rendered = template.format(**setup_inputs)
-                    provider = provider_instances[model_id]
-                    response = await provider.query(
-                        rendered,
-                        request_params,
-                        enable_grounding=enable_grounding,
-                        reasoning_enabled=reasoning_enabled,
+                if pr["error"] or pr["rendered"] is None:
+                    # Pre-render failed (e.g., generated prompt's meta-LLM
+                    # returned empty, or a setup_input was missing). Record
+                    # a failed model_responses row for bookkeeping.
+                    fallback_text = (
+                        extra_meta.get("generation_instruction_rendered")
+                        or "(prompt could not be rendered)"
                     )
-
+                    failure_metadata = {**extra_meta, "render_error": pr["error"]}
                     async with pool.connection() as conn:
                         async with conn.cursor() as cur:
                             await cur.execute(
@@ -154,17 +219,57 @@ async def run_refresh(
                                 """,
                                 (
                                     refresh_run_id, subject_id, prompt_id, model_id,
-                                    rendered, json.dumps(request_params),
-                                    response.text,
-                                    json.dumps(response.metadata, default=str),
-                                    response.success, response.error,
-                                    response.latency_ms, response.cost_usd,
+                                    fallback_text, json.dumps(request_params),
+                                    None, json.dumps(failure_metadata, default=str),
+                                    False, pr["error"], 0, Decimal(0),
                                     prompt_version, model_identifier,
                                 ),
                             )
                         await conn.commit()
-                except Exception as e:
-                    unexpected_error = f"unexpected error: {e}"
+                else:
+                    try:
+                        rendered = pr["rendered"]
+                        provider = provider_instances[model_id]
+                        response = await provider.query(
+                            rendered,
+                            request_params,
+                            enable_grounding=enable_grounding,
+                            reasoning_enabled=reasoning_enabled,
+                        )
+
+                        merged_metadata = {**response.metadata, **extra_meta}
+
+                        async with pool.connection() as conn:
+                            async with conn.cursor() as cur:
+                                await cur.execute(
+                                    """
+                                    INSERT INTO model_responses (
+                                        refresh_run_id, subject_id, prompt_id, model_id,
+                                        rendered_prompt, request_params,
+                                        response_text, response_metadata,
+                                        success, error_message, latency_ms, cost_usd,
+                                        prompt_version, model_identifier
+                                    ) VALUES (
+                                        %s, %s, %s, %s,
+                                        %s, %s::jsonb,
+                                        %s, %s::jsonb,
+                                        %s, %s, %s, %s,
+                                        %s, %s
+                                    )
+                                    """,
+                                    (
+                                        refresh_run_id, subject_id, prompt_id, model_id,
+                                        rendered, json.dumps(request_params),
+                                        response.text,
+                                        json.dumps(merged_metadata, default=str),
+                                        response.success, response.error,
+                                        response.latency_ms, response.cost_usd,
+                                        prompt_version, model_identifier,
+                                    ),
+                                )
+                            await conn.commit()
+                    except Exception as e:
+                        unexpected_error = f"unexpected error: {e}"
 
             # Bookkeeping after lock release. asyncio is single-threaded, so the
             # increment + read are atomic between awaits.
@@ -180,7 +285,7 @@ async def run_refresh(
                 success = False
                 cost = Decimal(0)
                 latency_ms = 0
-                err = unexpected_error
+                err = unexpected_error or pr["error"]
 
             if verbose:
                 mark = "✓" if success else "✗"

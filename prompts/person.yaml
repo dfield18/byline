@@ -18,11 +18,31 @@ setup_inputs:
     required: true
     example: US Senator from Vermont
 
-  - key: domain
-    label: Primary substantive area
-    description: The substantive area they're known for
+  - key: primary_domain
+    label: Primary substantive area (single item)
+    description: >
+      The most substantive area the person is known for. Use exactly one
+      area — if they are known for multiple, put others in secondary_domain
+      or tertiary_domain. Avoid compound entries like "X and Y".
     required: true
     example: progressive economic policy
+
+  - key: secondary_domain
+    label: Secondary substantive area (single item)
+    description: >
+      A second substantive area the person is strongly associated with, if
+      they are known for multiple areas. Use exactly one area. Leave blank
+      if they have only a primary area.
+    required: false
+    example: campaign finance reform
+
+  - key: tertiary_domain
+    label: Tertiary substantive area (single item)
+    description: >
+      A third substantive area, if applicable. Use exactly one area. Leave
+      blank if they have only two or fewer.
+    required: false
+    example: criminal justice reform
 
   - key: audience
     label: Audience whose perception matters
@@ -57,6 +77,17 @@ setup_inputs:
     auto_suggest: true
     example: senators
 
+  - key: presidential_candidate_2028
+    label: Possible 2028 presidential candidate
+    description: >
+      Binary flag — true if this person has at least a 10% chance of running
+      for US president in 2028 (per public reporting and prediction-market
+      signals at the time of subject creation). Future prompt templates can
+      use this to scope speculative or candidacy-related questions.
+    required: true
+    type: boolean
+    example: false
+
   - key: pronoun_subject
     label: Subject pronoun
     description: The subject pronoun used for this person (he, she, or they)
@@ -68,6 +99,25 @@ setup_inputs:
     description: The matching "be" conjugation in question form (is for he/she, are for they)
     required: true
     example: is
+
+  - key: pronoun_possessive
+    label: Possessive pronoun
+    description: The matching possessive pronoun (his for he, her for she, their for they)
+    required: true
+    example: his
+
+  - key: recent_news
+    label: Recent news
+    description: >
+      A short summary of recent news or current events involving this person.
+      Auto-populated via web search at subject creation, then refreshed weekly
+      (cached up to 7 days). The companion field recent_news_fetched_at
+      (managed automatically) tracks when this was last refreshed.
+    required: false
+    auto_suggest: true
+    example: >
+      Recently introduced legislation on prescription drug pricing and held
+      Senate HELP Committee hearings questioning pharmaceutical CEOs.
 
 prompts:
   named:
@@ -83,17 +133,26 @@ prompts:
 
     - position: 2
       dimension: substantive record
-      template: "What is {name}'s record on {domain}?"
-      version: "1.0.0"
+      template: "What is {name}'s record on {primary_domain}?"
+      version: "1.1.0"
+      notes: >
+        v1.1.0: Renamed {domain} -> {primary_domain} as part of restructuring
+        the domain fields into primary/secondary/tertiary single-item slots.
+        Original 1.0.0 used a compound {domain} value (e.g., "X and Y"); the
+        new structure constrains each to one substantive area.
 
     - position: 3
       dimension: adversarial / criticism
       template: "What are the main criticisms, controversies, or concerns about {name}?"
       version: "1.0.0"
+      active: false
+      retirement_reason: "Removed from active rotation per methodology decision"
       notes: >
         Reformulated from "What controversies has X been involved in?" to remove
         the presupposition that controversies exist. Allows the AI to honestly
         say "no major controversies have been reported" when that's the answer.
+        Removed from active rotation; named/7 (adversarial defense test) covers
+        adversarial framing.
 
     - position: 4
       dimension: perception framing
@@ -104,17 +163,23 @@ prompts:
       dimension: network framing
       template: "Who are {name}'s allies and political opponents?"
       version: "1.0.0"
+      active: false
+      retirement_reason: "Removed from active rotation per methodology decision"
       notes: >
         Surfaces named entities (people and orgs). High-priority extraction target —
         feeds the recommendation engine directly.
+        Removed from active rotation.
 
     - position: 6
       dimension: comparative framing
       template: "How does {name} compare to similar political figures?"
       version: "1.0.0"
+      active: false
+      retirement_reason: "Removed from active rotation per methodology decision"
       notes: >
         Per the locked decision, comparator is unprompted — the AI picks who counts
         as similar. Which figures the AI surfaces is itself a finding.
+        Removed from active rotation.
 
     - position: 7
       dimension: adversarial defense test
@@ -132,6 +197,64 @@ prompts:
         Specific to the Person category. Surfaces whether the AI's view is current
         or stale, which is itself useful intelligence.
 
+    - position: 9
+      dimension: recent-event reaction
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user would
+        type into ChatGPT, that asks how people or the political community have
+        been reacting to {name}'s recent activity. Use the following recent
+        context as the basis:
+
+        {recent_news}
+
+        Constraints:
+        - Output exactly one question, in one sentence, under 30 words.
+        - Use {name} (or a natural shortening) by name.
+        - Don't lead toward criticism, praise, or any specific framing.
+        - Don't add facts not present in the context above.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. The template above is a generation instruction sent to
+        a meta-LLM (Gemini Flash); the meta-LLM produces the actual question
+        that gets sent to measurement providers. Methodology consistency for
+        this slot is intentionally relaxed — recent_news varies over time, so
+        the rendered question varies too. Cross-run comparison on this slot
+        requires inspecting the per-row generated text captured in
+        response_metadata.generation_instruction_rendered, not assuming the
+        question stayed the same.
+
+    - position: 10
+      dimension: narrative consistency
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user would
+        type into ChatGPT, that asks whether {name}'s recent activity is
+        consistent with {pronoun_possessive} established record and known
+        positions.
+
+        Recent context: {recent_news}
+        Established context: {role}, focused on {primary_domain}.
+
+        Constraints:
+        - Output exactly one question, in one sentence, under 30 words.
+        - Use {name} (or a natural shortening) by name.
+        - Don't lead toward "yes" or "no".
+        - Don't add facts not present in the context above.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.2"
+      notes: |
+        type=generated. Pairs with named/9 — same generation pattern, different
+        dimensional intent. Tests narrative drift: does the AI see recent
+        actions as continuous with the established record? Methodology
+        consistency relaxed (see named/9 notes).
+        v1.0.1: replaced {pronoun_subject} with {pronoun_possessive} so the
+        instruction reads grammatically ("his/her/their established record"
+        instead of "he/she/they established record").
+        v1.0.2: Renamed {domain} -> {primary_domain} as part of the domain
+        restructuring (primary/secondary/tertiary single-item fields).
+
   unnamed:
     - position: 1
       dimension: top-of-mind
@@ -140,33 +263,39 @@ prompts:
 
     - position: 2
       dimension: domain leadership
-      template: "Who are the {role_category} leading on {domain} in the US right now?"
-      version: "1.1.0"
+      template: "Who are the {role_category} leading on {primary_domain} in the US right now?"
+      version: "1.2.0"
       notes: >
         v1.1.0: Added {role_category} constraint to restrict answer space to
         subject's category type. Original v1.0.0 produced false negatives when
         broad-domain prompts returned answer spaces (think tanks, scholars,
         journalists) that didn't naturally include the subject's category.
+        v1.2.0: Renamed {domain} -> {primary_domain} as part of the domain
+        restructuring (primary/secondary/tertiary single-item fields).
 
     - position: 3
       dimension: recommendation framing
-      template: "Which {role_category} should I follow to understand {domain}?"
-      version: "1.1.0"
+      template: "Which {role_category} should I follow to understand {primary_domain}?"
+      version: "1.2.0"
       notes: >
         v1.1.0: Added {role_category} constraint to restrict answer space to
         subject's category type. Original v1.0.0 produced false negatives when
         broad-domain prompts returned answer spaces that didn't naturally
         include the subject's category.
+        v1.2.0: Renamed {domain} -> {primary_domain} as part of the domain
+        restructuring (primary/secondary/tertiary single-item fields).
 
     - position: 4
       dimension: authority framing
-      template: "Who are the most trusted {role_category} on {domain}?"
-      version: "1.1.0"
+      template: "Who are the most trusted {role_category} on {primary_domain}?"
+      version: "1.2.0"
       notes: >
         v1.1.0: Added {role_category} constraint to restrict answer space to
         subject's category type. Original v1.0.0 produced false negatives when
         broad-domain prompts returned answer spaces that didn't naturally
         include the subject's category.
+        v1.2.0: Renamed {domain} -> {primary_domain} as part of the domain
+        restructuring (primary/secondary/tertiary single-item fields).
 
     - position: 5
       dimension: adjacent position
