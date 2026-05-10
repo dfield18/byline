@@ -97,7 +97,7 @@ runner plus five Extractor subclasses, all under methodology_version
   the version monotonic.
 - **Cross-analysis layer is live (Track A — `cross-analyzer` branch).**
   `app/cross_analyzer.py` holds the runner + a CrossAnalyzer ABC for
-  per-refresh findings. Two analyzers shipped at `cross-analysis-1.0.0`:
+  per-refresh findings. Three analyzers shipped at `cross-analysis-1.0.0`:
 
   - **AsymmetryAnalyzer v1.0.0** — pure Python, no LLM call. For each
     category's prompt pair, computes per-model gaps on length /
@@ -117,6 +117,21 @@ runner plus five Extractor subclasses, all under methodology_version
     factual_claim / narrative_frame / model_difference) + rationale.
     Writes one global (model_id=NULL) refresh_analyses row per
     refresh. Cost: ~$0.006 per refresh.
+
+  - **ShareOfVoiceAnalyzer v1.0.0** — pure Python, no LLM call.
+    Reads Track C's MentionDetectionExtractor v1.0 columns
+    (`subject_mentioned`, `mention_rank`, `mention_strength`,
+    `competitors_mentioned`) on the unnamed-layer responses. Per
+    model, reports mention rate, average rank, rank distribution,
+    strength distribution (`primary` / `listed` / `aside` /
+    `not_mentioned`), the top 10 competing entities aggregated by
+    appearance count + average rank, and a per-response detail list
+    for traceability. Skips responses whose mention columns are NULL
+    and surfaces coverage in `responses_evaluated`. First Rubio
+    finding (Gemini, partial backfill — 5 of 10 unnamed responses):
+    80% mention rate, average rank 3.0; Donald Trump always rank 1,
+    Pete Hegseth and Secretary of State as the next-most-cited
+    competitors. Cost: $0.
 
   CLI: `python -m app.cross_analyzer <refresh_run_id>
   [--use-analysis-run N]`. Picks the latest completed analysis_run
@@ -468,18 +483,17 @@ running concurrently on separate branches. Each track owns a
 non-overlapping slice of the codebase so the two sessions can ship
 work independently without merge conflicts.
 
-### Track A — Cross-response findings (`cross-analyzer` branch — at natural pause)
+### Track A — Cross-response findings (`cross-analyzer` branch)
 
 The "editor" layer: reads per-response extractions and produces findings
-*across* a whole refresh. **2 of 4 deliverables shipped to main; the
-remaining 2 are blocked on prerequisites:**
+*across* a whole refresh. **3 of 4 deliverables shipped; 1 still blocked:**
 
 | deliverable | status | notes |
 |---|---|---|
 | asymmetry | ✓ shipped — `AsymmetryAnalyzer v1.0.0`, pure Python, $0 | per-model gap analysis on category prompt pairs |
 | top_quotes | ✓ shipped — `TopQuotesAnalyzer v1.0.0`, Gemini Flash, ~$0.006 | one global row per refresh, 3-5 verbatim quotes with categorization |
-| share_of_voice | **blocked on Track C's MentionDetectionExtractor** — needs `response_extractions.subject_mentioned` / `mention_rank` populated | pure Python once columns exist |
-| narrative_drift | **blocked — needs ≥2 refreshes per subject** to compare current vs prior | nothing useful to compute today (every subject has a single refresh) |
+| share_of_voice | ✓ shipped — `ShareOfVoiceAnalyzer v1.0.0`, pure Python, $0 | per-model mention rate / rank / strength / top competitors. Reads Track C's MentionDetectionExtractor v1.0 columns. Skips rows where the columns are NULL and surfaces coverage in `responses_evaluated`. Today's findings are partial (Gemini only) until Track C completes mention-detection backfill on Rubio's chatgpt unnamed responses. |
+| narrative_drift | **blocked — needs ≥2 refreshes per subject** | nothing useful to compute today (every subject has a single refresh) |
 
 | | |
 |---|---|
@@ -489,7 +503,7 @@ remaining 2 are blocked on prerequisites:**
 | **Touches `app/analyzer.py`?** | NO — Track C's territory |
 | **Migration numbers** | none expected (schema landed in migration 010) |
 | **STATE.md section** | this Track A subsection + the "Cross-analysis layer" bullets under "Current phase" |
-| **Status** | `cross-analyzer` branch merged to `main`; both unblocked deliverables shipped. Track A is at a natural pause until Track C ships mention detection or the project gets a second refresh of any subject |
+| **Status** | `cross-analyzer` branch is ahead of `main` with `share_of_voice` shipped. Three of four deliverables done. Re-run `python -m app.cross_analyzer 18` after Track C's mention-detection backfill completes to get full chatgpt+gemini share_of_voice findings. narrative_drift remains blocked until any subject has a second refresh |
 
 ### Track C — Ops hardening (`ops-hardening` branch)
 
@@ -631,12 +645,11 @@ direction.
 > session per "Active work coordination" above. Unmarked items are
 > uncommitted backlog.
 
-- The cross-response findings layer — **(Track A: asymmetry +
-  top_quotes shipped; share_of_voice + narrative_drift blocked)** —
-  `refresh_analyses` is live with 5 rows. The two remaining
-  deliverables are blocked on prerequisites: `share_of_voice` needs
-  Track C's mention detection; `narrative_drift` needs a second
-  refresh of any subject so there's a prior to diff against.
+- The cross-response findings layer — **(Track A: 3 of 4 shipped;
+  narrative_drift blocked)** — asymmetry + top_quotes +
+  share_of_voice are in production. The last deliverable
+  (`narrative_drift`) needs a second refresh of any subject so
+  there's a prior state to diff against.
 - Mention detection backfill across the 288 unnamed-layer rows on
   prior analysis_runs — **(Track C — share-of-voice prerequisite)** —
   the `MentionDetectionExtractor v1.0` extractor itself shipped on

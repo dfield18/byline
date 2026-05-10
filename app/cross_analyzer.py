@@ -92,6 +92,14 @@ class ResponseRow:
     scores: dict | None
     narrative_themes: list | None
     dominant_theme: str | None
+    # mention_detection columns — only populated for unnamed-layer responses
+    # after Track C's MentionDetectionExtractor v1.0 has run on them
+    subject_mentioned: bool | None
+    mention_rank: int | None
+    mention_strength: str | None      # 'primary' | 'listed' | 'aside'
+    mention_excerpt: str | None
+    competitors_mentioned: list | None
+    disambiguation_confidence: float | None
 
 
 @dataclass
@@ -519,6 +527,233 @@ class TopQuotesAnalyzer(CrossAnalyzer):
         )]
 
 
+# ─── share-of-voice analyzer ───────────────────────────────────────────
+#
+# For each model, count how often the subject surfaced ORGANICALLY in the
+# unnamed-layer responses (i.e., responses to prompts that didn't name the
+# subject). Reads response_extractions.subject_mentioned / mention_rank /
+# mention_strength / competitors_mentioned — populated by Track C's
+# MentionDetectionExtractor v1.0. Pure Python — no LLM call.
+#
+# One row per model per refresh. Each row carries:
+#   - mention_rate (0..1): % of unnamed responses that named the subject
+#   - average_rank (or null): mean positional rank when mentioned
+#   - rank_distribution: how often the subject was 1st, 2nd, 3rd, ...
+#   - strength_distribution: primary / listed / aside / not_mentioned
+#   - top_competitors: aggregated competitor frequency + avg rank
+#   - per_response: traceable list of which responses landed where
+#
+# Skips rows whose mention_detection column is NULL — those responses
+# haven't been processed by MentionDetectionExtractor yet. The
+# `responses_evaluated` field surfaces coverage so partial backfills are
+# legible (e.g., "5 of 5 unnamed responses" vs. "3 of 5").
+
+_LOW_DISAMBIG_THRESHOLD = 0.6  # below this, mention_rank is treated as flagged
+
+
+def _aggregate_competitors(rows: list[ResponseRow]) -> list[dict[str, Any]]:
+    """Across the model's unnamed responses, count competitor mentions and
+    average their ranks. Returns a list sorted by frequency desc, then
+    avg_rank asc.
+
+    A competitor that appears in multiple responses gets one entry summing
+    its presence; a competitor appearing twice in the same response counts
+    once for that response (we dedup by canonical name within a response).
+    """
+    from collections import defaultdict
+
+    # name → {response_count, rank_total, type_votes}
+    accum: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"response_count": 0, "rank_sum": 0.0, "rank_n": 0, "type_votes": defaultdict(int)}
+    )
+    for row in rows:
+        comps = row.competitors_mentioned or []
+        seen_in_response: set[str] = set()
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            name = (c.get("name") or "").strip()
+            if not name or name in seen_in_response:
+                continue
+            seen_in_response.add(name)
+            entry = accum[name]
+            entry["response_count"] += 1
+            r = c.get("rank")
+            if r is not None:
+                entry["rank_sum"] += float(r)
+                entry["rank_n"] += 1
+            t = c.get("type") or "other"
+            entry["type_votes"][t] += 1
+
+    out = []
+    for name, e in accum.items():
+        avg_rank = (e["rank_sum"] / e["rank_n"]) if e["rank_n"] else None
+        # Pick the most common type as the canonical type for this competitor
+        if e["type_votes"]:
+            top_type = max(e["type_votes"].items(), key=lambda kv: kv[1])[0]
+        else:
+            top_type = "other"
+        out.append({
+            "name":              name,
+            "type":              top_type,
+            "appears_in_responses": e["response_count"],
+            "avg_rank":          round(avg_rank, 2) if avg_rank is not None else None,
+        })
+    out.sort(key=lambda x: (-x["appears_in_responses"], x["avg_rank"] if x["avg_rank"] is not None else 999))
+    return out
+
+
+def _share_of_voice_findings(rows: list[ResponseRow]) -> dict[str, Any] | None:
+    """Compute per-model share-of-voice findings from a list of unnamed-layer
+    responses. Returns None if no rows in the list have mention data."""
+    # Filter to rows where mention_detection has run
+    evaluated = [r for r in rows if r.subject_mentioned is not None]
+    if not evaluated:
+        return None
+
+    n = len(evaluated)
+    mentioned = [r for r in evaluated if r.subject_mentioned]
+
+    # Strength distribution
+    strength_dist = {"primary": 0, "listed": 0, "aside": 0, "not_mentioned": 0}
+    for r in evaluated:
+        if not r.subject_mentioned:
+            strength_dist["not_mentioned"] += 1
+        else:
+            key = r.mention_strength or "listed"
+            if key in strength_dist:
+                strength_dist[key] += 1
+            else:
+                strength_dist[key] = strength_dist.get(key, 0) + 1
+
+    # Rank statistics — over mentioned responses only
+    ranks = [r.mention_rank for r in mentioned if r.mention_rank is not None]
+    avg_rank = (sum(ranks) / len(ranks)) if ranks else None
+    rank_dist: dict[int, int] = {}
+    for r in ranks:
+        rank_dist[r] = rank_dist.get(r, 0) + 1
+
+    # Disambiguation flag
+    low_disambig = sum(
+        1 for r in mentioned
+        if r.disambiguation_confidence is not None
+        and r.disambiguation_confidence < _LOW_DISAMBIG_THRESHOLD
+    )
+
+    # Per-response detail (traceability)
+    per_response = [
+        {
+            "model_response_id": r.model_response_id,
+            "slot": f"{r.layer}/{r.position}",
+            "dimension": r.dimension,
+            "mentioned": bool(r.subject_mentioned),
+            "rank": r.mention_rank,
+            "strength": r.mention_strength,
+            "excerpt": r.mention_excerpt,
+            "disambiguation_confidence": r.disambiguation_confidence,
+        }
+        for r in evaluated
+    ]
+
+    competitors = _aggregate_competitors(evaluated)
+
+    return {
+        "responses_evaluated": n,
+        "mentioned_count":     len(mentioned),
+        "mention_rate":        round(len(mentioned) / n, 3) if n else 0.0,
+        "average_rank":        round(avg_rank, 2) if avg_rank is not None else None,
+        "rank_distribution":   {str(k): v for k, v in sorted(rank_dist.items())},
+        "strength_distribution": strength_dist,
+        "low_disambiguation_count": low_disambig,
+        "top_competitors":     competitors[:10],   # cap at 10 — the long tail isn't useful
+        "all_competitors_count": len(competitors),
+        "per_response":        per_response,
+    }
+
+
+def _summarize_sov(findings: dict[str, Any], model_slug: str) -> str:
+    n = findings["responses_evaluated"]
+    m = findings["mentioned_count"]
+    rate = findings["mention_rate"]
+    avg = findings["average_rank"]
+
+    parts = [
+        f"On {model_slug}: subject surfaced in {m}/{n} unnamed-layer "
+        f"responses ({rate*100:.0f}% mention rate)"
+    ]
+    if avg is not None:
+        parts.append(f"average rank {avg:.1f}")
+    elif m == 0:
+        parts.append("no organic mentions")
+
+    top = findings["top_competitors"][:3]
+    if top:
+        parts.append(
+            "top competitors: "
+            + ", ".join(
+                f"{c['name']} ({c['appears_in_responses']}× resp"
+                + (f", rank {c['avg_rank']}" if c['avg_rank'] is not None else "")
+                + ")"
+                for c in top
+            )
+        )
+
+    if findings.get("low_disambiguation_count"):
+        parts.append(
+            f"{findings['low_disambiguation_count']} mention(s) flagged with "
+            f"disambiguation_confidence<{_LOW_DISAMBIG_THRESHOLD}"
+        )
+
+    return ". ".join(parts) + "."
+
+
+class ShareOfVoiceAnalyzer(CrossAnalyzer):
+    """Per-model organic-visibility metrics over the unnamed-layer responses.
+
+    Inputs come from Track C's MentionDetectionExtractor v1.0 columns on
+    response_extractions. Skips responses whose mention_detection columns
+    are NULL (extractor hasn't run on them yet) and reports coverage in
+    `responses_evaluated`. One refresh_analyses row per model per refresh.
+    Pure Python; cost = 0.
+    """
+
+    name = "share_of_voice"
+    version = "1.0.0"
+
+    def analyze(self, ctx: RefreshContext) -> list[CrossAnalysisResult]:
+        start = time.perf_counter()
+
+        # Only unnamed-layer responses are eligible — mention detection on
+        # named-layer is meaningless (subject is in the prompt).
+        unnamed = [r for r in ctx.responses if r.layer == "unnamed"]
+        if not unnamed:
+            return []
+
+        # Group by model. Each model gets its own row.
+        by_model: dict[int, list[ResponseRow]] = {}
+        for r in unnamed:
+            by_model.setdefault(r.model_id, []).append(r)
+
+        results: list[CrossAnalysisResult] = []
+        for model_id, rows in by_model.items():
+            findings = _share_of_voice_findings(rows)
+            if findings is None:
+                continue  # no rows had mention_detection populated
+            summary = _summarize_sov(findings, rows[0].model_slug)
+            results.append(CrossAnalysisResult(
+                analysis_type="share_of_voice",
+                analysis_key=None,
+                model_id=model_id,
+                findings=findings,
+                source_response_ids=[r.model_response_id for r in rows],
+                summary=summary,
+                cost_usd=Decimal(0),
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            ))
+
+        return results
+
+
 # ─── runner ────────────────────────────────────────────────────────────
 
 
@@ -587,7 +822,10 @@ def _load_context(refresh_run_id: int, source_analysis_run: int | None) -> Refre
                     mr.response_text, mr.response_metadata,
                     re.descriptors, re.entities, re.sources,
                     re.total_sources_cited, re.scores,
-                    re.narrative_themes, re.dominant_theme
+                    re.narrative_themes, re.dominant_theme,
+                    re.subject_mentioned, re.mention_rank,
+                    re.mention_strength, re.mention_excerpt,
+                    re.competitors_mentioned, re.disambiguation_confidence
                 FROM model_responses mr
                 JOIN prompts p ON p.id = mr.prompt_id
                 JOIN models m ON m.id = mr.model_id
@@ -610,6 +848,10 @@ def _load_context(refresh_run_id: int, source_analysis_run: int | None) -> Refre
             descriptors=r[11], entities=r[12], sources=r[13],
             total_sources_cited=r[14], scores=r[15],
             narrative_themes=r[16], dominant_theme=r[17],
+            subject_mentioned=r[18], mention_rank=r[19],
+            mention_strength=r[20], mention_excerpt=r[21],
+            competitors_mentioned=r[22],
+            disambiguation_confidence=float(r[23]) if r[23] is not None else None,
         )
         for r in rows
     ]
@@ -761,6 +1003,7 @@ def _cli_main() -> None:
     analyzers: list[CrossAnalyzer] = [
         AsymmetryAnalyzer(),
         TopQuotesAnalyzer(),
+        ShareOfVoiceAnalyzer(),
     ]
     print(
         f"Running {len(analyzers)} cross-analyzer(s) "
