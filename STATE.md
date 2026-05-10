@@ -1,7 +1,7 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-09 (evening)**, on
-> commit `5498995`. Read this first if you're a fresh Claude Code session
+> A pulse-check of where the project sits **as of 2026-05-09 (late evening)**,
+> on commit `d311001`. Read this first if you're a fresh Claude Code session
 > picking up work. Update when state shifts meaningfully.
 
 ---
@@ -28,11 +28,15 @@ prompt set has been compacted to a **5+5 layout (10 active prompts total)**.
 The foundation layer — prompts → providers → engine → DB — is stable and
 validated across 5 subjects and 13 refresh runs (332 raw responses).
 
-Next major phase: **the analysis layer**. Extract structured findings from
-raw responses (descriptors, sources cited, sentiment/lean, named entities,
-framing devices, etc.) and store them in new tables for downstream
-visualization. The parallel Claude Code session is on its own branch
-(`analysis-layer`) working on this.
+Next major phase: **the analysis layer**. The **schema is landed** as of
+commit `d311001` (migration 010) — three tables (`analysis_runs`,
+`response_extractions`, `refresh_analyses`) plus a `source_types` lookup
+vocabulary. Methodology version is `analysis-1.0.0`. Schema design lives
+in the migration file's header comment.
+
+Next sub-phase: **implement the extractors** (`app/analyzer.py` or
+similar new module). Suggested first extractor is **descriptors** — see
+"Suggested entry points" below.
 
 ---
 
@@ -62,8 +66,8 @@ app/
     └── __init__.py          # PROVIDERS registry: 'openai' | 'google'
 
 prompts/                     # All five category YAMLs; person at v1.2 (5+5)
-migrations/                  # 003 applied (initial schema + grounding flag +
-                               prompt type column)
+migrations/                  # 4 applied (001-003 foundation + 010 analysis
+                               layer schema)
 sql/                         # Hand-written analysis queries
 scripts/                     # Diagnostics (test_providers, test_freshness)
 findings/                    # gitignored — local-only response dumps
@@ -94,9 +98,21 @@ docs/                        # Spec docs (read-only inputs)
    `response_metadata` as JSONB. Historical responses resolve correctly
    to the prompt version they used, even after edits.
 
+6. **Analysis layer is downstream and immutable-friendly.** The four
+   analysis tables (`source_types`, `analysis_runs`, `response_extractions`,
+   `refresh_analyses`) READ from `model_responses` and never write to it.
+   Every extraction row is tagged with `methodology_version`, so re-running
+   a smarter extractor produces a new `analysis_run` and a new set of rows
+   — old rows stay intact for historical comparison. Per-response findings
+   (descriptors, sources, entities, terminology, scores, narrative themes,
+   mention detection) live as JSONB blobs on a single
+   `response_extractions` row per (run, response). Cross-response findings
+   (asymmetry, narrative drift, share of voice, top quotes, etc.) live in
+   `refresh_analyses` keyed by `analysis_type`.
+
 ---
 
-## Live data state (commit `5498995`)
+## Live data state (commit `d311001`)
 
 | | Count |
 |---|---|
@@ -108,6 +124,8 @@ docs/                        # Spec docs (read-only inputs)
 | active prompts (all categories) | 62 |
 | active prompts (person) | **10** |
 | deprecated prompts (all) | 29 |
+| source_types (seeded) | 10 |
+| analysis_runs / response_extractions / refresh_analyses | 0 (schema only) |
 
 ### Person category — current 5+5 layout
 
@@ -213,9 +231,10 @@ orphan too.
 
 ## Conventions for editing
 
-- **Migrations** are sequential in `migrations/NNN_*.sql`. The next
-  available number is **004** for prompt-iteration concerns. The
-  analysis-layer session is using **010+**.
+- **Migrations** are sequential in `migrations/NNN_*.sql`. **004** is the
+  next available number for prompt-iteration concerns; **011** is the next
+  available for analysis-layer concerns (010 is taken by the analysis
+  schema).
 - **Prompt content changes** require a `version:` bump in YAML. Loader
   refuses content changes without a bump.
 - **Removing a prompt** has two paths:
@@ -234,29 +253,31 @@ orphan too.
 
 ## Active work coordination
 
-**Two parallel Claude Code sessions** sharing the same checkout directory:
+**Two parallel Claude Code sessions** sharing the same checkout directory.
+The `analysis-layer` feature branch has been merged into `main` (as of
+commit `d311001`); both sessions now work directly on `main` until either
+needs a new feature branch.
 
-- **Prompts-iteration session** — works on `main`. Touches prompts YAMLs,
+- **Prompts-iteration session** — touches prompts YAMLs,
   `app/prompt_loader.py`, `app/query_engine.py`, `app/refresh.py`,
   `app/prompt_generator.py`.
-- **Analysis-layer session** — works on `analysis-layer` branch. Touches
-  `migrations/010+`, `app/analyzer.py` (or similar new file), new
-  `analysis_outputs` / `extracted_*` tables.
+- **Analysis-layer session** — touches `migrations/011+`, will create
+  `app/analyzer.py` (or similar) and write to the new analysis tables.
 
 Coordination notes:
 
-1. **Use feature branches.** When the prompts-iteration session is
-   working, the working tree is on `main`; when analysis-layer is, it's
-   on `analysis-layer`. Switch via `git checkout` between sessions.
+1. **Cut a feature branch when starting non-trivial work**, then merge
+   back to main when done — same flow that landed `010`.
 2. **Migration numbers**: prompts work uses 004–009. Analysis-layer
-   uses 010+.
+   uses 011+ (010 is taken).
 3. **DB tables**: prompts session reads/writes `categories`, `models`,
    `prompts`, `subjects`, `refresh_runs`, `model_responses`. Analysis-
    layer should READ those (especially `model_responses`) but only WRITE
-   to new analysis tables.
+   to `analysis_runs`, `response_extractions`, `refresh_analyses`, and
+   (rarely) `source_types`.
 4. **STATE.md** lives on `main`; it should be updated by whichever session
-   makes a meaningful state change. Analysis-layer can update it via the
-   stash-checkout-commit-pop dance, or on merge to main.
+   makes a meaningful state change. If you're on a feature branch, sync
+   `main` in (or wait until merge) before editing it.
 
 ---
 
@@ -272,17 +293,22 @@ Coordination notes:
   on generated-prompt instruction language.
 
 ### If you're the analysis-layer session resuming work:
+- Schema is in place — read **`migrations/010_analysis_layer.sql`** for
+  the table shapes and the documented JSONB blob structures.
 - Read **`docs/product-spec.md`** sections on the analysis layer and
-  recommendation engine.
-- Read **`docs/database-schema.md`** "Future tables" section.
-- Inspect a few rows from `model_responses` to ground the schema in
-  real data:
+  recommendation engine for the methodology context.
+- Note: **`docs/database-schema.md` does not yet document the analysis
+  tables** — it still lists them under "Future tables." Updating that
+  doc is a good next chore.
+- Inspect a few rows from `model_responses` to ground extractor design
+  in real data:
   ```bash
   psql byline -c "SELECT response_text FROM model_responses WHERE refresh_run_id = 13 LIMIT 3;"
   ```
 - Suggested first extractor: **descriptors** (adjectives attached to the
   subject) — high-signal extraction target per the spec; cleanly testable
-  on the existing 332 rows.
+  on the existing 332 rows. Writes to `response_extractions.descriptors`
+  JSONB. Methodology version `analysis-1.0.0`.
 
 ---
 
