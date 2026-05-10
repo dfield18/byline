@@ -97,19 +97,30 @@ runner plus five Extractor subclasses, all under methodology_version
   the version monotonic.
 - **Cross-analysis layer is live (Track A — `cross-analyzer` branch).**
   `app/cross_analyzer.py` holds the runner + a CrossAnalyzer ABC for
-  per-refresh findings. First analyzer shipped: **AsymmetryAnalyzer
-  v1.0.0** — pure Python, no LLM call. For each category's prompt
-  pair, computes per-model gaps on length / descriptor count / citation
-  count / sentiment / criticism_severity / directional_lean, plus a
-  templated summary. Outputs land in `refresh_analyses` keyed by
-  `analysis_type='asymmetry'` and `analysis_key=<pair_key>`,
-  methodology_version `cross-analysis-1.0.0`. Pair definitions per
-  category live in `_ASYMMETRY_PAIRS`. CLI: `python -m
-  app.cross_analyzer <refresh_run_id> [--use-analysis-run N]`.
-  First production run on Rubio (analysis_run 34) surfaced a real
-  methodology finding: ChatGPT and Gemini criticize Rubio with
-  comparable severity but from OPPOSITE directional_lean
-  (ChatGPT +0.30 right-shifted; Gemini -0.70 left-shifted). Cost: $0.
+  per-refresh findings. Two analyzers shipped at `cross-analysis-1.0.0`:
+
+  - **AsymmetryAnalyzer v1.0.0** — pure Python, no LLM call. For each
+    category's prompt pair, computes per-model gaps on length /
+    descriptor count / citation count / sentiment /
+    criticism_severity / directional_lean, plus a templated summary.
+    Outputs keyed by `analysis_type='asymmetry'` and
+    `analysis_key=<pair_key>`. Pair definitions per category in
+    `_ASYMMETRY_PAIRS`. First production run on Rubio (analysis_run
+    34) surfaced a real methodology finding: ChatGPT and Gemini
+    criticize Rubio with comparable severity but from OPPOSITE
+    directional_lean (ChatGPT +0.30 right-shifted; Gemini -0.70
+    left-shifted). Cost: $0.
+
+  - **TopQuotesAnalyzer v1.0.0** — Gemini Flash, one LLM call per
+    refresh that picks 3-5 verbatim quotes across all 20 responses
+    with categorization (characterization / criticism / praise /
+    factual_claim / narrative_frame / model_difference) + rationale.
+    Writes one global (model_id=NULL) refresh_analyses row per
+    refresh. Cost: ~$0.006 per refresh.
+
+  CLI: `python -m app.cross_analyzer <refresh_run_id>
+  [--use-analysis-run N]`. Picks the latest completed analysis_run
+  for the refresh by default.
 
 - **narrative_themes** v1.1 — gemini-2.5-flash-lite. 1-3 free-form
   theme labels per response (`label`, `weight`, `excerpt`) plus a
@@ -247,9 +258,9 @@ docs/                        # Spec docs (read-only inputs)
 | active prompts (person / organization / issue / policy / event) | 10 / 10 / 10 / 10 / 10 |
 | deprecated prompts (all) | **81** (grew with the org/issue/policy/event v1.2 compactions) |
 | source_types (seeded) | 10 |
-| analysis_runs | **34** (16 v1.3 descriptor backfill + iteration + repeated Rubio runs + analysis_run 34 is the first cross-analyzer run) |
+| analysis_runs | **35** (16 v1.3 descriptor backfill + iteration + repeated Rubio runs + 2 cross-analyzer runs at runs 34 and 35) |
 | response_extractions | **629** |
-| refresh_analyses | **2** (Rubio asymmetry v1.0.0, one row per model on the named/2 ↔ named/3 pair) |
+| refresh_analyses | **5** (2 asymmetry + 1 top_quotes from analysis_run 34; 2 asymmetry + 1 top_quotes from analysis_run 35 — re-run for top_quotes) |
 
 ### Person category — current 5+5 layout
 

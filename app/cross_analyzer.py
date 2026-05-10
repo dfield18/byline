@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -25,12 +26,25 @@ from decimal import Decimal
 from typing import Any
 
 import psycopg
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 from psycopg.types.json import Json
 
 from app.db import get_database_url
 
 
+load_dotenv()
+
 CROSS_METHODOLOGY_VERSION = "cross-analysis-1.0.0"
+
+# Per-1M-token pricing for the Gemini models we use in cross-analysis.
+# Mirrors app/analyzer.py — keep in sync if pricing tiers change.
+_PRICING: dict[str, dict[str, Decimal]] = {
+    "gemini-2.5-flash":      {"input": Decimal("0.30"), "output": Decimal("2.50")},
+    "gemini-2.5-flash-lite": {"input": Decimal("0.075"), "output": Decimal("0.30")},
+}
+_PER_TOKEN = Decimal(1_000_000)
 
 
 # ─── data shapes ───────────────────────────────────────────────────────
@@ -308,6 +322,203 @@ class AsymmetryAnalyzer(CrossAnalyzer):
         return results
 
 
+# ─── top quotes analyzer ───────────────────────────────────────────────
+#
+# One LLM call per refresh that picks 3-5 representative/extreme quotes
+# from the 20 responses. The LLM sees every response (annotated with its
+# model_response_id, model_slug, and slot), and returns verbatim
+# sentences with categorization + rationale.
+#
+# Cost: ~$0.005-0.01 per refresh (Gemini Flash, ~15K input tokens for a
+# 20-response set, ~500 output tokens). The whole refresh's quotes
+# distill to one refresh_analyses row.
+
+_TOP_QUOTES_PROMPT_HEAD = """\
+You are reviewing AI-assistant responses about {subject_name} (a \
+{subject_category}). Your task: pick the 3 to 5 quotes that BEST capture \
+how AI assistants are characterizing the subject across this refresh.
+
+Selection criteria:
+1. DIVERSITY — quotes should represent different facets (sharpest \
+criticism, most distinctive characterization, strongest framing, notable \
+factual claim, model-difference moment). Don't pick five of the same kind.
+2. DISTINCTIVENESS — favor quotes that capture something notable, \
+opinionated, or surprising. Skip boilerplate ("X is a Senator from Y").
+3. VERBATIM — pull the EXACT sentence(s) from the response. Do NOT \
+paraphrase, summarize, or stitch together fragments. The text field must \
+appear unchanged in the source response.
+4. LENGTH — single sentences preferred. Two-sentence quotes are fine if \
+splitting loses meaning. Avoid quotes longer than 60 words.
+
+For each quote return:
+- text: the verbatim sentence(s) from the response
+- type: one of "characterization" | "criticism" | "praise" | \
+"factual_claim" | "narrative_frame" | "model_difference"
+- model_response_id: integer; MUST exactly match one of the IDs in the \
+input below
+- rationale: ≤25 words on why this quote made the cut
+
+Pick 3 to 5 quotes total. Quality over quantity — don't force 5 if 3 are \
+clearly the strongest.
+
+INPUT — each response is preceded by `[mr_id=N | model=X | slot=Y]`:
+
+{responses_block}
+"""
+
+_TOP_QUOTES_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "quotes": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "text":              {"type": "STRING"},
+                    "type": {
+                        "type": "STRING",
+                        "enum": [
+                            "characterization", "criticism", "praise",
+                            "factual_claim", "narrative_frame", "model_difference",
+                        ],
+                    },
+                    "model_response_id": {"type": "INTEGER"},
+                    "rationale":         {"type": "STRING"},
+                },
+                "required": ["text", "type", "model_response_id", "rationale"],
+            },
+        },
+    },
+    "required": ["quotes"],
+}
+
+
+def _format_responses_block(responses: list[ResponseRow]) -> str:
+    parts = []
+    for r in responses:
+        header = f"[mr_id={r.model_response_id} | model={r.model_slug} | slot={r.layer}/{r.position} ({r.dimension})]"
+        parts.append(f"{header}\n{r.response_text}")
+    return "\n\n".join(parts)
+
+
+class TopQuotesAnalyzer(CrossAnalyzer):
+    """Pick 3-5 representative quotes across the refresh.
+
+    One LLM call sees all 20 responses; returns verbatim sentences with
+    categorization + rationale. Outputs a single global (model_id=NULL)
+    refresh_analyses row per refresh — top quotes is a cross-model
+    finding, not a per-model one.
+    """
+
+    name = "top_quotes"
+    version = "1.0.0"
+    model_identifier = "gemini-2.5-flash"
+
+    def __init__(self) -> None:
+        self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    def analyze(self, ctx: RefreshContext) -> list[CrossAnalysisResult]:
+        start = time.perf_counter()
+        if not ctx.responses:
+            return []
+
+        prompt = _TOP_QUOTES_PROMPT_HEAD.format(
+            subject_name=ctx.subject_name,
+            subject_category=ctx.subject_category_slug,
+            responses_block=_format_responses_block(ctx.responses),
+        )
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_TOP_QUOTES_SCHEMA,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+
+        try:
+            api_response = self._client.models.generate_content(
+                model=self.model_identifier,
+                contents=prompt,
+                config=config,
+            )
+        except Exception as e:
+            return [CrossAnalysisResult(
+                analysis_type="top_quotes",
+                analysis_key=None,
+                model_id=None,
+                findings={},
+                source_response_ids=[],
+                error=f"{type(e).__name__}: {e}",
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )]
+
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+        usage = getattr(api_response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        prices = _PRICING.get(
+            self.model_identifier,
+            {"input": Decimal("0.30"), "output": Decimal("2.50")},
+        )
+        cost = (
+            Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+            + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
+        )
+
+        try:
+            parsed = json.loads(api_response.text or "{}")
+        except Exception as e:
+            return [CrossAnalysisResult(
+                analysis_type="top_quotes",
+                analysis_key=None,
+                model_id=None,
+                findings={},
+                source_response_ids=[],
+                cost_usd=cost,
+                error=f"JSON parse failed: {e}",
+                latency_ms=elapsed_ms,
+            )]
+
+        quotes = parsed.get("quotes", []) if isinstance(parsed, dict) else []
+
+        # Annotate each quote with source-response context (model + slot)
+        # and verify the model_response_id is valid for this refresh.
+        by_id = {r.model_response_id: r for r in ctx.responses}
+        valid_quotes = []
+        invalid_count = 0
+        for q in quotes:
+            mr_id = q.get("model_response_id")
+            src = by_id.get(mr_id)
+            if src is None:
+                invalid_count += 1
+                continue
+            q["model_slug"] = src.model_slug
+            q["slot"] = f"{src.layer}/{src.position}"
+            q["dimension"] = src.dimension
+            valid_quotes.append(q)
+
+        source_ids = sorted({q["model_response_id"] for q in valid_quotes})
+        type_counts: dict[str, int] = {}
+        for q in valid_quotes:
+            type_counts[q.get("type", "?")] = type_counts.get(q.get("type", "?"), 0) + 1
+        summary = (
+            f"{len(valid_quotes)} top quote(s) across {len(source_ids)} response(s): "
+            + ", ".join(f"{n} {t}" for t, n in sorted(type_counts.items()))
+        )
+        if invalid_count:
+            summary += f" ({invalid_count} dropped — bad model_response_id)"
+
+        return [CrossAnalysisResult(
+            analysis_type="top_quotes",
+            analysis_key=None,
+            model_id=None,
+            findings={"quotes": valid_quotes},
+            source_response_ids=source_ids,
+            summary=summary,
+            cost_usd=cost,
+            latency_ms=elapsed_ms,
+        )]
+
+
 # ─── runner ────────────────────────────────────────────────────────────
 
 
@@ -547,7 +758,10 @@ def _cli_main() -> None:
     )
     args = p.parse_args()
 
-    analyzers: list[CrossAnalyzer] = [AsymmetryAnalyzer()]
+    analyzers: list[CrossAnalyzer] = [
+        AsymmetryAnalyzer(),
+        TopQuotesAnalyzer(),
+    ]
     print(
         f"Running {len(analyzers)} cross-analyzer(s) "
         f"({', '.join(f'{a.name}@v{a.version}' for a in analyzers)}) "
