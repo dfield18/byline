@@ -1,7 +1,7 @@
 # byline — project state
 
 > A pulse-check of where the project sits **as of 2026-05-09 (late evening)**,
-> on commit `d311001`. Read this first if you're a fresh Claude Code session
+> on commit `37bb5ab`. Read this first if you're a fresh Claude Code session
 > picking up work. Update when state shifts meaningfully.
 
 ---
@@ -26,7 +26,7 @@ in **`docs/prompts-config-format.md`**.
 The **v1.2 methodology pass is complete and refined**. The Person category
 prompt set has been compacted to a **5+5 layout (10 active prompts total)**.
 The foundation layer — prompts → providers → engine → DB — is stable and
-validated across 5 subjects and 13 refresh runs (332 raw responses).
+validated across 6 subjects and 14 refresh runs (352 raw responses).
 
 Next major phase: **the analysis layer**. The **schema is landed** as of
 commit `d311001` (migration 010) — three tables (`analysis_runs`,
@@ -112,15 +112,15 @@ docs/                        # Spec docs (read-only inputs)
 
 ---
 
-## Live data state (commit `d311001`)
+## Live data state (commit `37bb5ab`)
 
 | | Count |
 |---|---|
 | categories | 5 |
 | models | 2 (chatgpt = gpt-5-mini, gemini = gemini-2.5-flash) |
-| subjects | 5 (Bernie, McConnell, AOC, Cotton, Vance) |
-| refresh_runs | 13 |
-| model_responses | **332** |
+| subjects | 6 (Bernie, McConnell, AOC, Cotton, Vance, Newsom) |
+| refresh_runs | 14 |
+| model_responses | **352** |
 | active prompts (all categories) | 62 |
 | active prompts (person) | **10** |
 | deprecated prompts (all) | 29 |
@@ -176,16 +176,18 @@ that's a future methodology pass if/when those categories get used.
 | 2 | Mitch McConnell | (still in old `domain`) | senators | 7 |
 | 3 | Alexandria Ocasio-Cortez | (still in old `domain`) | representatives | 8 |
 | 4 | Tom Cotton | (still in old `domain`) | senators | 9 |
-| 5 | J.D. Vance | conservative populism | Trump administration officials | **13** ← latest |
+| 5 | J.D. Vance | conservative populism | Trump administration officials | 13 |
+| 6 | Gavin Newsom | progressive state governance | governors | **14** ← latest |
 
 **Subjects 1–4** still have the old `domain` field as orphan data. Their
 `primary_domain` is missing. On their next refresh, Option C will prompt
 for `primary_domain` and `pronoun_possessive`.
 
-**Subject 5 (Vance)** is fully on v1.2 setup_inputs as of run 13. His
-`secondary_domain` still has multi-item legacy content but no current
-active template references `{secondary_domain}`, so it's effectively
-orphan too.
+**Subjects 5 (Vance) and 6 (Newsom)** are fully on v1.2 setup_inputs.
+Vance's `secondary_domain` still has multi-item legacy content but no
+current active template references `{secondary_domain}`, so it's
+effectively orphan too. Newsom was created cleanly with single-item
+primary/secondary/tertiary domains.
 
 ---
 
