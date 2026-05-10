@@ -64,13 +64,21 @@ runner plus five Extractor subclasses, all under methodology_version
   source_type today; the rest land in `unknown`. Long-tail unknowns can
   be added to the dict as they appear (`_DOMAIN_TO_SOURCE_TYPE` in
   `app/analyzer.py`).
-- **entities** v1.0 — gemini-2.5-flash with structured JSON output.
-  Extracts named people / organizations / policies / events / locations
-  *other than the subject*, each with type, role-relative-to-subject,
-  contextual valence, and excerpt. ~10 entities per response on
-  average; valence distribution is bimodal (~57% neutral factual mentions,
-  ~43% non-zero, skewing negative for foreign-policy subjects who name
-  adversarial regimes).
+- **entities** v1.2 — gemini-2.5-flash-lite with structured JSON
+  output. Extracts named people / organizations / policies / events /
+  locations *other than the subject*, each with type,
+  role-relative-to-subject, contextual valence, and excerpt. ~10
+  entities per response on average; valence distribution is bimodal
+  (~57% neutral factual mentions, ~43% non-zero, skewing negative for
+  foreign-policy subjects who name adversarial regimes). Version
+  history: v1.0 flash → v1.1 flash-lite (4× cheaper, equal-or-better
+  quality on side-by-side) → v1.2 added a DISTRIBUTIVE MODIFIERS rule
+  to the prompt (`"Departments of A, B, C"` was producing one entity
+  `"Departments of A"` plus bare `"B"` and `"C"`; v1.2 expands the
+  shared head noun across every conjunct). Known quirk: ~5% of
+  responses produce occasional truncated structured-JSON output on
+  flash-lite (single response in run 33). A retry-on-parse-failure
+  fallback would mitigate; tracked but not yet built.
 - **scores** v1.2 — gemini-2.5-flash, single-object JSON output. Four
   response-level numeric scores plus a short rationale: `sentiment`
   (-1..+1, toward subject), `directional_lean` (-1..+1, left/right
@@ -216,15 +224,15 @@ docs/                        # Spec docs (read-only inputs)
 |---|---|
 | categories | 5 |
 | models | 2 (chatgpt = gpt-5-mini, gemini = gemini-2.5-flash) |
-| subjects | **9** (6 person + 1 organization + 1 issue + 1 policy) |
-| refresh_runs | **17** |
-| model_responses | **411** (410 successful) |
+| subjects | **10** (7 person + 1 organization + 1 issue + 1 policy + 0 event) |
+| refresh_runs | **18** |
+| model_responses | **432** (431 successful, 20 of which are Rubio's run 18 with `us_focused=true`) |
 | active prompts (all categories) | **50** (10 per category × 5 categories — uniform 5+5) |
 | active prompts (person / organization / issue / policy / event) | 10 / 10 / 10 / 10 / 10 |
-| deprecated prompts (all) | **81** (was 29 — grew with the org/issue/policy/event compactions) |
+| deprecated prompts (all) | **81** (grew with the org/issue/policy/event v1.2 compactions) |
 | source_types (seeded) | 10 |
-| analysis_runs | **30** (16 v1.3 descriptor backfill + iteration + repeated Rubio runs through the 5-extractor stack at various model tiers) |
-| response_extractions | ~570 (411 v1.3 backfill + repeated Rubio runs) |
+| analysis_runs | **33** (16 v1.3 descriptor backfill + iteration + repeated Rubio runs through the 5-extractor stack at various model tiers and prompt versions) |
+| response_extractions | **629** (411 v1.3 backfill + repeated Rubio re-extractions) |
 | refresh_analyses | 0 (cross-response findings layer not yet built) |
 
 ### Person category — current 5+5 layout
@@ -301,7 +309,8 @@ reporting) that bring past events back into current discourse.
 | 6 | Gavin Newsom | person | 14 |
 | 7 | Heritage Foundation | organization | 15 |
 | 8 | AI regulation in the United States | issue | 16 |
-| 9 | the Inflation Reduction Act | policy | **17** ← latest |
+| 9 | the Inflation Reduction Act | policy | 17 |
+| 10 | Marco Rubio | person | **18** ← latest (only subject with `us_focused=true` metadata; bias landed at run 18) |
 
 **Subjects 7–9 are pilot tests of non-Person categories.** Each was
 created and refreshed *after* its category's 5+5 v1.2.0 compaction, so
