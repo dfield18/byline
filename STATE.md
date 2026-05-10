@@ -353,9 +353,9 @@ docs/                        # Spec docs (read-only inputs)
 | active prompts (person / organization / issue / policy / event) | 10 / 10 / 10 / 10 / 10 |
 | deprecated prompts (all) | **81** |
 | source_types (seeded) | 10 |
-| analysis_runs | **46** (per-response at `analysis-1.0.0` + cross-analysis at `cross-analysis-1.0.0`) |
-| response_extractions | **695** |
-| refresh_analyses | **34** |
+| analysis_runs | **90** (per-response at `analysis-1.0.0` + cross-analysis at `cross-analysis-1.0.0`; rich set after QA-cleanup pass) |
+| response_extractions | **1386** |
+| refresh_analyses | **100** (4 cross-analyzer types × 11 subjects on their latest refresh; 4 of those subjects also have narrative_drift findings against prior refreshes) |
 
 ### Person category — current 5+5 layout
 
@@ -573,8 +573,8 @@ anything else in Track C.
 | **Migration numbers** | 004+ (e.g., `004_subjects_canonical_url.sql` for sources v1.1's `cited_own_site`) |
 | **STATE.md section** | this Track C subsection + edits to "Suggested next" / "Things not yet built" lists as items are picked off |
 | **Shipped** | ✓ `MentionDetectionExtractor v1.0` — `gemini-2.5-flash-lite` extractor populating the six previously-NULL mention columns on unnamed-layer responses (`subject_mentioned`, `mention_rank`, `mention_strength`, `mention_excerpt`, `disambiguation_confidence`, `competitors_mentioned`). Validated on Rubio's run 18; backfill of older refreshes deferred (288 unnamed-layer rows still NULL on prior analysis_runs). |
-| **Recently shipped (this session)** | ✓ Event subject end-to-end test (subject 11) · ✓ Sources dict expansion (~50 domains; unknown 34% → 28% across the full 3016-citation corpus) · ✓ Entities v1.3 retry-on-parse-failure · ✓ Sources v1.1 with `cited_own_site` (stored as `subjects.setup_inputs.canonical_url`, no migration needed) · ✓ Mention-detection backfill on all 17 historical refreshes via new `--only-extractor` analyzer flag ($0.06 total — vs the ~$0.7 of running full analyzer on each). Track A's share_of_voice now works across all 11 subjects; narrative_drift unblocked on Bernie/McConnell/Vance/Rubio (the subjects with multiple refreshes). |
-| **Remaining pickable items** | backfill canonical_url for other subjects (currently only Heritage has it set; one-line UPDATE per subject + re-run analyzer for that refresh's sources). All other Track C items shipped. |
+| **Recently shipped (this session)** | ✓ Event subject end-to-end test (subject 11) · ✓ Sources dict expansion (~50 domains; unknown 34% → 28% across the full 3016-citation corpus) · ✓ Entities v1.3 retry-on-parse-failure · ✓ Sources v1.1 with `cited_own_site` (stored as `subjects.setup_inputs.canonical_url`, no migration needed) · ✓ Mention-detection backfill on all 17 historical refreshes via new `--only-extractor` analyzer flag ($0.06 total — vs the ~$0.7 of running full analyzer on each) · ✓ Mention_detection v1.1 retry-on-parse-failure (mirrors entities v1.3) · ✓ QA-cleanup pass closed Issues 1–3: cross-analyzer aggregates latest-non-null per column (Issue 1); full per-response extraction on the 8 partial subjects' latest refreshes ($0.43, Issue 2); cross-analyzer invoked on all 11 subjects ($0.06, Issue 3). Every subject now has full asymmetry / top_quotes / share_of_voice findings; 4 subjects also have narrative_drift (the ones with multiple completed refreshes). |
+| **Remaining pickable items** | backfill canonical_url for other subjects (currently only Heritage has it set; one-line UPDATE per subject + re-run analyzer for that refresh's sources) · backfill full extraction on older refreshes for richer narrative_drift histories (today only the latest refresh per subject has full extraction; older refreshes have descriptors + mention_detection only). All other Track C items shipped. |
 
 ### Cross-track dependency to be aware of
 
