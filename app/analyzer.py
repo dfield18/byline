@@ -1939,6 +1939,15 @@ async def _cli_main() -> None:
             "tasks into a single context. Sources still runs separately."
         ),
     )
+    parser.add_argument(
+        "--only-extractor", type=str, default=None, metavar="NAME",
+        help=(
+            "Run only the named extractor (e.g., 'mention_detection', "
+            "'sources'). Useful for backfilling a single column without "
+            "re-running already-populated extractors. The other extractors' "
+            "columns stay NULL on the resulting response_extractions rows."
+        ),
+    )
     args = parser.parse_args()
 
     source_type_ids = _fetch_source_type_ids()
@@ -1957,6 +1966,17 @@ async def _cli_main() -> None:
             NarrativeThemesExtractor(),
             MentionDetectionExtractor(),
         ]
+
+    if args.only_extractor:
+        filtered = [e for e in extractors if e.name == args.only_extractor]
+        if not filtered:
+            available = ", ".join(sorted(e.name for e in extractors))
+            raise SystemExit(
+                f"--only-extractor '{args.only_extractor}' not found. "
+                f"Available: {available}"
+            )
+        extractors = filtered
+
     print(
         f"Running {len(extractors)} extractor(s) "
         f"({', '.join(f'{e.name}@v{e.version}' for e in extractors)}) "
