@@ -44,9 +44,9 @@ runs 18+ measure "AI given a US bias." Cross-run comparisons spanning the
 change should account for the discontinuity. The `us_focused` flag in
 metadata identifies which rows have it.
 
-The **analysis layer has three extractors live**. Schema is in place
-(commit `d311001`, migration 010). `app/analyzer.py` holds the runner
-plus three Extractor subclasses, all under methodology_version
+The **analysis layer has all five planned extractors live**. Schema is
+in place (commit `d311001`, migration 010). `app/analyzer.py` holds the
+runner plus five Extractor subclasses, all under methodology_version
 `analysis-1.0.0`:
 
 - **descriptors** v1.3 — gemini-2.5-flash with verbatim+grammatical-
@@ -71,6 +71,29 @@ plus three Extractor subclasses, all under methodology_version
   average; valence distribution is bimodal (~57% neutral factual mentions,
   ~43% non-zero, skewing negative for foreign-policy subjects who name
   adversarial regimes).
+- **scores** v1.0 — gemini-2.5-flash, single-object JSON output. Four
+  response-level numeric scores plus a short rationale: `sentiment`
+  (-1..+1, toward subject), `directional_lean` (-1..+1, left/right
+  framing of the subject — works for any category), `certainty`
+  (0..+1, low when hedged with "some say" / "critics argue"),
+  `criticism_severity` (0..+1, harshness of criticism). All four apply
+  to every response; read in context downstream (e.g.,
+  `criticism_severity` near 0 on a `named/3` adversarial-defense slot
+  is itself a finding). On Rubio's run 18, `criticism_severity` lands
+  ~0.90 on `named/3` for both models; ~0 elsewhere — the asymmetry
+  methodology surfacing cleanly in numeric form.
+- **narrative_themes** v1.0 — gemini-2.5-flash. 1-3 free-form theme
+  labels per response (`label`, `weight`, `excerpt`) plus a single
+  `dominant_theme` text column. Free-form is intentional in v1.0
+  because we don't yet know what themes to pre-define; tradeoff is
+  that labels won't aggregate cleanly across runs (e.g., "foreign
+  policy hawkishness" / "hawkish foreign policy" / "foreign policy
+  leadership" surface as distinct labels for what's plausibly one
+  theme). v1.1 with a constrained taxonomy via post-hoc clustering is
+  the natural next iteration. ~2 of 20 responses in Rubio's run 26
+  produced no themes (brief / unfocused responses on `unnamed/3` and
+  `unnamed/5`); the extractor correctly returned empty rather than
+  forcing a theme.
 
 Next sub-phase: **add more extractors** to `app/analyzer.py` — natural
 candidates per the spec are sources, entities, scores, narrative_themes.
@@ -98,17 +121,23 @@ app/
 │                              missing required setup_inputs) and weekly
 │                              recent_news cache management.
 ├── analyzer.py              # CLI: python -m app.analyzer <refresh_run_id>
-│                              Extractor ABC + 3 production extractors:
+│                              Extractor ABC + 5 production extractors:
 │                                - DescriptorExtractor v1.3 (gemini, JSON)
 │                                - SourcesExtractor v1.0 (pure Python,
 │                                  domain dict + TLD heuristics)
 │                                - EntitiesExtractor v1.0 (gemini, JSON)
+│                                - ScoresExtractor v1.0 (gemini, JSON
+│                                  object — 4 numeric scores + rationale)
+│                                - NarrativeThemesExtractor v1.0 (gemini,
+│                                  free-form labels + dominant_theme)
 │                              Runner fans out per response, writes
 │                              response_extractions. ExtractionResult
 │                              supports extra_columns for extractors that
 │                              span multiple columns (sources writes both
 │                              `sources` JSONB and `total_sources_cited`
-│                              int). Add new extractors as new Extractor
+│                              int; narrative_themes writes both
+│                              `narrative_themes` JSONB and `dominant_theme`
+│                              text). Add new extractors as new Extractor
 │                              subclasses.
 └── providers/
     ├── base.py              # Provider abstract + ProviderResponse dataclass
@@ -181,9 +210,9 @@ docs/                        # Spec docs (read-only inputs)
 | active prompts (person / organization / issue / policy / event) | 10 / 10 / 10 / 10 / 10 |
 | deprecated prompts (all) | **81** (was 29 — grew with the org/issue/policy/event compactions) |
 | source_types (seeded) | 10 |
-| analysis_runs | **24** (16 v1.3 descriptor backfill + 6 iteration + 2 with full extractor stack on Rubio's run 18) |
-| response_extractions | ~470 (411 v1.3 backfill + 20 v1.3 Rubio + run 24 with 3-extractor stack) |
-| refresh_analyses | 0 (no cross-response findings yet) |
+| analysis_runs | **26** (16 v1.3 descriptor backfill + 8 iteration + 2 with the full 5-extractor stack on Rubio's run 18) |
+| response_extractions | ~510 (411 v1.3 backfill + repeated Rubio runs at 3- and 5-extractor stacks) |
+| refresh_analyses | 0 (cross-response findings layer not yet built) |
 
 ### Person category — current 5+5 layout
 
@@ -412,16 +441,30 @@ Coordination notes:
   set `name`/`version`/`output_column`, write the prompt + JSON schema,
   add it to the `extractors` list in `_cli_main()`. Runner handles the
   rest. ~50 lines per extractor.
-- **Suggested next extractors** (the two highest-priority spec items —
-  descriptors, sources, and entities are now live):
-  1. **scores** — sentiment / directional_lean / certainty /
-     criticism_severity. Has methodology decisions worth aligning before
-     building (what does directional_lean mean for a non-political-issue
-     subject? how does sentiment differ from descriptor valence? should
-     criticism_severity only apply on adversarial-framed prompts?).
-  2. **narrative_themes** + dominant_theme. Has methodology decisions
-     worth aligning before building (subject-specific themes vs.
-     category-generic themes? stable taxonomy or free-form labels?).
+- **Per-response extractor coverage is complete.** All five spec items
+  (descriptors, sources, entities, scores, narrative_themes) ship in
+  `app/analyzer.py`. The natural next layer of work is **cross-response
+  findings** that operate on a refresh as a whole rather than one
+  response at a time:
+  1. **Asymmetry analysis** — for prompts that pair (e.g., issue/policy
+     `named/2` + `named/3`, or person `named/3` adversarial-defense vs.
+     other named slots), compute completeness/depth/sources gap. Lives
+     in `refresh_analyses` keyed by `analysis_type='asymmetry'`.
+  2. **Share of voice** — for unnamed-layer responses, count how often
+     the subject surfaces vs. comparable peers. Inputs: `subject_mentioned`
+     + `mention_rank` columns we haven't populated yet.
+  3. **Top quotes** — pick the most representative or extreme passages
+     across the refresh. Cheaper to produce by selecting from existing
+     extraction excerpts than re-running on full text.
+  4. **Theme clustering / narrative drift** — cluster v1.0 free-form
+     theme labels into a stable taxonomy (offline/post-hoc), then bump
+     `narrative_themes` to v1.1 with constrained vocabulary. Also enables
+     drift detection across refreshes.
+- **Per-extractor v1.1+ refinements** worth tracking but not blocking:
+  descriptors v1.4 to capture action-attached descriptors with a
+  `directness` field; sources v1.1 to add `cited_own_site` once
+  `subjects.canonical_url` is plumbed; entities v1.1 to add a
+  `competitors_mentioned` derivation for the recommendation engine.
 - **Re-running an extractor** (e.g., bumping descriptors to v1.4) creates
   a new `analysis_run` with new rows; old rows stay intact for historical
   comparison. The runner backfills cleanly across all refresh_run_ids.

@@ -671,6 +671,295 @@ class EntitiesExtractor(Extractor):
         )
 
 
+# ─── scores extractor ──────────────────────────────────────────────────
+
+_SCORES_PROMPT = """\
+You will be given an AI assistant's response about {subject_name}.
+
+Score the response on four dimensions. Each is a single number; return \
+exactly one object. Use the full ranges — don't pile up at zero just \
+because the response feels neutral. If a dimension genuinely doesn't \
+apply (e.g., the subject is barely mentioned), score it close to 0.
+
+1. sentiment (-1.0 to 1.0):
+   Overall sentiment of the response toward {subject_name}.
+   -1.0 = relentlessly negative; 0.0 = balanced or factual; +1.0 = \
+relentlessly positive. Mixed responses with both praise and criticism \
+should land between -0.3 and +0.3.
+
+2. directional_lean (-1.0 to 1.0):
+   How the response FRAMES {subject_name}, on a left/right political \
+axis. -1.0 = framed from a strongly progressive/left perspective; \
+0.0 = balanced or non-political; +1.0 = framed from a strongly \
+conservative/right perspective. This is about the FRAMING of the \
+response, not the subject's own politics. A neutral factual write-up \
+of a conservative subject should score near 0; a progressive criticism \
+of the same subject scores negative.
+
+3. certainty (0.0 to 1.0):
+   How confident vs. hedged the response sounds.
+   0.0 = heavily hedged (lots of "some say", "critics argue", "may", \
+"could be", "it depends"); 0.5 = mixed; 1.0 = stated as established \
+fact with no hedging.
+
+4. criticism_severity (0.0 to 1.0):
+   How harshly the response criticizes {subject_name}.
+   0.0 = no criticism at all (descriptive or favorable); 0.3 = mild \
+critique woven in; 0.6 = sustained or pointed criticism; 1.0 = \
+scathing, central focus on flaws or failures. On non-adversarial \
+prompts this should usually land near 0; that is itself signal.
+
+Return exactly one object with the four numeric fields and a brief \
+`rationale` field (≤30 words) summarizing the most important reason \
+the response landed where it did on these axes.
+
+RESPONSE TO ANALYZE:
+{response_text}
+"""
+
+_SCORES_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "sentiment":            {"type": "NUMBER"},
+        "directional_lean":     {"type": "NUMBER"},
+        "certainty":            {"type": "NUMBER"},
+        "criticism_severity":   {"type": "NUMBER"},
+        "rationale":            {"type": "STRING"},
+    },
+    "required": [
+        "sentiment", "directional_lean", "certainty",
+        "criticism_severity", "rationale",
+    ],
+}
+
+
+class ScoresExtractor(Extractor):
+    """Four response-level scores: sentiment, directional_lean, certainty,
+    criticism_severity. One LLM call per response producing one numeric
+    object (not a list).
+
+    Methodology note: scores apply to every response uniformly. Read them
+    in context downstream — e.g., criticism_severity on a named/criticism
+    prompt should be high; if it's low, that itself is a finding.
+    """
+
+    name = "scores"
+    version = "1.0"
+    output_column = "scores"
+    model_identifier = "gemini-2.5-flash"
+
+    def __init__(self) -> None:
+        self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    async def extract(self, response: ResponseToAnalyze) -> ExtractionResult:
+        start = time.perf_counter()
+        prompt = _SCORES_PROMPT.format(
+            subject_name=response.subject_name,
+            response_text=response.response_text,
+        )
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_SCORES_SCHEMA,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+
+        try:
+            api_response, _ = await retry_async(
+                lambda: self._client.aio.models.generate_content(
+                    model=self.model_identifier,
+                    contents=prompt,
+                    config=config,
+                ),
+                is_retryable=_is_retryable_gemini,
+            )
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=str(e),
+                cost_usd=Decimal(0),
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
+
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+        usage = getattr(api_response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        prices = _PRICING[self.model_identifier]
+        cost = (
+            Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+            + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
+        )
+
+        try:
+            parsed = json.loads(api_response.text) if api_response.text else None
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=f"JSON parse failed: {e}",
+                cost_usd=cost,
+                latency_ms=elapsed_ms,
+            )
+
+        return ExtractionResult(
+            output=parsed,
+            error=None,
+            cost_usd=cost,
+            latency_ms=elapsed_ms,
+        )
+
+
+# ─── narrative themes extractor ────────────────────────────────────────
+
+_THEMES_PROMPT = """\
+You will be given an AI assistant's response about {subject_name}.
+
+Identify the 1-3 dominant NARRATIVE THEMES the response uses to frame \
+{subject_name}. A narrative theme is a recurring frame or angle the \
+response leans on, not just any topic mentioned. Themes are what makes \
+two responses about the same subject feel DIFFERENT.
+
+Examples of good narrative themes (free-form labels, 2-5 words each):
+- "presidential ambition"
+- "foreign policy hawkishness"
+- "MAGA loyalty test"
+- "establishment vs. populist"
+- "ideological inconsistency"
+- "policy substance over personality"
+- "identity politics framing"
+- "scandal management"
+- "generational change"
+- "Cuban-American immigrant story"
+
+For each theme:
+- label: a short noun phrase (2-5 words). Use clear, journalistic \
+phrasing rather than abstract sociology terms.
+- weight: 0.0 to 1.0 — how prominent this theme is in the response. \
+Don't be afraid of low values for secondary themes (0.2-0.4 is normal).
+- excerpt: a representative sentence or phrase from the response that \
+illustrates this theme.
+
+Then pick a `dominant_theme` (string) — the SINGLE most prominent theme. \
+This is just the label of one of the themes you returned (the one with \
+the highest weight, typically). It must match exactly.
+
+Avoid:
+- Themes that just restate the subject's job ("Secretary of State", \
+"is a senator") — these are facts, not framings.
+- Themes that are just topics ("foreign policy", "Cuba") without a frame \
+or angle attached.
+- More than 3 themes — pick the strongest 1-3 and let weaker ones go.
+
+Return up to 3 themes plus the dominant_theme label.
+
+RESPONSE TO ANALYZE:
+{response_text}
+"""
+
+_THEMES_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "themes": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "label":    {"type": "STRING"},
+                    "weight":   {"type": "NUMBER"},
+                    "excerpt":  {"type": "STRING"},
+                },
+                "required": ["label", "weight", "excerpt"],
+            },
+        },
+        "dominant_theme": {"type": "STRING"},
+    },
+    "required": ["themes", "dominant_theme"],
+}
+
+
+class NarrativeThemesExtractor(Extractor):
+    """1-3 free-form narrative theme labels per response, plus a single
+    dominant_theme string.
+
+    Free-form labels in v1.0 — taxonomy will fragment across runs but we
+    don't yet know what themes to pre-define. Once a corpus exists, a
+    v1.1 can constrain the vocabulary via clustering. Cross-run
+    aggregation requires post-hoc clustering for now.
+
+    Writes to two columns: narrative_themes (jsonb list of {label, weight,
+    excerpt}) and dominant_theme (text).
+    """
+
+    name = "narrative_themes"
+    version = "1.0"
+    output_column = "narrative_themes"
+    model_identifier = "gemini-2.5-flash"
+
+    def __init__(self) -> None:
+        self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    async def extract(self, response: ResponseToAnalyze) -> ExtractionResult:
+        start = time.perf_counter()
+        prompt = _THEMES_PROMPT.format(
+            subject_name=response.subject_name,
+            response_text=response.response_text,
+        )
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_THEMES_SCHEMA,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+
+        try:
+            api_response, _ = await retry_async(
+                lambda: self._client.aio.models.generate_content(
+                    model=self.model_identifier,
+                    contents=prompt,
+                    config=config,
+                ),
+                is_retryable=_is_retryable_gemini,
+            )
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=str(e),
+                cost_usd=Decimal(0),
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
+
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+        usage = getattr(api_response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        prices = _PRICING[self.model_identifier]
+        cost = (
+            Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+            + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
+        )
+
+        try:
+            parsed = json.loads(api_response.text) if api_response.text else {}
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=f"JSON parse failed: {e}",
+                cost_usd=cost,
+                latency_ms=elapsed_ms,
+            )
+
+        themes_list = parsed.get("themes") if isinstance(parsed, dict) else None
+        dominant = parsed.get("dominant_theme") if isinstance(parsed, dict) else None
+
+        return ExtractionResult(
+            output=themes_list,
+            error=None,
+            cost_usd=cost,
+            latency_ms=elapsed_ms,
+            extra_columns={"dominant_theme": dominant},
+        )
+
+
 # ─── runner ────────────────────────────────────────────────────────────
 
 
@@ -927,6 +1216,8 @@ async def _cli_main() -> None:
         DescriptorExtractor(),
         SourcesExtractor(source_type_ids),
         EntitiesExtractor(),
+        ScoresExtractor(),
+        NarrativeThemesExtractor(),
     ]
     print(
         f"Running {len(extractors)} extractor(s) "
