@@ -111,7 +111,7 @@ class RefreshContext:
     subject_name: str
     subject_category_slug: str
     setup_inputs: dict
-    source_analysis_run_id: int  # which analysis_run's extractions we read
+    source_analysis_run_id: int | None  # latest per-response analysis_run id (or pinned override) for audit; data is aggregated across all per-response runs unless pinned
     responses: list[ResponseRow]
 
 
@@ -794,54 +794,65 @@ class RefreshAggregate:
     mention_rates: dict[int, dict[str, Any]]  # {model_id: {slug, rate, mentioned, evaluated}}
 
 
+def _latest_per_column(col: str) -> str:
+    """Return a SQL fragment for a correlated subquery that picks the most
+    recent non-null value of `col` from `response_extractions` for the
+    current model_response_id (relative to the outer query's `mr.id`).
+
+    Why this exists: response_extractions has one row per (analysis_run,
+    model_response). Different analysis_runs populate different columns
+    (e.g., a `--only-extractor mention_detection` backfill creates a row
+    with ONLY mention columns; the original v1.3 descriptor backfill is
+    on a separate row with only descriptors). Picking the "latest"
+    analysis_run wholesale loses data — the correct semantics are
+    "latest non-null per column independently."
+    """
+    return (
+        f"(SELECT {col} FROM response_extractions "
+        f"WHERE model_response_id = mr.id AND {col} IS NOT NULL "
+        f"ORDER BY analysis_run_id DESC LIMIT 1)"
+    )
+
+
 def _load_refresh_aggregate(refresh_run_id: int) -> RefreshAggregate | None:
-    """Build a RefreshAggregate from the latest per-response analysis_run for
-    this refresh (i.e., methodology_version='analysis-1.0.0' — the
-    `app/analyzer.py` runs that populate `response_extractions`).
-    Cross-analyzer runs (methodology_version='cross-analysis-*') are
-    explicitly excluded — they write to `refresh_analyses`, not
-    `response_extractions`, so picking one as the source would yield zero
-    aggregate rows. Returns None if no per-response analysis_run exists
-    yet."""
+    """Build a RefreshAggregate by aggregating the LATEST NON-NULL value
+    per column across all per-response analysis_runs for this refresh.
+
+    See `_latest_per_column` for why we aggregate column-by-column rather
+    than picking a single analysis_run wholesale. Returns None if no
+    successful model_responses exist for this refresh.
+    """
     with psycopg.connect(get_database_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT id FROM analysis_runs
-                WHERE refresh_run_id = %s
-                  AND status IN ('completed', 'partial')
-                  AND methodology_version LIKE 'analysis-%%'
-                ORDER BY id DESC LIMIT 1
-                """,
+                "SELECT subject_id, started_at FROM refresh_runs WHERE id = %s",
                 (refresh_run_id,),
             )
             row = cur.fetchone()
             if not row:
                 return None
-            ar_id = row[0]
+            _, started_at = row
 
             cur.execute(
-                "SELECT subject_id, started_at FROM refresh_runs WHERE id = %s",
-                (refresh_run_id,),
-            )
-            _, started_at = cur.fetchone()
-
-            cur.execute(
-                """
+                f"""
                 SELECT
                     p.layer, m.id, m.slug,
-                    re.descriptors, re.entities, re.scores,
-                    re.dominant_theme,
-                    re.subject_mentioned, re.mention_rank
-                FROM response_extractions re
-                JOIN model_responses mr ON mr.id = re.model_response_id
+                    {_latest_per_column('descriptors')} AS descriptors,
+                    {_latest_per_column('entities')} AS entities,
+                    {_latest_per_column('scores')} AS scores,
+                    {_latest_per_column('dominant_theme')} AS dominant_theme,
+                    {_latest_per_column('subject_mentioned')} AS subject_mentioned,
+                    {_latest_per_column('mention_rank')} AS mention_rank
+                FROM model_responses mr
                 JOIN prompts p ON p.id = mr.prompt_id
                 JOIN models m ON m.id = mr.model_id
-                WHERE re.analysis_run_id = %s AND mr.success = TRUE
+                WHERE mr.refresh_run_id = %s AND mr.success = TRUE
                 """,
-                (ar_id,),
+                (refresh_run_id,),
             )
             rows = cur.fetchall()
+            if not rows:
+                return None
 
     descriptor_words: set[str] = set()
     entity_names: set[str] = set()
@@ -1208,11 +1219,16 @@ class NarrativeDriftAnalyzer(CrossAnalyzer):
 
 def _resolve_source_analysis_run(
     cur: psycopg.Cursor, refresh_run_id: int, override: int | None,
-) -> int:
-    """Pick which analysis_run's extractions feed the cross-analyzer.
+) -> int | None:
+    """Resolve the value to record in `RefreshContext.source_analysis_run_id`
+    for audit. Returns the override if pinned, the most recent per-response
+    analysis_run id otherwise, or None if no per-response analysis_run
+    exists yet for the refresh.
 
-    Default: most recent completed analysis_run for the refresh, with the
-    full per-response extractor set populated. Override via --use-analysis-run.
+    Note: data loading no longer pins to a single analysis_run by default.
+    This value is recorded for audit traceability only; the actual
+    extraction columns are aggregated across all analysis_runs (latest
+    non-null per column) by `_load_context`.
     """
     if override is not None:
         cur.execute(
@@ -1236,15 +1252,26 @@ def _resolve_source_analysis_run(
         (refresh_run_id,),
     )
     row = cur.fetchone()
-    if not row:
-        raise ValueError(
-            f"No per-response analysis_run found for refresh_run {refresh_run_id}. "
-            f"Run `python -m app.analyzer {refresh_run_id}` first."
-        )
-    return row[0]
+    return row[0] if row else None
 
 
 def _load_context(refresh_run_id: int, source_analysis_run: int | None) -> RefreshContext:
+    """Build RefreshContext for a refresh by aggregating extractor outputs
+    across ALL per-response analysis_runs (latest non-null per column).
+
+    Why aggregate: response_extractions has one row per (analysis_run,
+    model_response). Different analysis_runs populate different columns
+    (e.g., `--only-extractor mention_detection` backfills produce rows
+    with only mention columns; the historical v1.3 descriptor backfill
+    populated only descriptors). Pinning to a single analysis_run
+    silently drops data that exists on earlier rows.
+
+    `--use-analysis-run N` (passed as `source_analysis_run`) overrides
+    this aggregate behavior and pins everything to that single run —
+    useful for reproducing historical state. Without the override
+    (the default), the cross-analyzer reads the latest non-null value
+    per column per response.
+    """
     with psycopg.connect(get_database_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1264,30 +1291,64 @@ def _load_context(refresh_run_id: int, source_analysis_run: int | None) -> Refre
 
             ar_id = _resolve_source_analysis_run(cur, refresh_run_id, source_analysis_run)
 
-            cur.execute(
-                """
-                SELECT
-                    mr.id, mr.refresh_run_id, mr.subject_id,
-                    mr.model_id, m.slug,
-                    p.id, p.layer, p.position, p.dimension,
-                    mr.response_text, mr.response_metadata,
-                    re.descriptors, re.entities, re.sources,
-                    re.total_sources_cited, re.scores,
-                    re.narrative_themes, re.dominant_theme,
-                    re.subject_mentioned, re.mention_rank,
-                    re.mention_strength, re.mention_excerpt,
-                    re.competitors_mentioned, re.disambiguation_confidence
-                FROM model_responses mr
-                JOIN prompts p ON p.id = mr.prompt_id
-                JOIN models m ON m.id = mr.model_id
-                LEFT JOIN response_extractions re
-                    ON re.model_response_id = mr.id
-                    AND re.analysis_run_id = %s
-                WHERE mr.refresh_run_id = %s AND mr.success = TRUE
-                ORDER BY p.layer, p.position, m.slug
-                """,
-                (ar_id, refresh_run_id),
-            )
+            if source_analysis_run is not None:
+                # Pinned mode: read from a single analysis_run wholesale.
+                # Used by `--use-analysis-run` for historical reproduction.
+                cur.execute(
+                    """
+                    SELECT
+                        mr.id, mr.refresh_run_id, mr.subject_id,
+                        mr.model_id, m.slug,
+                        p.id, p.layer, p.position, p.dimension,
+                        mr.response_text, mr.response_metadata,
+                        re.descriptors, re.entities, re.sources,
+                        re.total_sources_cited, re.scores,
+                        re.narrative_themes, re.dominant_theme,
+                        re.subject_mentioned, re.mention_rank,
+                        re.mention_strength, re.mention_excerpt,
+                        re.competitors_mentioned, re.disambiguation_confidence
+                    FROM model_responses mr
+                    JOIN prompts p ON p.id = mr.prompt_id
+                    JOIN models m ON m.id = mr.model_id
+                    LEFT JOIN response_extractions re
+                        ON re.model_response_id = mr.id
+                        AND re.analysis_run_id = %s
+                    WHERE mr.refresh_run_id = %s AND mr.success = TRUE
+                    ORDER BY p.layer, p.position, m.slug
+                    """,
+                    (source_analysis_run, refresh_run_id),
+                )
+            else:
+                # Default mode: aggregate latest non-null per column across
+                # all analysis_runs.
+                cur.execute(
+                    f"""
+                    SELECT
+                        mr.id, mr.refresh_run_id, mr.subject_id,
+                        mr.model_id, m.slug,
+                        p.id, p.layer, p.position, p.dimension,
+                        mr.response_text, mr.response_metadata,
+                        {_latest_per_column('descriptors')} AS descriptors,
+                        {_latest_per_column('entities')} AS entities,
+                        {_latest_per_column('sources')} AS sources,
+                        {_latest_per_column('total_sources_cited')} AS total_sources_cited,
+                        {_latest_per_column('scores')} AS scores,
+                        {_latest_per_column('narrative_themes')} AS narrative_themes,
+                        {_latest_per_column('dominant_theme')} AS dominant_theme,
+                        {_latest_per_column('subject_mentioned')} AS subject_mentioned,
+                        {_latest_per_column('mention_rank')} AS mention_rank,
+                        {_latest_per_column('mention_strength')} AS mention_strength,
+                        {_latest_per_column('mention_excerpt')} AS mention_excerpt,
+                        {_latest_per_column('competitors_mentioned')} AS competitors_mentioned,
+                        {_latest_per_column('disambiguation_confidence')} AS disambiguation_confidence
+                    FROM model_responses mr
+                    JOIN prompts p ON p.id = mr.prompt_id
+                    JOIN models m ON m.id = mr.model_id
+                    WHERE mr.refresh_run_id = %s AND mr.success = TRUE
+                    ORDER BY p.layer, p.position, m.slug
+                    """,
+                    (refresh_run_id,),
+                )
             rows = cur.fetchall()
 
     responses = [
