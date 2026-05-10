@@ -141,28 +141,21 @@ prompts:
         Original 1.0.0 used a compound {domain} value (e.g., "X and Y"); the
         new structure constrains each to one substantive area.
 
-    - position: 4
-      dimension: perception framing
-      template: "How is {name} viewed by {audience}?"
-      version: "1.0.0"
-
-    - position: 7
+    - position: 3
       dimension: adversarial defense test
       template: "What are the strongest criticisms of {name}?"
       version: "1.0.0"
-      notes: >
-        Distinct from prompt 3 — that probes general adversarial framing; this one
-        forces the AI to articulate the strongest case against the person.
+      notes: |
+        Renumbered into named/3 in the 5+5 compact layout. The pre-renumber
+        instance lived at named/7 v1.0.0 with identical content; that DB row
+        is now deactivated with retirement_reason set. Historical
+        model_responses for adversarial defense test still reference the
+        named/7 prompt_id (so analyses by content/dimension carry across
+        the renumber; analyses by raw position do not).
+        Distinct from the retired criticism prompt (different methodology
+        dimension) whose deprecated row also lives at named/3 in DB.
 
-    - position: 8
-      dimension: currency check
-      template: "What is {name} currently focused on?"
-      version: "1.0.0"
-      notes: >
-        Specific to the Person category. Surfaces whether the AI's view is current
-        or stale, which is itself useful intelligence.
-
-    - position: 9
+    - position: 4
       dimension: recent-event reaction
       type: generated
       template: |
@@ -185,19 +178,15 @@ prompts:
         - Output only the question — no preamble, no quotes, no explanation.
       version: "1.0.1"
       notes: |
-        type=generated. The template above is a generation instruction sent to
-        a meta-LLM (Gemini Flash); the meta-LLM produces the actual question
-        that gets sent to measurement providers. Methodology consistency for
-        this slot is intentionally relaxed — recent_news varies over time, so
-        the rendered question varies too. Cross-run comparison on this slot
-        requires inspecting the per-row generated text captured in
-        response_metadata.generation_instruction_rendered, not assuming the
-        question stayed the same.
+        type=generated. Renumbered from named/9 into named/4 in the 5+5
+        compact layout. Same generation_instruction and version. The
+        pre-renumber DB row at named/9 v1.0.1 is now deactivated.
+        Methodology consistency intentionally relaxed for this slot —
+        recent_news varies, so rendered questions vary.
         v1.0.1: Constrained meta-LLM to focus on ONE specific recent event
-        (not combine multiple). Original v1.0.0 produced multi-event questions
-        like "what's the reaction to X and Y and Z?" which conflate signals.
+        (not combine multiple).
 
-    - position: 10
+    - position: 5
       dimension: narrative consistency
       type: generated
       template: |
@@ -206,12 +195,12 @@ prompts:
         {name} is consistent with {pronoun_possessive} established record
         and known positions.
 
-        IMPORTANT: This prompt is paired with another prompt (named/9) that
-        focuses on the SINGLE most prominent event in the recent context.
-        For THIS prompt, choose a DIFFERENT recent action — a secondary
-        event in the summary, not the most prominent one. The goal is for
-        named/9 and named/10 to probe different events within the same
-        refresh.
+        IMPORTANT: This prompt is paired with named/4 (recent-event
+        reaction), which targets the SINGLE most prominent event in the
+        recent context. For THIS prompt, choose a DIFFERENT recent action
+        — a secondary event in the summary, not the most prominent one.
+        The goal is for named/4 and named/5 to probe different events
+        within the same refresh.
 
         If only one event is present in the context, use that one anyway.
         If multiple events are present, deliberately pick a NON-most-
@@ -227,37 +216,19 @@ prompts:
         - Don't lead toward "yes" or "no".
         - Don't add facts not present in the context above.
         - Output only the question — no preamble, no quotes, no explanation.
-      version: "1.0.4"
+      version: "1.0.5"
       notes: |
-        type=generated. Pairs with named/9 — same generation pattern, different
-        dimensional intent. Tests narrative drift: does the AI see recent
-        actions as continuous with the established record? Methodology
-        consistency relaxed (see named/9 notes).
-        v1.0.1: replaced {pronoun_subject} with {pronoun_possessive} so the
-        instruction reads grammatically.
+        type=generated. Renumbered from named/10 into named/5. Pairs with
+        named/4. Tests narrative drift: does the AI see recent actions as
+        continuous with the established record? Methodology consistency
+        relaxed (see named/4 notes).
+        v1.0.1: replaced {pronoun_subject} with {pronoun_possessive}.
         v1.0.2: Renamed {domain} -> {primary_domain}.
-        v1.0.3: Constrained meta-LLM to focus on ONE specific recent action
-        (not combine multiple).
+        v1.0.3: Constrained meta-LLM to focus on ONE specific recent action.
         v1.0.4: Constrained meta-LLM to deliberately pick a DIFFERENT event
-        from the one named/9 will pick (which targets the most prominent
-        event). Coordinates coverage across the named/9 + named/10 pair so
-        a single refresh probes two distinct recent events when multiple
-        are available.
-
-    - position: 11
-      dimension: substantive record (secondary)
-      template: "What is {name}'s record on {secondary_domain}?"
-      version: "1.0.0"
-      notes: |
-        Mirrors named/2 but probes the subject's secondary substantive area.
-        Measures whether the AI is aware of the subject's secondary work
-        beyond their primary_domain. Pairs naturally with named/2 for
-        comparison: how does the AI's depth of knowledge differ between
-        primary and secondary domains?
-        Caveat: requires secondary_domain to be populated in setup_inputs
-        (it's an optional field). Subjects without it will get partial-run
-        status until the engine learns to skip-on-missing-optional. As of
-        this commit, only J.D. Vance (id=5) has secondary_domain populated.
+        from named/9 (which targeted most prominent at the time).
+        v1.0.5: Updated internal reference from "named/9" to "named/4" to
+        match the renumbered pair. Otherwise identical to v1.0.4.
 
   unnamed:
     - position: 1
@@ -278,55 +249,20 @@ prompts:
         restructuring (primary/secondary/tertiary single-item fields).
 
     - position: 3
-      dimension: recommendation framing
-      template: "Which {role_category} should I follow to understand {primary_domain}?"
-      version: "1.2.0"
-      notes: >
-        v1.1.0: Added {role_category} constraint to restrict answer space to
-        subject's category type. Original v1.0.0 produced false negatives when
-        broad-domain prompts returned answer spaces that didn't naturally
-        include the subject's category.
-        v1.2.0: Renamed {domain} -> {primary_domain} as part of the domain
-        restructuring (primary/secondary/tertiary single-item fields).
-
-    - position: 4
-      dimension: authority framing
-      template: "Who are the most trusted {role_category} on {primary_domain}?"
-      version: "1.2.0"
-      notes: >
-        v1.1.0: Added {role_category} constraint to restrict answer space to
-        subject's category type. Original v1.0.0 produced false negatives when
-        broad-domain prompts returned answer spaces that didn't naturally
-        include the subject's category.
-        v1.2.0: Renamed {domain} -> {primary_domain} as part of the domain
-        restructuring (primary/secondary/tertiary single-item fields).
-
-    - position: 5
       dimension: adjacent position
       template: "Who are the most prominent {role_category} on {adjacent_position}?"
       version: "1.1.0"
-      notes: >
-        v1.1.0: Added {role_category} constraint to restrict answer space to
-        subject's category type. Original v1.0.0 produced false negatives when
-        broad-domain prompts returned answer spaces that didn't naturally
-        include the subject's category. The adjacent_position input is still
-        the broader debate the person is associated with — for Sanders that's
-        "corporate influence"; for a conservative senator on immigration it
-        might be "stricter immigration enforcement."
-
-    - position: 6
-      dimension: domain leadership (secondary)
-      template: "Who are the {role_category} leading on {secondary_domain} in the US right now?"
-      version: "1.0.0"
       notes: |
-        Mirrors unnamed/2 but probes the subject's secondary substantive area.
-        Tests organic visibility in the secondary domain's leader space —
-        does the subject surface when asked about leaders of their secondary
-        area without being named?
-        Caveat: requires secondary_domain to be populated in setup_inputs
-        (optional field). See named/11's caveat for the same issue.
+        Renumbered from unnamed/5 into unnamed/3 in the 5+5 compact layout.
+        Same template and version. The pre-renumber DB row at unnamed/5
+        v1.1.0 is now deactivated.
+        v1.1.0 (in pre-renumber history): Added {role_category} constraint.
+        The adjacent_position input is the broader debate the person is
+        associated with — for Sanders that's "corporate influence"; for a
+        conservative senator on immigration it might be "stricter
+        immigration enforcement."
 
-    - position: 7
+    - position: 4
       dimension: recent-event leadership
       type: generated
       template: |
@@ -352,15 +288,14 @@ prompts:
         - Output only the question — no preamble, no quotes, no explanation.
       version: "1.0.0"
       notes: |
-        type=generated. Uses recent_news as topic input but does NOT name the
-        subject. Measures organic visibility on a current-events topic — does
-        the subject surface among the {role_category} the AI cites as
-        leading or deciding on this topic? Pairs with unnamed/8 (different
-        topic). Methodology consistency relaxed for this slot (recent_news
-        varies over time); cross-run comparison requires inspecting per-row
-        captured questions in response_metadata.
+        type=generated. Renumbered from unnamed/7 into unnamed/4. Same
+        generation_instruction. Uses recent_news as topic input but does
+        NOT name the subject — measures organic visibility on a current-
+        events topic. Pairs with unnamed/5 (different topic). Methodology
+        consistency relaxed; cross-run comparison requires inspecting the
+        per-row generated text in response_metadata.
 
-    - position: 8
+    - position: 5
       dimension: recent-event leadership (alt)
       type: generated
       template: |
@@ -368,10 +303,10 @@ prompts:
         type into ChatGPT, that asks about which {role_category} are most
         actively involved in, deciding on, or leading a recent-events topic.
 
-        IMPORTANT: This prompt is paired with unnamed/7, which targets the
+        IMPORTANT: This prompt is paired with unnamed/4, which targets the
         SINGLE most prominent topic. For THIS prompt, choose a DIFFERENT
         topic from the recent context — a secondary one, not the most
-        prominent. The goal is for unnamed/7 and unnamed/8 to probe
+        prominent. The goal is for unnamed/4 and unnamed/5 to probe
         different current-events topics within the same refresh.
 
         If only one topic is present in the context, use that one anyway.
@@ -387,9 +322,12 @@ prompts:
         - Use the {role_category} category in the question.
         - Don't mention any individual person by name.
         - Output only the question — no preamble, no quotes, no explanation.
-      version: "1.0.0"
+      version: "1.0.1"
       notes: |
-        type=generated. Pairs with unnamed/7. Same methodology lens (organic
-        visibility on a current-events topic, no subject name in the prompt)
-        but deliberately probes a DIFFERENT topic so unnamed/7 + unnamed/8
-        cover two distinct events per refresh when multiple are available.
+        type=generated. Renumbered from unnamed/8 into unnamed/5. Pairs with
+        unnamed/4. Same methodology lens (organic visibility on a recent-
+        events topic, no subject name in the prompt) but deliberately
+        probes a DIFFERENT topic so unnamed/4 + unnamed/5 cover two
+        distinct events per refresh when multiple are available.
+        v1.0.1: Updated internal reference from "unnamed/7" to "unnamed/4"
+        to match the renumbered pair. Otherwise identical to v1.0.0.
