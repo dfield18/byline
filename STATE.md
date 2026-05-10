@@ -137,9 +137,36 @@ runner plus five Extractor subclasses, all under methodology_version
     Vance, Gabbard, Waltz); Gemini stays anchored to a Trump–Rubio–
     Hegseth triangle. Cost: $0.
 
+  - **NarrativeDriftAnalyzer v1.0.0** — Gemini Flash, one LLM call
+    for the natural-language summary; everything else is pure-Python
+    aggregation. Compares the current refresh against the most
+    recent fully-completed prior refresh of the same subject (skips
+    `partial` priors when a `completed` one is available — partial
+    refreshes have missing model coverage that would skew aggregate
+    deltas). Surfaces score deltas (sentiment / criticism_severity
+    / directional_lean / certainty), theme turnover (added /
+    dropped / stable), descriptor turnover, entity turnover, and
+    per-model mention-rate trajectory. First production run on
+    Rubio (refresh 18 → refresh 20, 0.68 days apart, analysis_run
+    44): all four score deltas under |0.03| — characterization is
+    stable on a half-day interval, but framing-language shifts
+    visible (descriptors dropped: `neoconservative hawk`,
+    `spineless`, `pro-sanctions`; descriptors added: `establishment
+    hawk`, `inauthentic`, `interventionist`). One LLM-generated
+    summary paragraph captures the drift; the structured deltas
+    underneath provide the audit trail. Cost: ~$0.005 per refresh.
+    Returns no rows when no prior refresh exists. Methodology
+    caveat: free-form theme labels fragment across runs ("national
+    security focus" vs "national security surveillance" surface as
+    separate themes), so theme turnover overstates real drift; a
+    `narrative_themes` v1.2 with constrained taxonomy will tighten
+    this up.
+
   CLI: `python -m app.cross_analyzer <refresh_run_id>
-  [--use-analysis-run N]`. Picks the latest completed analysis_run
-  for the refresh by default.
+  [--use-analysis-run N]`. Picks the latest per-response
+  analysis_run for the refresh by default (filters by
+  `methodology_version LIKE 'analysis-%'` to avoid feeding a
+  cross-analysis run back into itself).
 
 - **narrative_themes** v1.1 — gemini-2.5-flash-lite. 1-3 free-form
   theme labels per response (`label`, `weight`, `excerpt`) plus a
@@ -300,15 +327,15 @@ docs/                        # Spec docs (read-only inputs)
 | categories | 5 |
 | models | 2 (chatgpt = gpt-5-mini, gemini = gemini-2.5-flash) |
 | subjects | **10** (7 person + 1 organization + 1 issue + 1 policy + 0 event) |
-| refresh_runs | **18** |
-| model_responses | **432** (431 successful, 20 of which are Rubio's run 18 with `us_focused=true`) |
+| refresh_runs | **20** (Rubio at 18 = full, 19 = partial gemini-only quota event, 20 = full) |
+| model_responses | **472** |
 | active prompts (all categories) | **50** (10 per category × 5 categories — uniform 5+5) |
 | active prompts (person / organization / issue / policy / event) | 10 / 10 / 10 / 10 / 10 |
-| deprecated prompts (all) | **81** (grew with the org/issue/policy/event v1.2 compactions) |
+| deprecated prompts (all) | **81** |
 | source_types (seeded) | 10 |
-| analysis_runs | **35** (16 v1.3 descriptor backfill + iteration + repeated Rubio runs + 2 cross-analyzer runs at runs 34 and 35) |
-| response_extractions | **629** |
-| refresh_analyses | **5** (2 asymmetry + 1 top_quotes from analysis_run 34; 2 asymmetry + 1 top_quotes from analysis_run 35 — re-run for top_quotes) |
+| analysis_runs | **44** (per-response analysis_runs at methodology `analysis-1.0.0` + cross-analysis runs at `cross-analysis-1.0.0`) |
+| response_extractions | **675** |
+| refresh_analyses | **29** (asymmetry / top_quotes / share_of_voice / narrative_drift across multiple cross-analyzer runs on Rubio refresh 18 + 20) |
 
 ### Person category — current 5+5 layout
 
@@ -385,7 +412,7 @@ reporting) that bring past events back into current discourse.
 | 7 | Heritage Foundation | organization | 15 |
 | 8 | AI regulation in the United States | issue | 16 |
 | 9 | the Inflation Reduction Act | policy | 17 |
-| 10 | Marco Rubio | person | **18** ← latest (only subject with `us_focused=true` metadata; bias landed at run 18) |
+| 10 | Marco Rubio | person | **18 + 20** (refresh 19 = partial quota outage; first subject with multiple full refreshes — unblocks narrative_drift) |
 
 **Subjects 7–9 are pilot tests of non-Person categories.** Each was
 created and refreshed *after* its category's 5+5 v1.2.0 compaction, so
@@ -487,27 +514,27 @@ running concurrently on separate branches. Each track owns a
 non-overlapping slice of the codebase so the two sessions can ship
 work independently without merge conflicts.
 
-### Track A — Cross-response findings (`cross-analyzer` branch)
+### Track A — Cross-response findings (`cross-analyzer` branch — fully shipped, ready to merge)
 
 The "editor" layer: reads per-response extractions and produces findings
-*across* a whole refresh. **3 of 4 deliverables shipped; 1 still blocked:**
+*across* a whole refresh. **All 4 deliverables shipped:**
 
 | deliverable | status | notes |
 |---|---|---|
-| asymmetry | ✓ shipped — `AsymmetryAnalyzer v1.0.0`, pure Python, $0 | per-model gap analysis on category prompt pairs |
+| asymmetry | ✓ shipped — `AsymmetryAnalyzer v1.0.1`, pure Python, $0 | per-model gap analysis on category prompt pairs (v1.0.1 patch handles zero-citation edge case in templated summary) |
 | top_quotes | ✓ shipped — `TopQuotesAnalyzer v1.0.0`, Gemini Flash, ~$0.006 | one global row per refresh, 3-5 verbatim quotes with categorization |
-| share_of_voice | ✓ shipped — `ShareOfVoiceAnalyzer v1.0.0`, pure Python, $0 | per-model mention rate / rank / strength / top competitors. Reads Track C's MentionDetectionExtractor v1.0 columns. Both-model findings now in production for Rubio (analysis_run 39): Gemini 80% mention rate at avg rank 3.0; ChatGPT 40% at avg rank 2.0. Track C ran the full Rubio mention-detection backfill in analysis_run 38. |
-| narrative_drift | **blocked — needs ≥2 refreshes per subject** | nothing useful to compute today (every subject has a single refresh) |
+| share_of_voice | ✓ shipped — `ShareOfVoiceAnalyzer v1.0.0`, pure Python, $0 | per-model mention rate / rank / strength / top competitors. Reads Track C's MentionDetectionExtractor v1.0 columns. |
+| narrative_drift | ✓ shipped — `NarrativeDriftAnalyzer v1.0.0`, Gemini Flash, ~$0.005 | compares current refresh vs. most recent fully-completed prior. Score deltas, theme/descriptor/entity turnover, mention-rate trajectory, plus an LLM summary. Returns no rows when no prior exists. First Rubio drift run (refresh 18 → 20) clean. |
 
 | | |
 |---|---|
 | **Owns these files** | `app/cross_analyzer.py` (existing — additive only when adding new analyzers; no edits to existing CrossAnalyzer subclasses without version bump) |
-| **Reads** | `response_extractions`, `model_responses`, `prompts`, `analysis_runs`, `refresh_runs` (read-only) |
+| **Reads** | `response_extractions`, `model_responses`, `prompts`, `analysis_runs`, `refresh_runs` (read-only). Filters per-response analysis_runs by `methodology_version LIKE 'analysis-%'` to avoid picking a cross-analysis run as the source. |
 | **Writes (DB)** | `refresh_analyses` + a new `analysis_runs` row per cross-analyzer invocation |
 | **Touches `app/analyzer.py`?** | NO — Track C's territory |
 | **Migration numbers** | none expected (schema landed in migration 010) |
 | **STATE.md section** | this Track A subsection + the "Cross-analysis layer" bullets under "Current phase" |
-| **Status** | `cross-analyzer` branch is ahead of `main` with `share_of_voice` shipped. Three of four deliverables done. Re-run `python -m app.cross_analyzer 18` after Track C's mention-detection backfill completes to get full chatgpt+gemini share_of_voice findings. narrative_drift remains blocked until any subject has a second refresh |
+| **Status** | `cross-analyzer` branch is ahead of `main` with all 4 deliverables. Ready to merge to `main`. Per-refresh cross-analysis cost: ~$0.011 (top_quotes + narrative_drift LLM calls; asymmetry + share_of_voice are free). |
 
 ### Track C — Ops hardening (`ops-hardening` branch)
 
@@ -567,28 +594,36 @@ direction.
 ## Suggested entry points for new sessions
 
 ### If you're the Track A session resuming work:
-- **2 of 4 deliverables already shipped** (asymmetry, top_quotes — see
-  the Cross-analysis layer bullets under "Current phase" for the
-  details). Two remaining are both blocked:
-  - `share_of_voice` waits on Track C's MentionDetectionExtractor
-    (needs `response_extractions.subject_mentioned` / `mention_rank`
-    columns populated; they've been NULL since migration 010 landed).
-    Once Track C ships, share-of-voice is a small pure-Python
-    addition to `app/cross_analyzer.py`: count subject mentions
-    across the unnamed-layer responses, rank against any other
-    entities surfaced in the same responses, write one
-    refresh_analyses row per refresh.
-  - `narrative_drift` needs ≥2 refreshes of the same subject so
-    there's a prior to diff against. Today every subject has one
-    refresh. The simplest unblock is a second Rubio refresh.
-- When picking up new work, follow the existing `CrossAnalyzer` ABC
-  pattern in `app/cross_analyzer.py`: subclass + register in
-  `_cli_main()`. Pair definitions for asymmetry live in
-  `_ASYMMETRY_PAIRS`. New analysis types should pick a fresh
-  `analysis_type` string (the `refresh_analyses.analysis_type`
-  column), and use `analysis_key` for any sub-keying.
-- Re-runnable: a new cross-analyzer methodology version creates a new
-  `analysis_run` and new `refresh_analyses` rows; old rows stay
+- **All 4 deliverables shipped** (asymmetry, top_quotes,
+  share_of_voice, narrative_drift). Track A's original mandate is
+  complete. See the Cross-analysis layer bullets under "Current
+  phase" for production details.
+- **Picking up new work:** follow the existing `CrossAnalyzer` ABC
+  pattern in `app/cross_analyzer.py` — subclass + register in
+  `_cli_main()`. New analysis types should pick a fresh
+  `analysis_type` string for `refresh_analyses` and use
+  `analysis_key` for any sub-keying.
+- **v1.x backlog** (none of these are blocking; promote when the
+  data motivates it):
+  - **`narrative_themes` v1.2 with constrained taxonomy** —
+    cluster all v1.0 free-form theme labels, derive a stable
+    vocabulary, bump the per-response extractor to v1.2 with the
+    closed-vocab schema. This would tighten `narrative_drift`'s
+    theme turnover signal (today free-form fragmentation overstates
+    real drift, e.g., "national security focus" vs "national
+    security surveillance").
+  - **Per-model `top_quotes`** (~30 lines): add an `analysis_key`
+    variant alongside the global one for "ChatGPT's 3 best" vs
+    "Gemini's 3 best".
+  - **LLM-polished asymmetry summaries**: add an optional
+    `polish=True` flag that runs the templated string through
+    Gemini Flash for natural phrasing.
+  - **Multi-refresh trend analysis**: once any subject has ≥3
+    refreshes, build trajectory views (mention-rank trajectory,
+    sentiment trajectory, etc.). Goes beyond drift (one delta) to
+    trend (slope across N points).
+- Re-runnable: a new cross-analyzer methodology version creates a
+  new `analysis_run` and new `refresh_analyses` rows; old rows stay
   intact for historical comparison.
 - Don't touch `app/analyzer.py` (Track C's file). Don't touch
   prompt YAMLs or refresh.py.
@@ -649,11 +684,11 @@ direction.
 > session per "Active work coordination" above. Unmarked items are
 > uncommitted backlog.
 
-- The cross-response findings layer — **(Track A: 3 of 4 shipped;
-  narrative_drift blocked)** — asymmetry + top_quotes +
-  share_of_voice are in production. The last deliverable
-  (`narrative_drift`) needs a second refresh of any subject so
-  there's a prior state to diff against.
+- ~~The cross-response findings layer~~ — **(Track A: SHIPPED, all
+  4 deliverables in production)** — asymmetry + top_quotes +
+  share_of_voice + narrative_drift now run end-to-end on
+  `python -m app.cross_analyzer <refresh_run_id>`. Per-refresh cost
+  ~$0.011.
 - Mention detection backfill across the 288 unnamed-layer rows on
   prior analysis_runs — **(Track C — share-of-voice prerequisite)** —
   the `MentionDetectionExtractor v1.0` extractor itself shipped on

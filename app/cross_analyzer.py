@@ -226,7 +226,9 @@ def _summarize_asymmetry(
     # Length
     lr = gaps.get("length_ratio_r_over_l")
     if lr is not None:
-        if lr < 0.7:
+        if lr == 0:
+            pieces.append(f"the {right_slot[0]}/{right_slot[1]} response is empty")
+        elif lr < 0.7:
             pieces.append(f"the {right_slot[0]}/{right_slot[1]} response is {1/lr:.1f}× shorter than the {left_slot[0]}/{left_slot[1]} response")
         elif lr > 1.4:
             pieces.append(f"the {right_slot[0]}/{right_slot[1]} response is {lr:.1f}× longer")
@@ -236,7 +238,9 @@ def _summarize_asymmetry(
     # Citations
     cr = gaps.get("citation_ratio_r_over_l")
     if cr is not None:
-        if cr < 0.6:
+        if cr == 0:
+            pieces.append(f"with no citations on the {right_slot[0]}/{right_slot[1]} side (left has {left['citation_count']})")
+        elif cr < 0.6:
             pieces.append(f"with {1/cr:.1f}× fewer citations")
         elif cr > 1.7:
             pieces.append(f"with {cr:.1f}× more citations")
@@ -276,7 +280,7 @@ class AsymmetryAnalyzer(CrossAnalyzer):
     """
 
     name = "asymmetry"
-    version = "1.0.0"
+    version = "1.0.1"  # patch: handle zero-length / zero-citation summary edges
 
     def analyze(self, ctx: RefreshContext) -> list[CrossAnalysisResult]:
         start = time.perf_counter()
@@ -754,6 +758,451 @@ class ShareOfVoiceAnalyzer(CrossAnalyzer):
         return results
 
 
+# ─── narrative drift analyzer ──────────────────────────────────────────
+#
+# Compares the current refresh's per-response extractions against the most
+# recent prior refresh of the same subject. Surfaces what changed:
+#   - score deltas (sentiment, criticism_severity, directional_lean, certainty)
+#   - theme turnover (added / dropped / stable dominant_themes)
+#   - descriptor turnover (added / dropped / stable canonical descriptor words)
+#   - entity turnover (added / dropped / stable canonical entity names)
+#   - per-model mention-rate trajectory (organic visibility shift)
+# Plus one Gemini Flash call that synthesizes the deltas into a short
+# natural-language summary — the user-facing "what changed?" answer.
+#
+# Returns nothing (empty list) if there's no prior refresh — drift requires
+# a prior state to diff against.
+
+
+@dataclass
+class RefreshAggregate:
+    """Aggregated cross-response signals for a single refresh, used as the
+    unit of comparison for narrative_drift."""
+
+    refresh_run_id: int
+    started_at: Any
+    n_responses: int
+    n_named: int
+    n_unnamed: int
+    # Averaged across responses
+    avg_scores: dict[str, float]            # 4 keys: sentiment, lean, certainty, criticism
+    # Sets of canonical labels
+    descriptor_words: set[str]              # lowercased, deduped
+    entity_names: set[str]                  # canonicalized, deduped
+    dominant_themes: list[str]              # one per response (preserves duplicates)
+    # Per-model mention rate over unnamed-layer responses where mention data exists
+    mention_rates: dict[int, dict[str, Any]]  # {model_id: {slug, rate, mentioned, evaluated}}
+
+
+def _load_refresh_aggregate(refresh_run_id: int) -> RefreshAggregate | None:
+    """Build a RefreshAggregate from the latest per-response analysis_run for
+    this refresh (i.e., methodology_version='analysis-1.0.0' — the
+    `app/analyzer.py` runs that populate `response_extractions`).
+    Cross-analyzer runs (methodology_version='cross-analysis-*') are
+    explicitly excluded — they write to `refresh_analyses`, not
+    `response_extractions`, so picking one as the source would yield zero
+    aggregate rows. Returns None if no per-response analysis_run exists
+    yet."""
+    with psycopg.connect(get_database_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id FROM analysis_runs
+                WHERE refresh_run_id = %s
+                  AND status IN ('completed', 'partial')
+                  AND methodology_version LIKE 'analysis-%%'
+                ORDER BY id DESC LIMIT 1
+                """,
+                (refresh_run_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            ar_id = row[0]
+
+            cur.execute(
+                "SELECT subject_id, started_at FROM refresh_runs WHERE id = %s",
+                (refresh_run_id,),
+            )
+            _, started_at = cur.fetchone()
+
+            cur.execute(
+                """
+                SELECT
+                    p.layer, m.id, m.slug,
+                    re.descriptors, re.entities, re.scores,
+                    re.dominant_theme,
+                    re.subject_mentioned, re.mention_rank
+                FROM response_extractions re
+                JOIN model_responses mr ON mr.id = re.model_response_id
+                JOIN prompts p ON p.id = mr.prompt_id
+                JOIN models m ON m.id = mr.model_id
+                WHERE re.analysis_run_id = %s AND mr.success = TRUE
+                """,
+                (ar_id,),
+            )
+            rows = cur.fetchall()
+
+    descriptor_words: set[str] = set()
+    entity_names: set[str] = set()
+    dominant_themes: list[str] = []
+    score_sums = {"sentiment": 0.0, "directional_lean": 0.0, "certainty": 0.0, "criticism_severity": 0.0}
+    score_n = 0
+    n_named = n_unnamed = 0
+    # mention rates per model — only counts unnamed-layer rows with populated mention data
+    mention_acc: dict[int, dict[str, Any]] = {}
+
+    for layer, model_id, model_slug, descs, ents, scores, dom_theme, subj_mentioned, mention_rank in rows:
+        if layer == "named":
+            n_named += 1
+        else:
+            n_unnamed += 1
+
+        # Descriptors — collect canonical words (lowercased)
+        if descs:
+            arr = descs if isinstance(descs, list) else json.loads(descs)
+            for d in arr:
+                if isinstance(d, dict) and d.get("word"):
+                    descriptor_words.add(d["word"].strip().lower())
+
+        # Entities — collect canonical names
+        if ents:
+            arr = ents if isinstance(ents, list) else json.loads(ents)
+            for e in arr:
+                if isinstance(e, dict) and e.get("name"):
+                    entity_names.add(e["name"].strip())
+
+        # Themes
+        if dom_theme:
+            dominant_themes.append(dom_theme.strip())
+
+        # Scores
+        if scores:
+            s = scores if isinstance(scores, dict) else json.loads(scores)
+            for k in score_sums:
+                v = s.get(k)
+                if v is not None:
+                    try:
+                        score_sums[k] += float(v)
+                    except Exception:
+                        pass
+            score_n += 1
+
+        # Mention rates — only unnamed-layer rows with populated mention column
+        if layer == "unnamed" and subj_mentioned is not None:
+            acc = mention_acc.setdefault(
+                model_id,
+                {"slug": model_slug, "evaluated": 0, "mentioned": 0},
+            )
+            acc["evaluated"] += 1
+            if subj_mentioned:
+                acc["mentioned"] += 1
+
+    avg_scores = {k: (v / score_n) if score_n else 0.0 for k, v in score_sums.items()}
+    mention_rates = {
+        mid: {
+            "slug": acc["slug"],
+            "evaluated": acc["evaluated"],
+            "mentioned": acc["mentioned"],
+            "rate": (acc["mentioned"] / acc["evaluated"]) if acc["evaluated"] else None,
+        }
+        for mid, acc in mention_acc.items()
+    }
+
+    return RefreshAggregate(
+        refresh_run_id=refresh_run_id,
+        started_at=started_at,
+        n_responses=len(rows),
+        n_named=n_named,
+        n_unnamed=n_unnamed,
+        avg_scores=avg_scores,
+        descriptor_words=descriptor_words,
+        entity_names=entity_names,
+        dominant_themes=dominant_themes,
+        mention_rates=mention_rates,
+    )
+
+
+def _find_prior_refresh(current_refresh_id: int, subject_id: int) -> int | None:
+    """The most recent prior refresh_run of the same subject, before the
+    current one. Prefers fully-completed refreshes — partial refreshes have
+    missing responses that would skew aggregate comparisons (e.g., a
+    gemini-only partial refresh would look like "all chatgpt content
+    appeared this run" when compared against a full prior). Falls back to
+    partial only if no completed prior exists.
+
+    Returns None if no prior of either status exists.
+    """
+    with psycopg.connect(get_database_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id FROM refresh_runs
+                WHERE subject_id = %s
+                  AND id < %s
+                  AND status = 'completed'
+                ORDER BY id DESC LIMIT 1
+                """,
+                (subject_id, current_refresh_id),
+            )
+            row = cur.fetchone()
+            if row:
+                return row[0]
+            # Fallback: partial is better than nothing if completed is unavailable
+            cur.execute(
+                """
+                SELECT id FROM refresh_runs
+                WHERE subject_id = %s
+                  AND id < %s
+                  AND status = 'partial'
+                ORDER BY id DESC LIMIT 1
+                """,
+                (subject_id, current_refresh_id),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
+_DRIFT_PROMPT = """\
+You are summarizing how AI-assistant characterization of {subject_name} \
+changed between two refreshes of the same subject.
+
+Refresh interval: {interval_days} day(s) apart.
+
+QUANTITATIVE DELTAS:
+- Avg sentiment shift:          {sent_delta:+.2f}  ({sent_prior:+.2f} → {sent_curr:+.2f})
+- Avg criticism_severity shift: {crit_delta:+.2f}  ({crit_prior:.2f}  → {crit_curr:.2f})
+- Avg directional_lean shift:   {lean_delta:+.2f}  ({lean_prior:+.2f} → {lean_curr:+.2f})
+- Avg certainty shift:          {cert_delta:+.2f}  ({cert_prior:.2f}  → {cert_curr:.2f})
+
+THEMES (dominant_theme labels):
+- Stable (in both):  {themes_stable}
+- Added this run:    {themes_added}
+- Dropped this run:  {themes_dropped}
+
+DESCRIPTORS (adjectives attached to the subject):
+- Stable:  {descs_stable}
+- Added:   {descs_added}
+- Dropped: {descs_dropped}
+
+ENTITIES (other named people/orgs/policies in the responses):
+- Stable:  {ents_stable}
+- Added:   {ents_added}
+- Dropped: {ents_dropped}
+
+MENTION-RATE TRAJECTORY (organic visibility in unnamed-layer responses):
+{mention_rates_block}
+
+Write a 2-3 sentence summary of the drift. Focus on the most meaningful \
+changes — sharp shifts in sentiment or criticism, new or dropped themes, \
+notable entity changes, mention-rate moves. Skip noise (small score \
+deltas, single-response theme variation).
+
+If nothing meaningful changed, say so plainly.
+
+Output JSON: {{"summary": "<2-3 sentences>"}}
+"""
+
+_DRIFT_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "summary": {"type": "STRING"},
+    },
+    "required": ["summary"],
+}
+
+
+def _format_set(s: set[str] | list[str], cap: int = 10) -> str:
+    items = sorted(s) if isinstance(s, set) else list(s)
+    if not items:
+        return "(none)"
+    if len(items) > cap:
+        return ", ".join(items[:cap]) + f", ... (+{len(items) - cap} more)"
+    return ", ".join(items)
+
+
+def _format_mention_block(curr: RefreshAggregate, prior: RefreshAggregate) -> str:
+    lines = []
+    all_mids = set(curr.mention_rates.keys()) | set(prior.mention_rates.keys())
+    for mid in sorted(all_mids):
+        c = curr.mention_rates.get(mid)
+        p = prior.mention_rates.get(mid)
+        slug = (c or p)["slug"]
+        if c and p and c["rate"] is not None and p["rate"] is not None:
+            lines.append(
+                f"- {slug}: {p['rate']:.0%} → {c['rate']:.0%}  "
+                f"({p['mentioned']}/{p['evaluated']} → {c['mentioned']}/{c['evaluated']})"
+            )
+        elif c and c["rate"] is not None:
+            lines.append(f"- {slug}: {c['rate']:.0%} ({c['mentioned']}/{c['evaluated']}) — no prior data")
+        elif p and p["rate"] is not None:
+            lines.append(f"- {slug}: prior {p['rate']:.0%} ({p['mentioned']}/{p['evaluated']}) — no current data")
+    return "\n".join(lines) if lines else "(no mention data on either run)"
+
+
+class NarrativeDriftAnalyzer(CrossAnalyzer):
+    """Compares the current refresh against the most recent prior refresh of
+    the same subject, surfacing what changed in framing, scores, themes,
+    entities, descriptors, and organic visibility.
+
+    One global (model_id=NULL) refresh_analyses row per refresh, when a
+    prior exists. Returns nothing if no prior refresh exists.
+
+    Cost: ~$0.005 per run (one Gemini Flash call for the natural-language
+    summary; everything else is pure-Python aggregation).
+    """
+
+    name = "narrative_drift"
+    version = "1.0.0"
+    model_identifier = "gemini-2.5-flash"
+
+    def __init__(self) -> None:
+        self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    def analyze(self, ctx: RefreshContext) -> list[CrossAnalysisResult]:
+        start = time.perf_counter()
+
+        prior_id = _find_prior_refresh(ctx.refresh_run_id, ctx.subject_id)
+        if prior_id is None:
+            return []  # no prior to diff against — drift not computable
+
+        curr = _load_refresh_aggregate(ctx.refresh_run_id)
+        prior = _load_refresh_aggregate(prior_id)
+        if curr is None or prior is None:
+            return []
+
+        # Quantitative deltas
+        score_deltas = {
+            f"{k}_delta": curr.avg_scores[k] - prior.avg_scores[k]
+            for k in curr.avg_scores
+        }
+
+        # Theme turnover (operate on unique sets within each refresh)
+        curr_themes = set(curr.dominant_themes)
+        prior_themes = set(prior.dominant_themes)
+        themes_stable = sorted(curr_themes & prior_themes)
+        themes_added = sorted(curr_themes - prior_themes)
+        themes_dropped = sorted(prior_themes - curr_themes)
+
+        # Descriptor turnover
+        descs_stable = sorted(curr.descriptor_words & prior.descriptor_words)
+        descs_added = sorted(curr.descriptor_words - prior.descriptor_words)
+        descs_dropped = sorted(prior.descriptor_words - curr.descriptor_words)
+
+        # Entity turnover
+        ents_stable = sorted(curr.entity_names & prior.entity_names)
+        ents_added = sorted(curr.entity_names - prior.entity_names)
+        ents_dropped = sorted(prior.entity_names - curr.entity_names)
+
+        # Mention-rate trajectory
+        mention_rate_block = _format_mention_block(curr, prior)
+
+        # Compute interval in days
+        interval_days = max(
+            (curr.started_at - prior.started_at).total_seconds() / 86400.0,
+            0.0,
+        )
+
+        # LLM summary
+        prompt = _DRIFT_PROMPT.format(
+            subject_name=ctx.subject_name,
+            interval_days=f"{interval_days:.1f}",
+            sent_delta=score_deltas["sentiment_delta"],
+            sent_prior=prior.avg_scores["sentiment"],
+            sent_curr=curr.avg_scores["sentiment"],
+            crit_delta=score_deltas["criticism_severity_delta"],
+            crit_prior=prior.avg_scores["criticism_severity"],
+            crit_curr=curr.avg_scores["criticism_severity"],
+            lean_delta=score_deltas["directional_lean_delta"],
+            lean_prior=prior.avg_scores["directional_lean"],
+            lean_curr=curr.avg_scores["directional_lean"],
+            cert_delta=score_deltas["certainty_delta"],
+            cert_prior=prior.avg_scores["certainty"],
+            cert_curr=curr.avg_scores["certainty"],
+            themes_stable=_format_set(themes_stable),
+            themes_added=_format_set(themes_added),
+            themes_dropped=_format_set(themes_dropped),
+            descs_stable=_format_set(descs_stable, cap=15),
+            descs_added=_format_set(descs_added),
+            descs_dropped=_format_set(descs_dropped),
+            ents_stable=_format_set(ents_stable, cap=15),
+            ents_added=_format_set(ents_added),
+            ents_dropped=_format_set(ents_dropped),
+            mention_rates_block=mention_rate_block,
+        )
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_DRIFT_SCHEMA,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+
+        cost = Decimal(0)
+        summary_text: str | None = None
+        error: str | None = None
+        try:
+            api_response = self._client.models.generate_content(
+                model=self.model_identifier,
+                contents=prompt,
+                config=config,
+            )
+            usage = getattr(api_response, "usage_metadata", None)
+            input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+            output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+            prices = _PRICING[self.model_identifier]
+            cost = (
+                Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+                + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
+            )
+            parsed = json.loads(api_response.text or "{}")
+            if isinstance(parsed, dict):
+                summary_text = parsed.get("summary")
+        except Exception as e:
+            error = f"{type(e).__name__}: {e}"
+
+        findings = {
+            "current_refresh_id": ctx.refresh_run_id,
+            "prior_refresh_id":   prior_id,
+            "interval_days":      round(interval_days, 2),
+            "current_started_at": curr.started_at.isoformat(),
+            "prior_started_at":   prior.started_at.isoformat(),
+            "score_deltas":       {k: round(v, 3) for k, v in score_deltas.items()},
+            "current_avg_scores": {k: round(v, 3) for k, v in curr.avg_scores.items()},
+            "prior_avg_scores":   {k: round(v, 3) for k, v in prior.avg_scores.items()},
+            "themes": {
+                "stable": themes_stable,
+                "added": themes_added,
+                "dropped": themes_dropped,
+            },
+            "descriptors": {
+                "stable": descs_stable,
+                "added": descs_added,
+                "dropped": descs_dropped,
+            },
+            "entities": {
+                "stable": ents_stable,
+                "added": ents_added,
+                "dropped": ents_dropped,
+            },
+            "mention_rates": {
+                "current": curr.mention_rates,
+                "prior":   prior.mention_rates,
+            },
+            "llm_summary": summary_text,
+        }
+
+        return [CrossAnalysisResult(
+            analysis_type="narrative_drift",
+            analysis_key=str(prior_id),  # makes (current_run, prior_run) the key
+            model_id=None,
+            findings=findings,
+            source_response_ids=[],  # cross-refresh; no single set of source rows
+            summary=summary_text,
+            cost_usd=cost,
+            latency_ms=int((time.perf_counter() - start) * 1000),
+            error=error,
+        )]
+
+
 # ─── runner ────────────────────────────────────────────────────────────
 
 
@@ -779,7 +1228,9 @@ def _resolve_source_analysis_run(
     cur.execute(
         """
         SELECT id FROM analysis_runs
-        WHERE refresh_run_id = %s AND status IN ('completed', 'partial')
+        WHERE refresh_run_id = %s
+          AND status IN ('completed', 'partial')
+          AND methodology_version LIKE 'analysis-%%'
         ORDER BY id DESC LIMIT 1
         """,
         (refresh_run_id,),
@@ -787,7 +1238,7 @@ def _resolve_source_analysis_run(
     row = cur.fetchone()
     if not row:
         raise ValueError(
-            f"No completed analysis_run found for refresh_run {refresh_run_id}. "
+            f"No per-response analysis_run found for refresh_run {refresh_run_id}. "
             f"Run `python -m app.analyzer {refresh_run_id}` first."
         )
     return row[0]
@@ -1004,6 +1455,7 @@ def _cli_main() -> None:
         AsymmetryAnalyzer(),
         TopQuotesAnalyzer(),
         ShareOfVoiceAnalyzer(),
+        NarrativeDriftAnalyzer(),
     ]
     print(
         f"Running {len(analyzers)} cross-analyzer(s) "
