@@ -1012,6 +1012,213 @@ class NarrativeThemesExtractor(Extractor):
         )
 
 
+# ─── mention detection extractor ───────────────────────────────────────
+
+_MENTION_PROMPT = """\
+You will be given an AI assistant's response. Your task: determine whether \
+{subject_name} is mentioned, where they appear in the order of named \
+entities, and who else is named.
+
+Context: this response came from asking the AI a question about a topic \
+area WITHOUT naming {subject_name}. We're testing whether the AI \
+organically surfaces {subject_name} when asked about adjacent topics — \
+this is the share-of-voice signal.
+
+For {subject_name} specifically:
+- subject_mentioned: true if {subject_name} (or a clear variant of their \
+name) appears anywhere in the response. Pronoun references alone (e.g., \
+"he said") without a name don't count.
+- mention_rank: positional order — 1 if {subject_name} is the FIRST named \
+entity in the response (or first in a list); 2 if second, etc. Count only \
+distinct named entities (don't repeat for re-mentions of the same entity).
+- mention_strength:
+  - "primary": {subject_name} is the focus of a paragraph or section, \
+discussed at length
+  - "listed": {subject_name} is named in a series/list with others (most common)
+  - "aside": brief mention, parenthetical, one-line
+- mention_excerpt: the exact sentence containing the most informative \
+mention of {subject_name}.
+- disambiguation_confidence: 0.0 to 1.0, how confident you are that the \
+"{subject_name}" mentioned is the SAME {subject_name} we're asking about \
+(some names are shared — context usually disambiguates). 1.0 = certain; \
+0.5 = ambiguous; 0.0 = clearly the wrong person/thing.
+
+If subject_mentioned is false, do NOT include mention_rank, \
+mention_strength, mention_excerpt, or disambiguation_confidence in your \
+response.
+
+For competitors_mentioned (every named entity in the response OTHER than \
+{subject_name}, with positional rank):
+- name: a clean canonical form (e.g., "Donald Trump", not "Trump"; \
+"Heritage Foundation", not "Heritage").
+- rank: positional order in the response — same numbering scheme as \
+mention_rank. If {subject_name} is listed second after Warren, then \
+{subject_name}'s mention_rank=2 and Warren's rank=1.
+- type: one of:
+  - "person": a specific named individual ("Elizabeth Warren", "Joe Biden")
+  - "organization": a specific named org ("Heritage Foundation", "AFL-CIO")
+  - "position": a role/title without a person attached ("Secretary of \
+State", "Speaker of the House", "the Senate Majority Leader")
+  - "other": anything else (locations, policies, events, etc.)
+
+Return an empty competitors_mentioned array if no other entities are named.
+
+RESPONSE TO ANALYZE:
+{response_text}
+"""
+
+_MENTION_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "subject_mentioned":         {"type": "BOOLEAN"},
+        "mention_rank":              {"type": "INTEGER"},
+        "mention_strength":          {
+            "type": "STRING",
+            "enum": ["primary", "listed", "aside"],
+        },
+        "mention_excerpt":           {"type": "STRING"},
+        "disambiguation_confidence": {"type": "NUMBER"},
+        "competitors_mentioned": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "name": {"type": "STRING"},
+                    "rank": {"type": "INTEGER"},
+                    "type": {
+                        "type": "STRING",
+                        "enum": ["person", "organization", "position", "other"],
+                    },
+                },
+                "required": ["name", "rank", "type"],
+            },
+        },
+    },
+    "required": ["subject_mentioned", "competitors_mentioned"],
+}
+
+
+class MentionDetectionExtractor(Extractor):
+    """Detects whether and how the subject is mentioned in unnamed-layer
+    responses. Skips named-layer responses (subject is in the prompt; mention
+    detection is meaningless there).
+
+    Writes:
+      - competitors_mentioned (jsonb): [{name, rank, type}, ...] every other
+        named entity in the response, ordered by appearance
+      - subject_mentioned (bool): primary signal
+      - mention_rank (int | null): positional order if mentioned
+      - mention_strength (text | null): 'primary' | 'listed' | 'aside'
+      - mention_excerpt (text | null): supporting snippet
+      - disambiguation_confidence (numeric | null): 0..1
+
+    For named-layer responses, returns a no-op (output=None, empty
+    extra_columns) so all six columns stay NULL on the row, matching the
+    schema's intent.
+
+    Uses gemini-2.5-flash-lite with structured-object JSON output. Mostly
+    comprehension + ordinal counting + light disambiguation — well within
+    flash-lite's capability per the same reasoning that put EntitiesExtractor
+    on flash-lite.
+    """
+
+    name = "mention_detection"
+    version = "1.0"
+    output_column = "competitors_mentioned"
+    model_identifier = "gemini-2.5-flash-lite"
+
+    def __init__(self) -> None:
+        self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    async def extract(self, response: ResponseToAnalyze) -> ExtractionResult:
+        start = time.perf_counter()
+
+        if response.layer != "unnamed":
+            return ExtractionResult(
+                output=None,
+                error=None,
+                cost_usd=Decimal(0),
+                latency_ms=0,
+            )
+
+        prompt = _MENTION_PROMPT.format(
+            subject_name=response.subject_name,
+            response_text=response.response_text,
+        )
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_MENTION_SCHEMA,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+
+        try:
+            api_response, _ = await retry_async(
+                lambda: self._client.aio.models.generate_content(
+                    model=self.model_identifier,
+                    contents=prompt,
+                    config=config,
+                ),
+                is_retryable=_is_retryable_gemini,
+            )
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=str(e),
+                cost_usd=Decimal(0),
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
+
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+        usage = getattr(api_response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        prices = _PRICING[self.model_identifier]
+        cost = (
+            Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+            + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
+        )
+
+        try:
+            parsed = json.loads(api_response.text) if api_response.text else {}
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=f"JSON parse failed: {e}",
+                cost_usd=cost,
+                latency_ms=elapsed_ms,
+            )
+
+        if not isinstance(parsed, dict):
+            return ExtractionResult(
+                output=None,
+                error=f"Mention output not a dict: {type(parsed).__name__}",
+                cost_usd=cost,
+                latency_ms=elapsed_ms,
+            )
+
+        mentioned = bool(parsed.get("subject_mentioned", False))
+        competitors = parsed.get("competitors_mentioned") or []
+
+        extra: dict[str, Any] = {
+            "subject_mentioned": mentioned,
+            "mention_rank":      parsed.get("mention_rank") if mentioned else None,
+            "mention_strength":  parsed.get("mention_strength") if mentioned else None,
+            "mention_excerpt":   parsed.get("mention_excerpt") if mentioned else None,
+            "disambiguation_confidence": (
+                parsed.get("disambiguation_confidence") if mentioned else None
+            ),
+        }
+
+        return ExtractionResult(
+            output=competitors,
+            error=None,
+            cost_usd=cost,
+            latency_ms=elapsed_ms,
+            extra_columns=extra,
+        )
+
+
 # ─── combined extractor ────────────────────────────────────────────────
 #
 # Issues ONE LLM call per response that returns all four LLM-extractor
@@ -1600,6 +1807,7 @@ async def _cli_main() -> None:
         extractors: list[Extractor] = [
             CombinedExtractor(),
             SourcesExtractor(source_type_ids),
+            MentionDetectionExtractor(),
         ]
     else:
         extractors = [
@@ -1608,6 +1816,7 @@ async def _cli_main() -> None:
             EntitiesExtractor(),
             ScoresExtractor(),
             NarrativeThemesExtractor(),
+            MentionDetectionExtractor(),
         ]
     print(
         f"Running {len(extractors)} extractor(s) "
