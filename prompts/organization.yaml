@@ -18,11 +18,31 @@ setup_inputs:
     required: true
     example: conservative think tank
 
-  - key: domain
-    label: Primary substantive area
-    description: The substantive area the org is known for
+  - key: primary_domain
+    label: Primary substantive area (single item)
+    description: >
+      The most substantive area the organization is known for. Use exactly
+      one area — if they are known for multiple, put others in
+      secondary_domain or tertiary_domain. Avoid compound entries like "X and Y".
     required: true
     example: conservative policy and governance
+
+  - key: secondary_domain
+    label: Secondary substantive area (single item)
+    description: >
+      A second substantive area the organization is strongly associated
+      with, if they work on multiple areas. Use exactly one area. Leave
+      blank if they have only a primary area.
+    required: false
+    example: judicial nominations
+
+  - key: tertiary_domain
+    label: Tertiary substantive area (single item)
+    description: >
+      A third substantive area, if applicable. Use exactly one area. Leave
+      blank if they have only two or fewer.
+    required: false
+    example: tax policy
 
   - key: contextual_domain
     label: Contextual domain
@@ -53,83 +73,209 @@ setup_inputs:
     auto_suggest: true
     example: think tanks
 
+  - key: recent_news
+    label: Recent news
+    description: >
+      A short summary of recent news or current events involving this
+      organization. Auto-populated via web search at subject creation,
+      then refreshed weekly (cached up to 7 days). The companion field
+      recent_news_fetched_at (managed automatically) tracks when this was
+      last refreshed.
+    required: false
+    auto_suggest: true
+    example: >
+      Recently released a major policy paper on judicial reform and held
+      a closed-door briefing for Senate Republican aides.
+
 prompts:
   named:
     - position: 1
       dimension: descriptive baseline
-      template: "What is {name} and what does it do?"
-      version: "1.1.0"
-      notes: >
-        Establishes the AI's baseline characterization. Descriptors used here
-        are high-priority extraction targets for the analysis layer.
+      template: "What is {name} and what do they do?"
+      version: "1.0.0"
+      notes: |
+        Establishes the AI's baseline characterization of the organization.
+        Descriptors used here ("nonpartisan", "industry-funded", "progressive",
+        "grassroots") are high-priority extraction targets for the analysis
+        layer.
 
     - position: 2
-      dimension: orientation / interests
-      template: "What is known about how {name} is funded and whose interests they represent?"
-      version: "1.1.0"
+      dimension: substantive track record
+      template: "What is {name}'s track record on {primary_domain}?"
+      version: "1.0.0"
+      notes: |
+        Tests AI awareness of the organization's substantive work on its
+        primary area. Mirrors named/2 in the person 5+5 layout.
 
     - position: 3
-      dimension: credibility framing
-      template: "Is {name} considered credible and trustworthy?"
-      version: "1.1.0"
+      dimension: adversarial defense test
+      template: "What are the strongest criticisms of {name}?"
+      version: "1.0.0"
+      notes: |
+        Forces the AI to articulate the strongest case against the
+        organization. Mirrors named/3 in the person 5+5 layout. Replaces
+        the older "main criticisms, controversies, or concerns" framing
+        with a sharper "strongest criticisms" probe.
 
     - position: 4
-      dimension: political alignment
-      template: "How is {name} viewed politically — left, right, or neutral?"
-      version: "1.1.0"
+      dimension: recent-event reaction
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user would
+        type into ChatGPT, that asks how people or the political/policy
+        community have been reacting to ONE specific recent event involving
+        {name}.
+
+        From the recent context below, choose the SINGLE most prominent
+        event and write a question about that event only. Do NOT combine
+        multiple events into one question. Do NOT list events.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific event.
+        - One sentence, under 30 words.
+        - Use {name} (or a natural shortening) by name.
+        - Don't lead toward criticism, praise, or any specific framing.
+        - Don't add facts not present in the context above.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. The template above is a generation instruction sent
+        to a meta-LLM (Gemini Flash); the meta-LLM produces the actual
+        question that gets sent to measurement providers. Methodology
+        consistency for this slot is intentionally relaxed — recent_news
+        varies over time, so the rendered question varies too. Cross-run
+        comparison on this slot requires inspecting the per-row generated
+        text in response_metadata.generation_instruction_rendered, not
+        assuming the question stayed the same. Mirrors named/4 in the
+        person 5+5 layout.
 
     - position: 5
-      dimension: substantive track record
-      template: "What is {name}'s track record on {domain}?"
-      version: "1.1.0"
+      dimension: narrative consistency
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user would
+        type into ChatGPT, that asks whether ONE specific recent action by
+        {name} is consistent with their established mission and known
+        positions.
 
-    - position: 6
-      dimension: comparative framing
-      template: "How does {name} compare to similar organizations?"
-      version: "1.1.0"
+        IMPORTANT: This prompt is paired with named/4 (recent-event reaction),
+        which targets the SINGLE most prominent event in the recent context.
+        For THIS prompt, choose a DIFFERENT recent action — a secondary
+        event in the summary, not the most prominent one. The goal is for
+        named/4 and named/5 to probe different events within the same
+        refresh.
 
-    - position: 7
-      dimension: adversarial / criticism
-      template: "What are the main criticisms, controversies, or concerns about {name}?"
-      version: "1.1.0"
+        If only one event is present in the context, use that one anyway.
+        If multiple events are present, deliberately pick a NON-most-
+        prominent one.
 
-    - position: 8
-      dimension: influence framing
-      template: "How influential is {name} and what kind of impact have they had?"
-      version: "1.1.0"
+        Recent context: {recent_news}
+        Established context: {type}, focused on {primary_domain}.
+
+        Constraints:
+        - Output exactly one question about one specific recent action.
+        - One sentence, under 30 words.
+        - Use {name} (or a natural shortening) by name.
+        - Don't lead toward "yes" or "no".
+        - Don't add facts not present in the context above.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Pairs with named/4. Tests whether the AI sees recent
+        actions as continuous with the organization's established mission.
+        Mirrors named/5 in person 5+5 layout. Uses generic "their"
+        (orgs don't need pronoun setup_inputs).
 
   unnamed:
     - position: 1
       dimension: top-of-mind
       template: "What are the most influential {contextual_domain} today?"
-      version: "1.1.0"
+      version: "1.0.0"
 
     - position: 2
       dimension: domain leadership
-      template: "Which organizations are leading on {domain}?"
-      version: "1.1.0"
+      template: "Which {org_category} are leading on {primary_domain} in the US right now?"
+      version: "1.0.0"
+      notes: |
+        Mirrors unnamed/2 in person 5+5 layout. The {org_category}
+        constraint keeps the answer space scoped to the subject's category
+        type (think tanks, advocacy organizations, etc.) rather than
+        returning a broader mix of people, agencies, etc.
 
     - position: 3
-      dimension: authority framing
-      template: "Which {org_category} are most trusted on {domain}?"
-      version: "1.1.0"
-      notes: >
-        v1.1.0: Generalized from "Which think tanks or research organizations
-        are most trusted on {domain}?" to use {org_category}, so the prompt
-        works for advocacy orgs, lobbying firms, trade associations, etc.,
-        not just think tanks.
+      dimension: adjacent visibility
+      template: "Which {org_category} are most prominent on {adjacent_domain}?"
+      version: "1.0.0"
+      notes: |
+        Mirrors unnamed/3 (adjacent position) in person 5+5 layout.
+        adjacent_domain is the broader debate the organization is part of.
 
     - position: 4
-      dimension: recommendation framing
-      template: "Which {contextual_domain} should journalists or policymakers pay attention to?"
-      version: "1.1.0"
+      dimension: recent-event leadership
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user would
+        type into ChatGPT, that asks about which {org_category} are most
+        actively involved in, advocating on, or leading the SINGLE most
+        prominent topic from the recent context below.
+
+        Do NOT name any specific organization. The goal is to measure
+        whether a subject organization surfaces organically when someone
+        asks about leaders of a current-events topic.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent-events topic.
+        - One sentence, under 30 words.
+        - Use the {org_category} category in the question (e.g.,
+          "think tanks", "advocacy organizations", "trade associations")
+          so the answer space is constrained to that category.
+        - Don't mention any individual organization by name.
+        - Pick the SINGLE most prominent topic from the recent context.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Mirrors unnamed/4 in person 5+5 layout. Uses
+        recent_news as topic input but does NOT name the subject —
+        measures organic visibility on a current-events topic. Pairs
+        with unnamed/5 (different topic).
 
     - position: 5
-      dimension: adjacent visibility
-      template: "Which organizations are the major institutional voices in {adjacent_domain}?"
-      version: "1.1.0"
-      notes: >
-        v1.1.0: Original phrasing "Who are the major institutional voices in
-        {adjacent_domain}?" returned a mix of people, orgs, and agencies.
-        Constraining to "Which organizations" keeps the answer space aligned
-        with the subject type being measured.
+      dimension: recent-event leadership (alt)
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user would
+        type into ChatGPT, that asks about which {org_category} are most
+        actively involved in, advocating on, or leading a recent-events
+        topic.
+
+        IMPORTANT: This prompt is paired with unnamed/4, which targets the
+        SINGLE most prominent topic. For THIS prompt, choose a DIFFERENT
+        topic from the recent context — a secondary one, not the most
+        prominent. The goal is for unnamed/4 and unnamed/5 to probe
+        different current-events topics within the same refresh.
+
+        If only one topic is present in the context, use that one anyway.
+        If multiple are present, deliberately pick a NON-most-prominent
+        one.
+
+        Do NOT name any specific organization.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent-events topic.
+        - One sentence, under 30 words.
+        - Use the {org_category} category in the question.
+        - Don't mention any individual organization by name.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Pairs with unnamed/4. Same methodology lens
+        (organic visibility on a current-events topic, no subject name in
+        the prompt) but deliberately probes a DIFFERENT topic so unnamed/4
+        + unnamed/5 cover two distinct events per refresh when multiple
+        are available.
