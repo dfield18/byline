@@ -1,8 +1,9 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-09 (late evening)**,
-> on commit `37bb5ab`. Read this first if you're a fresh Claude Code session
-> picking up work. Update when state shifts meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-09 (late evening,
+> after the v1.2 5+5 compaction across all categories + provider US bias +
+> descriptor extractor backfill)**. Read this first if you're a fresh Claude
+> Code session picking up work. Update when state shifts meaningfully.
 
 ---
 
@@ -23,20 +24,39 @@ in **`docs/prompts-config-format.md`**.
 
 ## Current phase
 
-The **v1.2 methodology pass is complete and refined**. The Person category
-prompt set has been compacted to a **5+5 layout (10 active prompts total)**.
-The foundation layer — prompts → providers → engine → DB — is stable and
-validated across 6 subjects and 14 refresh runs (352 raw responses).
+The **v1.2 methodology pass is complete across all five categories**. Every
+category now uses the same **5+5 layout (10 active prompts: 5 named + 5
+unnamed)**: person, organization, issue, policy, and event. Total active
+prompts: **50** (down from 62). The foundation layer — prompts → providers
+→ engine → DB — is stable and validated across **9 subjects in 4 categories
+(person, organization, issue, policy)** and **17 refresh runs (411 raw
+responses)**. Event has a v1.2 layout in YAML/DB but no Event subject has
+been tested yet.
 
-Next major phase: **the analysis layer**. The **schema is landed** as of
-commit `d311001` (migration 010) — three tables (`analysis_runs`,
-`response_extractions`, `refresh_analyses`) plus a `source_types` lookup
-vocabulary. Methodology version is `analysis-1.0.0`. Schema design lives
-in the migration file's header comment.
+**Provider US bias landed (commit `0c64cab`).** Both providers now hardcode
+a US-focused system instruction on every query so model responses default
+to US context for political/policy subjects. OpenAI also passes
+`web_search.user_location.country=US` to bias search results. Each response
+in `model_responses` since the change carries `us_focused=true` (and
+`search_user_location_country=US` for OpenAI) in `response_metadata` for
+audit. **Methodology caveat:** runs 1–17 measured "AI's default behavior";
+runs 18+ measure "AI given a US bias." Cross-run comparisons spanning the
+change should account for the discontinuity. The `us_focused` flag in
+metadata identifies which rows have it.
 
-Next sub-phase: **implement the extractors** (`app/analyzer.py` or
-similar new module). Suggested first extractor is **descriptors** — see
-"Suggested entry points" below.
+The **analysis layer is bootstrapping**. Schema is in place
+(commit `d311001`, migration 010). The **descriptor extractor is
+built and the back-catalog is fully analyzed** — `app/analyzer.py`
+holds the runner + the first extractor. v1.3 of the descriptor extractor
+(gemini-2.5-flash with verbatim+grammatical-attachment rules) is the
+production version; 411 responses backfilled across 16 analysis_runs
+for ~$0.30, methodology_version `analysis-1.0.0`. 46% of responses
+produce ≥1 descriptor.
+
+Next sub-phase: **add more extractors** to `app/analyzer.py` — natural
+candidates per the spec are sources, entities, scores, narrative_themes.
+Each adds ~50 lines (one Extractor subclass + one prompt + schema) and
+slots into the existing runner. See "Suggested entry points" below.
 
 ---
 
@@ -58,14 +78,24 @@ app/
 │                              Includes Option C (interactive prompt for
 │                              missing required setup_inputs) and weekly
 │                              recent_news cache management.
+├── analyzer.py              # CLI: python -m app.analyzer <refresh_run_id>
+│                              Extractor ABC + DescriptorExtractor (v1.3,
+│                              gemini-2.5-flash, structured JSON output).
+│                              Runner fans out per response, writes
+│                              response_extractions. Add new extractors as
+│                              new Extractor subclasses.
 └── providers/
     ├── base.py              # Provider abstract + ProviderResponse dataclass
-    ├── openai_provider.py   # AsyncOpenAI; Responses API (web_search tool)
-    ├── gemini_provider.py   # google-genai; .aio.* + GoogleSearch tool
+    ├── openai_provider.py   # AsyncOpenAI; Responses API (web_search tool).
+    │                          Hardcoded US system instruction +
+    │                          web_search.user_location.country=US.
+    ├── gemini_provider.py   # google-genai; .aio.* + GoogleSearch tool.
+    │                          Hardcoded US system_instruction (only lever —
+    │                          GoogleSearch has no country parameter).
     ├── _retry.py            # Exponential-backoff retry helper
     └── __init__.py          # PROVIDERS registry: 'openai' | 'google'
 
-prompts/                     # All five category YAMLs; person at v1.2 (5+5)
+prompts/                     # All five category YAMLs at v1.2 5+5 layout
 migrations/                  # 4 applied (001-003 foundation + 010 analysis
                                layer schema)
 sql/                         # Hand-written analysis queries
@@ -112,20 +142,22 @@ docs/                        # Spec docs (read-only inputs)
 
 ---
 
-## Live data state (commit `37bb5ab`)
+## Live data state
 
 | | Count |
 |---|---|
 | categories | 5 |
 | models | 2 (chatgpt = gpt-5-mini, gemini = gemini-2.5-flash) |
-| subjects | 6 (Bernie, McConnell, AOC, Cotton, Vance, Newsom) |
-| refresh_runs | 14 |
-| model_responses | **352** |
-| active prompts (all categories) | 62 |
-| active prompts (person) | **10** |
-| deprecated prompts (all) | 29 |
+| subjects | **9** (6 person + 1 organization + 1 issue + 1 policy) |
+| refresh_runs | **17** |
+| model_responses | **411** (410 successful) |
+| active prompts (all categories) | **50** (10 per category × 5 categories — uniform 5+5) |
+| active prompts (person / organization / issue / policy / event) | 10 / 10 / 10 / 10 / 10 |
+| deprecated prompts (all) | **81** (was 29 — grew with the org/issue/policy/event compactions) |
 | source_types (seeded) | 10 |
-| analysis_runs / response_extractions / refresh_analyses | 0 (schema only) |
+| analysis_runs | **21** (16 v1.3 production + 5 test/iteration) |
+| response_extractions | **~431** (411 backfilled at v1.3 + ~20 test rows) |
+| refresh_analyses | 0 (no cross-response findings yet) |
 
 ### Person category — current 5+5 layout
 
@@ -160,24 +192,56 @@ original prompt rows correctly. **Position numbers are not stable across
 the renumber — analyses spanning the renumber boundary should join by
 `prompt_id` or filter by dimension/template, not by raw position.**
 
-### Other categories
+### Other categories — also at 5+5 v1.2.0
 
-Organization, policy, issue, event each have **13 active prompts at v1.1.0**
-(unchanged from earlier work). They have not been compacted to 5+5 yet —
-that's a future methodology pass if/when those categories get used.
+All four other categories were compacted to 5+5 in this same v1.2 pass
+(commits `33647c5` org, `c7c237f` issue, `4f087aa` policy, `fd4a4a7`
+event). The shapes are parallel to Person but the keepers reflect each
+category's distinctive methodology hook:
+
+| Category | Named (5) | Unnamed (5) |
+|---|---|---|
+| **organization** | descriptive · substantive track record · adversarial · 2× generated (recent-event reaction + narrative consistency) | top-of-mind · domain leadership · adjacent visibility · 2× generated |
+| **issue** | descriptive · perspective mapping · case for position_a · case for position_b · 1 generated (recent-event framing) | top-of-mind · pressing-debate · public-concern · 2× generated |
+| **policy** | descriptive · favorable · adversarial · coalition · 1 generated (recent-event framing) | top-of-mind in domain · problem-driven · effectiveness · 2× generated |
+| **event** | descriptive · responsibility · interpretive · criticism · 1 generated (recent-development reframing) | top-of-mind · domain-shaping · authority · 2× generated |
+
+Generated-prompt counts vary by category: person/organization have 2
+generated in named (4 generated total per refresh); issue/policy/event
+have 1 in named (3 generated total). The named layer's fixed-prompt
+density tracks each category's core methodology hook (favorable/adversarial
+pair for issue/policy; descriptive/interpretive pair for event;
+substantive-track-record for person/org).
+
+All four categories now have a `recent_news` setup_input (auto-fetched
+via web search at subject creation, refreshed weekly) feeding the
+generated slots. Event added `recent_news` in the v1.2 compaction —
+captures resurfacing developments (anniversaries, lawsuits, follow-up
+reporting) that bring past events back into current discourse.
 
 ---
 
 ## Subjects in the DB
 
-| id | name | primary_domain | role_category | last refresh run |
-|---|---|---|---|---|
-| 1 | Bernie Sanders | (still in old `domain`) | senators | 11 |
-| 2 | Mitch McConnell | (still in old `domain`) | senators | 7 |
-| 3 | Alexandria Ocasio-Cortez | (still in old `domain`) | representatives | 8 |
-| 4 | Tom Cotton | (still in old `domain`) | senators | 9 |
-| 5 | J.D. Vance | conservative populism | Trump administration officials | 13 |
-| 6 | Gavin Newsom | progressive state governance | governors | **14** ← latest |
+| id | name | category | last refresh run |
+|---|---|---|---|
+| 1 | Bernie Sanders | person | 11 |
+| 2 | Mitch McConnell | person | 7 |
+| 3 | Alexandria Ocasio-Cortez | person | 8 |
+| 4 | Tom Cotton | person | 9 |
+| 5 | J.D. Vance | person | 13 |
+| 6 | Gavin Newsom | person | 14 |
+| 7 | Heritage Foundation | organization | 15 |
+| 8 | AI regulation in the United States | issue | 16 |
+| 9 | the Inflation Reduction Act | policy | **17** ← latest |
+
+**Subjects 7–9 are pilot tests of non-Person categories.** Each was
+created and refreshed *after* its category's 5+5 v1.2.0 compaction, so
+each refresh produced exactly 10 prompts × 2 models = **20 successful
+responses** (the expected count, not gated). Heritage Foundation tested
+the organization compaction; AI regulation tested issue; IRA tested
+policy. **No Event subject has been tested yet** — the event 5+5 layout
+landed in commit `fd4a4a7` after the other compactions.
 
 **Subjects 1–4** still have the old `domain` field as orphan data. Their
 `primary_domain` is missing. On their next refresh, Option C will prompt
@@ -215,12 +279,20 @@ primary/secondary/tertiary domains.
      ones; in run 13 they picked different (Iran vs. H1B).
 
 4. **Methodology consistency:**
-   - The 6 fixed prompts honor "same prompts over time" strictly.
-   - The 4 generated prompts deliberately relax this — recent_news varies,
-     so rendered questions vary. Cross-run comparison on those slots
-     requires inspecting the per-row generated text in
+   - Fixed prompts honor "same prompts over time" strictly. Generated
+     prompts deliberately relax this — recent_news varies, so rendered
+     questions vary. Cross-run comparison on generated slots requires
+     inspecting per-row generated text in
      `response_metadata.generation_instruction_rendered`, not assuming
      the question stayed the same.
+   - Per-category fixed/generated split: **person, organization** have
+     6 fixed + 4 generated (2 generated in named, 2 in unnamed). **Issue,
+     policy, event** have 7 fixed + 3 generated (1 in named, 2 in
+     unnamed). The denser-fixed-named layouts in issue/policy/event
+     reflect a stronger methodology hook there: a paired
+     favorable/adversarial probe (issue/policy) or descriptive/interpretive
+     pair (event) that can't be relaxed without losing the central
+     finding.
 
 5. **Grounding on by default; reasoning off by default.** OpenAI uses
    `effort="low"` when grounded, `"minimal"` when not. Gemini Flash uses
@@ -286,31 +358,47 @@ Coordination notes:
 ## Suggested entry points for new sessions
 
 ### If you're the prompts-iteration session resuming work:
-- Read this file's "Person category — current 5+5 layout" table.
+- Read this file's per-category 5+5 table under "Other categories — also
+  at 5+5 v1.2.0" plus the Person table for the most detailed per-slot
+  layout.
 - Check `git log --oneline -5` to see what's on main since the last
   commit on this branch.
-- The next natural prompt-iteration concerns: improve engine to skip-on-
-  missing-optional setup_inputs (so prompts referencing optional fields
-  don't fail render); apply 5+5 compaction to other categories; iterate
-  on generated-prompt instruction language.
+- The next natural prompt-iteration concerns:
+  - Test an Event subject end-to-end (the v1.2 layout landed but no Event
+    subject has been refreshed yet).
+  - Plumb a per-subject `geography_or_scope` override so non-US subjects
+    can opt out of the hardcoded US bias (currently every query is
+    US-biased system-wide).
+  - Improve engine to skip-on-missing-optional setup_inputs (so prompts
+    referencing optional fields don't fail render).
+  - Iterate on generated-prompt instruction language if the meta-LLM
+    starts producing weak questions.
 
 ### If you're the analysis-layer session resuming work:
-- Schema is in place — read **`migrations/010_analysis_layer.sql`** for
-  the table shapes and the documented JSONB blob structures.
-- Read **`docs/product-spec.md`** sections on the analysis layer and
-  recommendation engine for the methodology context.
-- Note: **`docs/database-schema.md` does not yet document the analysis
-  tables** — it still lists them under "Future tables." Updating that
-  doc is a good next chore.
-- Inspect a few rows from `model_responses` to ground extractor design
-  in real data:
-  ```bash
-  psql byline -c "SELECT response_text FROM model_responses WHERE refresh_run_id = 13 LIMIT 3;"
-  ```
-- Suggested first extractor: **descriptors** (adjectives attached to the
-  subject) — high-signal extraction target per the spec; cleanly testable
-  on the existing 332 rows. Writes to `response_extractions.descriptors`
-  JSONB. Methodology version `analysis-1.0.0`.
+- Schema is in place — see **`docs/database-schema.md`** "Analysis layer"
+  section (full table definitions, JSONB shapes, design rationale).
+- The first extractor (**descriptors**) is in **`app/analyzer.py`** as
+  `DescriptorExtractor` (v1.3, gemini-2.5-flash with verbatim +
+  grammatical-attachment rules). Production runs for all 17 refreshes
+  exist in `analysis_runs` (rows 5-21). 46% of responses have ≥1
+  descriptor; ~$0.30 total cost.
+- **To add another extractor**: subclass `Extractor` in `app/analyzer.py`,
+  set `name`/`version`/`output_column`, write the prompt + JSON schema,
+  add it to the `extractors` list in `_cli_main()`. Runner handles the
+  rest. ~50 lines per extractor.
+- **Suggested next extractors** in priority order (per the product spec):
+  1. **sources** — cited sources/URLs in the response, classified against
+     `source_types` vocabulary. Highest product priority per spec.
+  2. **entities** — people/orgs/policies named, with role + sentiment.
+  3. **scores** — sentiment / directional_lean / certainty / criticism_severity.
+  4. **narrative_themes** + dominant_theme.
+- **Re-running an extractor** (e.g., bumping descriptors to v1.4) creates
+  a new `analysis_run` with new rows; old rows stay intact for historical
+  comparison. The runner backfills cleanly across all refresh_run_ids.
+- **For cross-response findings** (asymmetry, narrative drift, share of
+  voice, top quotes), they go in `refresh_analyses` and need a different
+  runner shape (operates on a refresh as a whole, not per-response).
+  Not built yet.
 
 ---
 
@@ -324,7 +412,9 @@ Coordination notes:
 - Scheduled refreshes / cron jobs (manual `python -m app.refresh` only).
 - Cross-category subject linking (events ↔ people, etc.).
 - Stress-test prompts (deliberately leading) — deferred to v1.5+.
-- 5+5 compaction for organization/policy/issue/event categories.
+- Per-subject US-bias override (`geography_or_scope` plumbed through the
+  provider call). Currently the US bias is hardcoded at the provider
+  layer and applies to every query system-wide.
 - Engine support for skip-on-missing-optional setup_inputs (currently a
   KeyError causes a partial-status row).
 
