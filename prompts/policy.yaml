@@ -18,11 +18,30 @@ setup_inputs:
     required: true
     example: federal legislation
 
-  - key: domain
-    label: Substantive area
-    description: The substantive area the policy operates in
+  - key: primary_domain
+    label: Primary substantive area (single item)
+    description: >
+      The most substantive area the policy operates in. Use exactly one
+      area — if it spans multiple, put others in secondary_domain or
+      tertiary_domain. Avoid compound entries like "X and Y".
     required: true
-    example: climate, healthcare, and tax policy
+    example: climate policy
+
+  - key: secondary_domain
+    label: Secondary substantive area (single item)
+    description: >
+      A second substantive area the policy intersects with. Use exactly
+      one area. Leave blank if it has only a primary area.
+    required: false
+    example: healthcare policy
+
+  - key: tertiary_domain
+    label: Tertiary substantive area (single item)
+    description: >
+      A third substantive area, if applicable. Use exactly one area.
+      Leave blank if it has only two or fewer.
+    required: false
+    example: tax policy
 
   - key: contextual_domain
     label: Contextual domain
@@ -44,92 +63,178 @@ setup_inputs:
     label: Policy category
     description: >
       The noun that names what kind of policy this is — e.g. "laws",
-      "regulations", "proposed bills", "executive orders". Used by unnamed
-      prompts to constrain the answer space to the subject's category type.
+      "regulations", "proposed bills", "executive orders". Used by
+      generated unnamed prompts to constrain the answer space to the
+      subject's category type.
     required: true
     auto_suggest: true
     example: laws
+
+  - key: recent_news
+    label: Recent news
+    description: >
+      A short summary of recent news or current events involving this
+      policy. Auto-populated via web search at subject creation, then
+      refreshed weekly (cached up to 7 days). The companion field
+      recent_news_fetched_at (managed automatically) tracks when this was
+      last refreshed.
+    required: false
+    auto_suggest: true
+    example: >
+      Recently survived a House repeal vote and the Treasury issued
+      updated guidance on the clean-energy credits.
 
 prompts:
   named:
     - position: 1
       dimension: descriptive baseline
       template: "What is {name} and what does it do?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Establishes the AI's baseline characterization of the policy.
+        High-priority extraction targets here: terminology drift — which
+        name or framing the AI defaults to ("Inflation Reduction Act"
+        vs. "Biden's spending bill" vs. "the climate and healthcare law").
 
     - position: 2
       dimension: favorable case
       template: "What are the arguments in favor of {name}?"
-      version: "1.1.0"
-      notes: >
-        Asking arguments-for and arguments-against in separate prompts is
-        critical — the asymmetry between the two responses is the core finding
+      version: "1.0.0"
+      notes: |
+        Paired with named/3 (adversarial case). Asking arguments-for and
+        arguments-against in SEPARATE prompts (not combined) is core
+        methodology. The asymmetry between the two responses —
+        completeness, depth, source mix, hedging — is the central finding
         for the policy category.
 
     - position: 3
       dimension: adversarial case
       template: "What are the arguments against {name}?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Paired with named/2 (favorable case). See named/2 notes.
 
     - position: 4
-      dimension: effects framing
-      template: "What are the expected or actual effects of {name}?"
-      version: "1.1.0"
-
-    - position: 5
       dimension: coalition framing
       template: "Who supports and who opposes {name}, and why?"
-      version: "1.1.0"
-      notes: >
-        High-priority extraction target — named entities (supporters and
-        opponents) feed the recommendation engine directly.
+      version: "1.0.0"
+      notes: |
+        High-priority extraction target per the methodology spec: named
+        entities (supporters and opponents) feed the recommendation engine
+        directly. The "and why" probes the AI's understanding of the
+        political coalition logic.
 
-    - position: 6
-      dimension: prescriptive framing
-      template: "What should be done with {name} going forward?"
-      version: "1.1.0"
-      notes: >
-        v1.1.0: Combined the spec's two conditional variants (enacted vs
-        proposed) into one neutral prompt that works for both. Per the
-        prompts-config-format guidance, conditional logic is deferred for v1.
+    - position: 5
+      dimension: recent-event framing
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user
+        would type into ChatGPT, that asks how {name} is being shaped or
+        reframed by ONE specific recent event from the recent context
+        below.
 
-    - position: 7
-      dimension: comparative framing
-      template: "How does {name} compare to alternative approaches?"
-      version: "1.1.0"
+        Choose the SINGLE most prominent event and write a question that
+        ties that event to {name}. Do NOT combine multiple events. Do NOT
+        list events.
 
-    - position: 8
-      dimension: adversarial / criticism
-      template: "What are the main criticisms or concerns about {name}?"
-      version: "1.1.0"
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent event.
+        - One sentence, under 30 words.
+        - Reference {name} (the policy) in the question.
+        - Don't lead toward favorable or adversarial framing.
+        - Don't add facts not present in the context above.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Policy's only generated named prompt (vs person/org
+        which have 2). The named layer is denser with fixed prompts because
+        of the favorable/adversarial pair (named/2 + named/3) which is
+        core methodology. Methodology consistency relaxed for this slot —
+        recent_news varies, rendered question varies.
 
   unnamed:
     - position: 1
       dimension: top-of-mind
       template: "What are the most important pieces of {contextual_domain} in recent years?"
-      version: "1.1.0"
+      version: "1.0.0"
 
     - position: 2
       dimension: problem-driven
       template: "What policies have been proposed or enacted to address {problem_addressed}?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Tests visibility from a problem-first lens — does {name} surface
+        when someone asks about policies addressing the problem it targets?
 
     - position: 3
       dimension: effectiveness framing
       template: "Which policies have been most effective at addressing {problem_addressed}?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Distinct from problem-driven (which probes any policy attempting
+        the problem) — this asks specifically about EFFECTIVENESS, which
+        is more evaluatively loaded. {name} surfacing here means the AI
+        considers it among the more successful interventions.
 
     - position: 4
-      dimension: authority framing
-      template: "What do experts identify as the most consequential {contextual_domain}?"
-      version: "1.1.0"
+      dimension: recent-event leadership
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user
+        would type into ChatGPT, that asks about which {policy_category}
+        are most actively shaping or responding to the SINGLE most
+        prominent topic from the recent context below.
+
+        Do NOT name {name} (the specific policy we're tracking). The goal
+        is to measure whether {name} surfaces organically when someone
+        asks about leading {policy_category} on a current-events topic.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent topic.
+        - One sentence, under 30 words.
+        - Use {policy_category} (e.g., "laws", "regulations") to constrain
+          the answer space to that category.
+        - Don't mention {name} specifically.
+        - Pick the SINGLE most prominent topic from the recent context.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Mirrors unnamed/4 in person/org 5+5 layouts.
+        Pairs with unnamed/5 (different topic).
 
     - position: 5
-      dimension: adjacent visibility
-      template: "What are the major {policy_category} shaping {domain} today?"
-      version: "1.1.0"
-      notes: >
-        v1.1.0: Generalized from "What are the major laws shaping {domain}
-        today?" to use {policy_category}. Subjects that are regulations,
-        executive orders, or proposed bills wouldn't have surfaced under the
-        hardcoded "laws" answer space.
+      dimension: recent-event leadership (alt)
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user
+        would type into ChatGPT, that asks about which {policy_category}
+        are most actively shaping or responding to a recent-events topic.
+
+        IMPORTANT: This prompt is paired with unnamed/4, which targets the
+        SINGLE most prominent topic. For THIS prompt, choose a DIFFERENT
+        topic from the recent context — a secondary one, not the most
+        prominent. The goal is for unnamed/4 and unnamed/5 to probe
+        different current-events topics within the same refresh.
+
+        If only one topic is present in the context, use that one anyway.
+        If multiple are present, deliberately pick a NON-most-prominent
+        one.
+
+        Do NOT name {name}.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent topic.
+        - One sentence, under 30 words.
+        - Use {policy_category} to constrain the answer space.
+        - Don't mention {name} specifically.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Pairs with unnamed/4. Different topic for cross-
+        topic visibility coverage when recent_news contains multiple.
