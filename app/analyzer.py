@@ -546,7 +546,32 @@ later analyze co-mention patterns and competitive positioning.
 
 For each entity:
 - name: a clean canonical form of the entity name (e.g., "Donald Trump", \
-not "Trump"; "Inflation Reduction Act", not "the IRA")
+not "Trump"; "Inflation Reduction Act", not "the IRA").
+
+  IMPORTANT — distributive modifiers: when a list shares an implicit \
+head noun, EXPAND the modifier to every item in the list. Each item \
+becomes its own entity with the full canonical name.
+
+    "Departments of Homeland Security, Labor, and Justice"
+      → THREE entities, each canonicalized:
+         - "Department of Homeland Security"
+         - "Department of Labor"
+         - "Department of Justice"
+      NOT: one "Departments of Homeland Security" plus bare "Labor" \
+and "Justice".
+
+    "Senators Sanders, Warren, and Markey"
+      → "Senator Bernie Sanders", "Senator Elizabeth Warren", \
+"Senator Edward Markey".
+
+    "the Trump and Biden administrations"
+      → "Trump administration" and "Biden administration".
+
+  Same principle when context strongly implies a category — \
+"Hegseth at Defense, Bondi at Justice" should yield "Department of \
+Defense" and "Department of Justice", not bare "Defense" and \
+"Justice", since the surrounding sentence is clearly about cabinet \
+departments.
 - type: one of "person" | "organization" | "policy" | "event" | "location"
 - role: a SHORT phrase (under 10 words) describing how this entity relates \
 to {subject_name} in this response. E.g., "appointed Rubio as SecState", \
@@ -602,15 +627,23 @@ class EntitiesExtractor(Extractor):
 
     Captures who/what else is named in discussions of the subject — feeds
     co-mention analysis and competitive positioning. Uses
-    gemini-2.5-flash-lite (v1.1 onward) with structured-output JSON
-    schema; no web grounding. Flash-lite is ~4x cheaper than flash and
-    quality on this task held in side-by-side testing — entities
-    extraction is structured pattern matching, well within flash-lite's
-    capabilities.
+    gemini-2.5-flash-lite with structured-output JSON schema; no web
+    grounding. Flash-lite is ~4x cheaper than flash and quality on this
+    task held in side-by-side testing — entities extraction is structured
+    pattern matching, well within flash-lite's capabilities.
+
+    Version history:
+    - v1.0: gemini-2.5-flash baseline
+    - v1.1: gemini-2.5-flash-lite (cost-tuned)
+    - v1.2: prompt fix for DISTRIBUTIVE MODIFIERS — "Departments of X,
+      Y, Z" was producing one "Departments of X" entity plus bare "Y"
+      and "Z" entities. v1.2 adds an explicit rule + examples telling
+      the model to expand the shared head noun across every item in
+      the list.
     """
 
     name = "entities"
-    version = "1.1"
+    version = "1.2"
     output_column = "entities"
     model_identifier = "gemini-2.5-flash-lite"
 
