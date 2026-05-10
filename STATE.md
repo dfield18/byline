@@ -136,6 +136,29 @@ runner plus five Extractor subclasses, all under methodology_version
   were already noisy by design at that floor (the agreement rate
   reflects label-fragmentation noise, not a genuine quality
   regression), so the cost saving was kept.
+- **mention_detection** v1.0 — gemini-2.5-flash-lite, structured-
+  object JSON output. **Runs on unnamed-layer responses only** (no-op
+  for named-layer, where the subject is in the prompt and detection
+  is meaningless). Populates the six previously-NULL columns on
+  `response_extractions`: `subject_mentioned` (bool),
+  `mention_rank` (int positional order across all named entities in
+  the response — the subject's slot is reserved in the competitor
+  numbering, so a rank-7 subject implies competitors at ranks 1-6
+  and 8+), `mention_strength` (`'primary'` | `'listed'` | `'aside'`),
+  `mention_excerpt`, `disambiguation_confidence` (0..1, primarily
+  guarding against same-name collisions), and `competitors_mentioned`
+  JSONB (every other named entity in the response, each with
+  positional rank and a `type` of `'person'` | `'organization'` |
+  `'position'` | `'other'`). Smoke test on Rubio's run 18 (6
+  unnamed-layer responses, analysis_run 36) validated the design —
+  including a NOT-mentioned response correctly classifying its 5
+  positional competitors as `type='position'` plus 1 `'person'`
+  reference (Henry Kissinger). **Backfill across the existing 288
+  unnamed-layer rows on prior analysis_runs was deferred** — the
+  six columns there remain NULL until either someone backfills or a
+  fresh refresh is run. New refreshes pick up mention detection
+  automatically since the extractor is in the default extractors
+  list. Cost: ~$0.0015 per unnamed-layer response.
 
 Next sub-phase: **add more extractors** to `app/analyzer.py` — natural
 candidates per the spec are sources, entities, scores, narrative_themes.
@@ -163,7 +186,7 @@ app/
 │                              missing required setup_inputs) and weekly
 │                              recent_news cache management.
 ├── analyzer.py              # CLI: python -m app.analyzer <refresh_run_id>
-│                              Extractor ABC + 5 production extractors at
+│                              Extractor ABC + 6 production extractors at
 │                              a mixed gemini-flash / flash-lite stack
 │                              (cost-tuned per side-by-side testing):
 │                                - DescriptorExtractor v1.3 (flash, JSON)
@@ -176,8 +199,14 @@ app/
 │                                  criticism_severity was meaningful.)
 │                                - NarrativeThemesExtractor v1.1
 │                                  (flash-LITE, free-form labels)
-│                              Per 20-response refresh: ~$0.035 (was
-│                              ~$0.106 on all-flash). Runner fans out per
+│                                - MentionDetectionExtractor v1.0
+│                                  (flash-LITE, JSON object; runs on
+│                                  unnamed-layer responses only — no-op
+│                                  for named-layer)
+│                              Per 20-response refresh: ~$0.040 (mention
+│                              detection adds ~$0.005 over the previous
+│                              5-extractor stack at ~$0.035; was ~$0.106
+│                              on all-flash). Runner fans out per
 │                              response, writes response_extractions.
 │                              ExtractionResult supports extra_columns for
 │                              extractors that span multiple columns
@@ -476,7 +505,8 @@ anything else in Track C.
 | **Touches existing cross_analyzer.py?** | NO — Track A's file |
 | **Migration numbers** | 004+ (e.g., `004_subjects_canonical_url.sql` for sources v1.1's `cited_own_site`) |
 | **STATE.md section** | this Track C subsection + edits to "Suggested next" / "Things not yet built" lists as items are picked off |
-| **Pickable items** | Test an Event subject end-to-end · sources dict expansion (drop unknown rate from 27% → <15%) · MentionDetectionExtractor (populates the unpopulated mention_* columns; required input for Track A's share-of-voice) · entities v1.3 retry-on-parse-failure · sources v1.1 with `cited_own_site` (needs subjects.canonical_url migration) |
+| **Shipped** | ✓ `MentionDetectionExtractor v1.0` — `gemini-2.5-flash-lite` extractor populating the six previously-NULL mention columns on unnamed-layer responses (`subject_mentioned`, `mention_rank`, `mention_strength`, `mention_excerpt`, `disambiguation_confidence`, `competitors_mentioned`). Validated on Rubio's run 18; backfill of older refreshes deferred (288 unnamed-layer rows still NULL on prior analysis_runs). |
+| **Remaining pickable items** | Test an Event subject end-to-end · sources dict expansion (drop unknown rate from 27% → <15%) · entities v1.3 retry-on-parse-failure · sources v1.1 with `cited_own_site` (needs `004_subjects_canonical_url.sql` migration) · backfill mention detection across the 288 unnamed-layer rows on existing refreshes (unblocks Track A's share-of-voice) |
 
 ### Cross-track dependency to be aware of
 
@@ -547,14 +577,19 @@ direction.
 
 ### If you're the Track C session resuming work:
 - This section is your context plus the per-extractor version table
-  in "Current phase" above (entities at v1.2, scores at v1.2,
-  narrative_themes at v1.1, descriptors at v1.3, sources at v1.0).
-- **Highest-leverage Track C item:** MentionDetectionExtractor.
-  Populates `response_extractions.subject_mentioned`,
-  `mention_rank`, `mention_strength`, `mention_excerpt`,
-  `disambiguation_confidence` — schema columns from migration 010
-  that have been NULL since the table landed. Track A's
-  share-of-voice analysis needs these populated.
+  in "Current phase" above (descriptors v1.3, sources v1.0,
+  entities v1.2, scores v1.2, narrative_themes v1.1, **mention_detection
+  v1.0**).
+- **What just shipped:** `MentionDetectionExtractor v1.0` — populates
+  the six mention columns on unnamed-layer responses. New refreshes
+  pick it up automatically; **288 unnamed-layer rows on existing
+  analysis_runs still have NULL columns**. Backfilling those is the
+  highest-leverage remaining item because it unblocks Track A's
+  share-of-voice deliverable. Two paths: (a) re-run all extractors
+  via `python -m app.analyzer <id>` per refresh (~$0.04 per refresh,
+  redundant work but simple), or (b) write a mention-only mode that
+  UPDATEs the existing rows on a chosen analysis_run (small additive
+  function in `app/analyzer.py`; cheaper but new code).
 - **Other pickable items, all independent:**
   - Test Event subject end-to-end (no Event subject exists yet —
     pick a real event, e.g., Sam Altman firing or Roe overturning,
@@ -602,9 +637,11 @@ direction.
   deliverables are blocked on prerequisites: `share_of_voice` needs
   Track C's mention detection; `narrative_drift` needs a second
   refresh of any subject so there's a prior to diff against.
-- Mention detection extractor — **(Track C — share-of-voice
-  prerequisite)** — populates the unpopulated `subject_mentioned`,
-  `mention_rank`, `mention_strength`, `mention_excerpt` columns.
+- Mention detection backfill across the 288 unnamed-layer rows on
+  prior analysis_runs — **(Track C — share-of-voice prerequisite)** —
+  the `MentionDetectionExtractor v1.0` extractor itself shipped on
+  `ops-hardening`; only the historical-data backfill is pending.
+  New refreshes pick up mention detection automatically.
 - Event subject end-to-end test — **(Track C)** — v1.2.0 Event YAML
   is in place but no Event subject has been refreshed yet.
 - A web UI / dashboard for visualization.
