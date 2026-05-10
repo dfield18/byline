@@ -17,7 +17,7 @@ import json
 import os
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
@@ -49,12 +49,20 @@ _PER_TOKEN = Decimal(1_000_000)
 
 @dataclass
 class ExtractionResult:
-    """One extractor's output for one model_response."""
+    """One extractor's output for one model_response.
+
+    `output` populates the extractor's primary output_column as JSON.
+    `extra_columns` lets an extractor also write to scalar columns on the
+    same response_extractions row — e.g., the sources extractor writes to
+    `total_sources_cited` (int) and `cited_own_site` (bool) alongside the
+    `sources` JSONB blob. Values in extra_columns are written as-is.
+    """
 
     output: Any                      # The JSONB-shaped result; None on failure
     error: str | None                # None on success
     cost_usd: Decimal
     latency_ms: int
+    extra_columns: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -69,6 +77,7 @@ class ResponseToAnalyze:
     prompt_id: int
     layer: str                       # 'named' | 'unnamed'
     response_text: str
+    response_metadata: dict          # Citations, search_queries, etc.
 
 
 # ─── extractor abstraction ─────────────────────────────────────────────
@@ -254,6 +263,414 @@ class DescriptorExtractor(Extractor):
         )
 
 
+# ─── sources extractor ─────────────────────────────────────────────────
+
+# Curated domain → source_type slug. Suffix-matched: a citation domain
+# matches an entry if it equals the entry or ends with ".<entry>". So
+# "en.wikipedia.org" matches "wikipedia.org", and "matt.substack.com"
+# matches "substack.com". Add new domains here as they're observed.
+_DOMAIN_TO_SOURCE_TYPE: dict[str, str] = {
+    # news — mainstream outlets
+    "nytimes.com": "news",
+    "washingtonpost.com": "news",
+    "wsj.com": "news",
+    "ft.com": "news",
+    "reuters.com": "news",
+    "apnews.com": "news",
+    "ap.org": "news",
+    "bloomberg.com": "news",
+    "cnn.com": "news",
+    "foxnews.com": "news",
+    "msnbc.com": "news",
+    "nbcnews.com": "news",
+    "cbsnews.com": "news",
+    "abcnews.go.com": "news",
+    "npr.org": "news",
+    "pbs.org": "news",
+    "bbc.com": "news",
+    "bbc.co.uk": "news",
+    "theguardian.com": "news",
+    "economist.com": "news",
+    "politico.com": "news",
+    "axios.com": "news",
+    "thehill.com": "news",
+    "rollcall.com": "news",
+    "newyorker.com": "news",
+    "theatlantic.com": "news",
+    "newsweek.com": "news",
+    "time.com": "news",
+    "usatoday.com": "news",
+    "latimes.com": "news",
+    "miamiherald.com": "news",
+    "boston.com": "news",
+    "chicagotribune.com": "news",
+    "huffpost.com": "news",
+    "vox.com": "news",
+    "slate.com": "news",
+    "salon.com": "news",
+    "motherjones.com": "news",
+    "propublica.org": "news",
+    "nationalreview.com": "news",
+    "washingtonexaminer.com": "news",
+    "dailycaller.com": "news",
+    "breitbart.com": "news",
+    "thedailybeast.com": "news",
+    "cnbc.com": "news",
+    "marketwatch.com": "news",
+    "businessinsider.com": "news",
+    "semafor.com": "news",
+    "punchbowl.news": "news",
+    "courthousenews.com": "news",
+    "lawfareblog.com": "news",
+    "lawfaremedia.org": "news",
+    "yahoo.com": "news",
+    "aljazeera.com": "news",
+    "ctpost.com": "news",
+
+    # reference
+    "wikipedia.org": "reference",
+    "britannica.com": "reference",
+    "ballotpedia.org": "reference",
+    "factcheck.org": "reference",
+    "snopes.com": "reference",
+    "politifact.com": "reference",
+    "opensecrets.org": "reference",
+    "votesmart.org": "reference",
+    "govtrack.us": "reference",
+    "fec.gov": "government",  # also gov; gov takes priority via TLD
+
+    # think_tank
+    "brookings.edu": "think_tank",
+    "heritage.org": "think_tank",
+    "americanprogress.org": "think_tank",
+    "aei.org": "think_tank",
+    "cato.org": "think_tank",
+    "hudson.org": "think_tank",
+    "csis.org": "think_tank",
+    "carnegieendowment.org": "think_tank",
+    "rand.org": "think_tank",
+    "urban.org": "think_tank",
+    "epi.org": "think_tank",
+    "manhattan-institute.org": "think_tank",
+    "manhattan.institute": "think_tank",
+    "aspeninstitute.org": "think_tank",
+    "newamerica.org": "think_tank",
+    "thirdway.org": "think_tank",
+    "atlanticcouncil.org": "think_tank",
+    "cnas.org": "think_tank",
+    "cfr.org": "think_tank",
+    "wilsoncenter.org": "think_tank",
+    "piie.com": "think_tank",
+    "fpri.org": "think_tank",
+    "stimson.org": "think_tank",
+    "millercenter.org": "academic",  # UVA Miller Center
+    "atlasinstitute.org": "think_tank",
+
+    # advocacy
+    "aclu.org": "advocacy",
+    "sierraclub.org": "advocacy",
+    "nra.org": "advocacy",
+    "naacp.org": "advocacy",
+    "splcenter.org": "advocacy",
+    "humanrightswatch.org": "advocacy",
+    "amnesty.org": "advocacy",
+    "amnestyusa.org": "advocacy",
+    "plannedparenthood.org": "advocacy",
+    "nrlc.org": "advocacy",
+    "moveon.org": "advocacy",
+    "heritageaction.org": "advocacy",
+    "clubforgrowth.org": "advocacy",
+    "sba-list.org": "advocacy",
+    "judicialwatch.org": "advocacy",
+    "fairus.org": "advocacy",
+    "edf.org": "advocacy",
+    "nrdc.org": "advocacy",
+    "ncai.org": "advocacy",
+    "afl-cio.org": "advocacy",
+    "uschamber.com": "advocacy",
+    "businessroundtable.org": "advocacy",
+
+    # social_media
+    "twitter.com": "social_media",
+    "x.com": "social_media",
+    "youtube.com": "social_media",
+    "youtu.be": "social_media",
+    "facebook.com": "social_media",
+    "fb.com": "social_media",
+    "instagram.com": "social_media",
+    "tiktok.com": "social_media",
+    "linkedin.com": "social_media",
+    "reddit.com": "social_media",
+    "threads.net": "social_media",
+    "bsky.app": "social_media",
+    "podcasts.apple.com": "social_media",
+    "open.spotify.com": "social_media",
+    "quora.com": "social_media",
+
+    # personal — substack/medium subdomains land here via suffix match
+    "substack.com": "personal",
+    "medium.com": "personal",
+}
+
+
+def _classify_domain(domain: str) -> str:
+    """Map a normalized hostname → source_type slug. Returns 'unknown' on miss.
+
+    Order:
+      1. Government TLDs (.gov, .gov.uk, .gc.ca, etc.)
+      2. Academic TLDs (.edu) — except known think tanks
+      3. Exact match in _DOMAIN_TO_SOURCE_TYPE
+      4. Suffix match (e.g., en.wikipedia.org → wikipedia.org)
+      5. 'unknown'
+    """
+    if not domain:
+        return "unknown"
+    d = domain.lower().strip()
+    if d.startswith("www."):
+        d = d[4:]
+
+    # Government — broad TLD heuristic
+    if d.endswith(".gov") or ".gov." in d or d.endswith(".mil"):
+        return "government"
+    if d.endswith(".gov.uk") or d.endswith(".gc.ca") or d.endswith(".gov.au"):
+        return "government"
+
+    # Exact match takes precedence (catches think tanks on .edu like brookings.edu)
+    if d in _DOMAIN_TO_SOURCE_TYPE:
+        return _DOMAIN_TO_SOURCE_TYPE[d]
+
+    # Suffix match — handles subdomains (en.wikipedia.org, matt.substack.com)
+    for known, slug in _DOMAIN_TO_SOURCE_TYPE.items():
+        if d.endswith("." + known):
+            return slug
+
+    # Academic TLD as last-resort heuristic
+    if d.endswith(".edu") or d.endswith(".ac.uk"):
+        return "academic"
+
+    return "unknown"
+
+
+def _domain_from_citation(cite: dict) -> str | None:
+    """Extract a hostname from a citation dict, handling both provider shapes.
+
+    OpenAI citations: {url, title, start_index, end_index}.
+    Gemini citations: {uri, title} where title IS the domain (e.g.,
+    'wikipedia.org') and uri is a Google grounding redirect handle.
+    """
+    from urllib.parse import urlparse
+
+    # Gemini: title is the domain; uri is a redirect we can't decode.
+    title = cite.get("title")
+    if isinstance(title, str) and "." in title and " " not in title.strip():
+        # Looks like a bare domain — Gemini shape.
+        return title.strip().lower()
+
+    # OpenAI: url is the direct publisher URL.
+    url = cite.get("url") or cite.get("uri")
+    if not url:
+        return None
+    try:
+        host = urlparse(url).hostname
+        return host.lower() if host else None
+    except Exception:
+        return None
+
+
+class SourcesExtractor(Extractor):
+    """Classify the citations a model_response cited against the source_types
+    vocabulary. Pure Python — no LLM call. Reads from response_metadata
+    (already populated by the providers at refresh time).
+
+    Writes:
+      - sources (jsonb): [{url, domain, source_type_slug, source_type_id,
+                           classified_via, title}, ...]
+      - total_sources_cited (int): count of citations
+      - cited_own_site (bool): NULL for now — depends on a subject_url
+        field that doesn't exist yet on subjects.
+    """
+
+    name = "sources"
+    version = "1.0"
+    output_column = "sources"
+
+    def __init__(self, source_type_ids: dict[str, int]) -> None:
+        # Pass in pre-fetched slug → id map so we can populate FK-ish ids
+        # without re-querying per-row.
+        self._source_type_ids = source_type_ids
+
+    async def extract(self, response: ResponseToAnalyze) -> ExtractionResult:
+        start = time.perf_counter()
+        meta = response.response_metadata or {}
+        citations = meta.get("citations") or []
+
+        sources_out: list[dict[str, Any]] = []
+        for c in citations:
+            if not isinstance(c, dict):
+                continue
+            domain = _domain_from_citation(c)
+            slug = _classify_domain(domain or "")
+            sources_out.append({
+                "url": c.get("url") or c.get("uri"),
+                "domain": domain,
+                "title": c.get("title"),
+                "source_type_slug": slug,
+                "source_type_id": self._source_type_ids.get(slug),
+                "classified_via": "domain_lookup",
+            })
+
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+        return ExtractionResult(
+            output=sources_out,
+            error=None,
+            cost_usd=Decimal(0),
+            latency_ms=elapsed_ms,
+            extra_columns={
+                "total_sources_cited": len(sources_out),
+                # cited_own_site: deferred — needs subjects.canonical_url
+            },
+        )
+
+
+# ─── entities extractor ────────────────────────────────────────────────
+
+_ENTITIES_PROMPT = """\
+You will be given an AI assistant's response about {subject_name}.
+
+Extract every named entity (specific person, organization, policy, event, \
+or location) that appears in the response — but EXCLUDE {subject_name} \
+themselves and any direct variant of their name. The goal is to capture \
+WHO and WHAT else is named in the discussion of {subject_name}, so we can \
+later analyze co-mention patterns and competitive positioning.
+
+For each entity:
+- name: a clean canonical form of the entity name (e.g., "Donald Trump", \
+not "Trump"; "Inflation Reduction Act", not "the IRA")
+- type: one of "person" | "organization" | "policy" | "event" | "location"
+- role: a SHORT phrase (under 10 words) describing how this entity relates \
+to {subject_name} in this response. E.g., "appointed Rubio as SecState", \
+"foreign rival Rubio criticizes", "policy Rubio co-sponsored"
+- valence: -1.0 to 1.0 — how the entity is portrayed in this response \
+(unflattering treatment → negative; favorable treatment → positive; \
+neutral mention → ~0)
+- excerpt: the exact sentence containing the most informative mention
+
+Examples of what TO extract:
+- "Trump appointed Rubio Secretary of State" → \
+{{name: "Donald Trump", type: "person", role: "appointed Rubio as SecState"}}
+- "Rubio has consistently called for sanctions against Iran" → \
+{{name: "Iran", type: "location", role: "regime Rubio targets with sanctions"}}
+- "He co-sponsored the Uyghur Human Rights Policy Act" → \
+{{name: "Uyghur Human Rights Policy Act", type: "policy", role: \
+"legislation Rubio co-sponsored"}}
+
+Examples of what NOT to extract:
+- {subject_name} themselves (or pronoun references to them)
+- Generic categories without a specific name ("Republicans", "voters", \
+"the administration", "experts", "critics", "his base")
+- Job titles without a person attached ("the Senator", "the President")
+- Vague references ("some lawmakers", "many in the GOP")
+
+Return an empty array if no qualifying entities are present.
+
+RESPONSE TO ANALYZE:
+{response_text}
+"""
+
+_ENTITIES_SCHEMA = {
+    "type": "ARRAY",
+    "items": {
+        "type": "OBJECT",
+        "properties": {
+            "name":     {"type": "STRING"},
+            "type":     {
+                "type": "STRING",
+                "enum": ["person", "organization", "policy", "event", "location"],
+            },
+            "role":     {"type": "STRING"},
+            "valence":  {"type": "NUMBER"},
+            "excerpt":  {"type": "STRING"},
+        },
+        "required": ["name", "type", "role", "valence", "excerpt"],
+    },
+}
+
+
+class EntitiesExtractor(Extractor):
+    """Pulls named entities (other than the subject) mentioned in the response.
+
+    Captures who/what else is named in discussions of the subject — feeds
+    co-mention analysis and competitive positioning. Uses gemini-2.5-flash
+    with structured-output JSON schema. No web grounding.
+    """
+
+    name = "entities"
+    version = "1.0"
+    output_column = "entities"
+    model_identifier = "gemini-2.5-flash"
+
+    def __init__(self) -> None:
+        self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    async def extract(self, response: ResponseToAnalyze) -> ExtractionResult:
+        start = time.perf_counter()
+        prompt = _ENTITIES_PROMPT.format(
+            subject_name=response.subject_name,
+            response_text=response.response_text,
+        )
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_ENTITIES_SCHEMA,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+
+        try:
+            api_response, _ = await retry_async(
+                lambda: self._client.aio.models.generate_content(
+                    model=self.model_identifier,
+                    contents=prompt,
+                    config=config,
+                ),
+                is_retryable=_is_retryable_gemini,
+            )
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=str(e),
+                cost_usd=Decimal(0),
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
+
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+        usage = getattr(api_response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        prices = _PRICING[self.model_identifier]
+        cost = (
+            Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+            + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
+        )
+
+        try:
+            parsed = json.loads(api_response.text) if api_response.text else []
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=f"JSON parse failed: {e}",
+                cost_usd=cost,
+                latency_ms=elapsed_ms,
+            )
+
+        return ExtractionResult(
+            output=parsed,
+            error=None,
+            cost_usd=cost,
+            latency_ms=elapsed_ms,
+        )
+
+
 # ─── runner ────────────────────────────────────────────────────────────
 
 
@@ -275,7 +692,8 @@ def _load_responses(
             sql = """
                 SELECT
                     mr.id, mr.subject_id, s.name, s.setup_inputs,
-                    mr.model_id, mr.prompt_id, p.layer, mr.response_text
+                    mr.model_id, mr.prompt_id, p.layer, mr.response_text,
+                    mr.response_metadata
                 FROM model_responses mr
                 JOIN subjects s ON s.id = mr.subject_id
                 JOIN prompts p ON p.id = mr.prompt_id
@@ -294,11 +712,12 @@ def _load_responses(
             id=r[0],
             subject_id=r[1],
             subject_name=r[2],
-            subject_setup_inputs=r[3],
+            subject_setup_inputs=r[3] or {},
             model_id=r[4],
             prompt_id=r[5],
             layer=r[6],
             response_text=r[7],
+            response_metadata=r[8] or {},
         )
         for r in rows
     ]
@@ -360,6 +779,11 @@ def _insert_extraction_row(
         result = results[extractor.name]
         if result.output is not None:
             columns[extractor.output_column] = Json(result.output)
+        # Extractors that span multiple columns (e.g., sources writes both
+        # the sources JSONB and the total_sources_cited int) populate
+        # extra_columns. Values are passed through as-is.
+        for k, v in result.extra_columns.items():
+            columns[k] = v
         errors[extractor.name] = result.error
         total_cost += result.cost_usd
         total_latency += result.latency_ms
@@ -473,6 +897,14 @@ async def run_analysis(
 # ─── cli ───────────────────────────────────────────────────────────────
 
 
+def _fetch_source_type_ids() -> dict[str, int]:
+    """Load the source_types vocabulary as a slug → id map."""
+    with psycopg.connect(get_database_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT slug, id FROM source_types WHERE active = TRUE")
+            return {slug: sid for slug, sid in cur.fetchall()}
+
+
 async def _cli_main() -> None:
     parser = argparse.ArgumentParser(
         description="Run analysis extractors over a refresh_run."
@@ -490,10 +922,16 @@ async def _cli_main() -> None:
     )
     args = parser.parse_args()
 
-    extractors: list[Extractor] = [DescriptorExtractor()]
+    source_type_ids = _fetch_source_type_ids()
+    extractors: list[Extractor] = [
+        DescriptorExtractor(),
+        SourcesExtractor(source_type_ids),
+        EntitiesExtractor(),
+    ]
     print(
-        f"Running {len(extractors)} extractor(s) over refresh_run "
-        f"{args.refresh_run_id}"
+        f"Running {len(extractors)} extractor(s) "
+        f"({', '.join(f'{e.name}@v{e.version}' for e in extractors)}) "
+        f"over refresh_run {args.refresh_run_id}"
         + (f" (limit {args.limit})" if args.limit else "")
         + "..."
     )

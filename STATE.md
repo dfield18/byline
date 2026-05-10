@@ -44,14 +44,33 @@ runs 18+ measure "AI given a US bias." Cross-run comparisons spanning the
 change should account for the discontinuity. The `us_focused` flag in
 metadata identifies which rows have it.
 
-The **analysis layer is bootstrapping**. Schema is in place
-(commit `d311001`, migration 010). The **descriptor extractor is
-built and the back-catalog is fully analyzed** — `app/analyzer.py`
-holds the runner + the first extractor. v1.3 of the descriptor extractor
-(gemini-2.5-flash with verbatim+grammatical-attachment rules) is the
-production version; 411 responses backfilled across 16 analysis_runs
-for ~$0.30, methodology_version `analysis-1.0.0`. 46% of responses
-produce ≥1 descriptor.
+The **analysis layer has three extractors live**. Schema is in place
+(commit `d311001`, migration 010). `app/analyzer.py` holds the runner
+plus three Extractor subclasses, all under methodology_version
+`analysis-1.0.0`:
+
+- **descriptors** v1.3 — gemini-2.5-flash with verbatim+grammatical-
+  attachment rules. ~46% of responses produce ≥1 descriptor on backfill;
+  the rate is lower (~25%) on responses that characterize via actions
+  rather than directly (e.g., a Gemini response saying "Rubio advocates
+  for an assertive role" produces 0, while ChatGPT saying "Rubio is
+  hawkish" produces hits — a real model-difference finding).
+- **sources** v1.0 — pure-Python (no LLM), maps citation domains against
+  the `source_types` vocabulary using a curated dict + TLD heuristics
+  (`.gov` → government, `.edu` → academic). Reads from
+  `model_responses.response_metadata.citations` (already populated by
+  the providers at refresh time). Writes `sources` JSONB plus
+  `total_sources_cited` int. ~73% of citations classify into a known
+  source_type today; the rest land in `unknown`. Long-tail unknowns can
+  be added to the dict as they appear (`_DOMAIN_TO_SOURCE_TYPE` in
+  `app/analyzer.py`).
+- **entities** v1.0 — gemini-2.5-flash with structured JSON output.
+  Extracts named people / organizations / policies / events / locations
+  *other than the subject*, each with type, role-relative-to-subject,
+  contextual valence, and excerpt. ~10 entities per response on
+  average; valence distribution is bimodal (~57% neutral factual mentions,
+  ~43% non-zero, skewing negative for foreign-policy subjects who name
+  adversarial regimes).
 
 Next sub-phase: **add more extractors** to `app/analyzer.py` — natural
 candidates per the spec are sources, entities, scores, narrative_themes.
@@ -79,11 +98,18 @@ app/
 │                              missing required setup_inputs) and weekly
 │                              recent_news cache management.
 ├── analyzer.py              # CLI: python -m app.analyzer <refresh_run_id>
-│                              Extractor ABC + DescriptorExtractor (v1.3,
-│                              gemini-2.5-flash, structured JSON output).
+│                              Extractor ABC + 3 production extractors:
+│                                - DescriptorExtractor v1.3 (gemini, JSON)
+│                                - SourcesExtractor v1.0 (pure Python,
+│                                  domain dict + TLD heuristics)
+│                                - EntitiesExtractor v1.0 (gemini, JSON)
 │                              Runner fans out per response, writes
-│                              response_extractions. Add new extractors as
-│                              new Extractor subclasses.
+│                              response_extractions. ExtractionResult
+│                              supports extra_columns for extractors that
+│                              span multiple columns (sources writes both
+│                              `sources` JSONB and `total_sources_cited`
+│                              int). Add new extractors as new Extractor
+│                              subclasses.
 └── providers/
     ├── base.py              # Provider abstract + ProviderResponse dataclass
     ├── openai_provider.py   # AsyncOpenAI; Responses API (web_search tool).
@@ -155,8 +181,8 @@ docs/                        # Spec docs (read-only inputs)
 | active prompts (person / organization / issue / policy / event) | 10 / 10 / 10 / 10 / 10 |
 | deprecated prompts (all) | **81** (was 29 — grew with the org/issue/policy/event compactions) |
 | source_types (seeded) | 10 |
-| analysis_runs | **21** (16 v1.3 production + 5 test/iteration) |
-| response_extractions | **~431** (411 backfilled at v1.3 + ~20 test rows) |
+| analysis_runs | **24** (16 v1.3 descriptor backfill + 6 iteration + 2 with full extractor stack on Rubio's run 18) |
+| response_extractions | ~470 (411 v1.3 backfill + 20 v1.3 Rubio + run 24 with 3-extractor stack) |
 | refresh_analyses | 0 (no cross-response findings yet) |
 
 ### Person category — current 5+5 layout
@@ -386,12 +412,16 @@ Coordination notes:
   set `name`/`version`/`output_column`, write the prompt + JSON schema,
   add it to the `extractors` list in `_cli_main()`. Runner handles the
   rest. ~50 lines per extractor.
-- **Suggested next extractors** in priority order (per the product spec):
-  1. **sources** — cited sources/URLs in the response, classified against
-     `source_types` vocabulary. Highest product priority per spec.
-  2. **entities** — people/orgs/policies named, with role + sentiment.
-  3. **scores** — sentiment / directional_lean / certainty / criticism_severity.
-  4. **narrative_themes** + dominant_theme.
+- **Suggested next extractors** (the two highest-priority spec items —
+  descriptors, sources, and entities are now live):
+  1. **scores** — sentiment / directional_lean / certainty /
+     criticism_severity. Has methodology decisions worth aligning before
+     building (what does directional_lean mean for a non-political-issue
+     subject? how does sentiment differ from descriptor valence? should
+     criticism_severity only apply on adversarial-framed prompts?).
+  2. **narrative_themes** + dominant_theme. Has methodology decisions
+     worth aligning before building (subject-specific themes vs.
+     category-generic themes? stable taxonomy or free-form labels?).
 - **Re-running an extractor** (e.g., bumping descriptors to v1.4) creates
   a new `analysis_run` with new rows; old rows stay intact for historical
   comparison. The runner backfills cleanly across all refresh_run_ids.
