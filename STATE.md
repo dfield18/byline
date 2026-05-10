@@ -127,11 +127,15 @@ runner plus five Extractor subclasses, all under methodology_version
     `not_mentioned`), the top 10 competing entities aggregated by
     appearance count + average rank, and a per-response detail list
     for traceability. Skips responses whose mention columns are NULL
-    and surfaces coverage in `responses_evaluated`. First Rubio
-    finding (Gemini, partial backfill — 5 of 10 unnamed responses):
-    80% mention rate, average rank 3.0; Donald Trump always rank 1,
-    Pete Hegseth and Secretary of State as the next-most-cited
-    competitors. Cost: $0.
+    and surfaces coverage in `responses_evaluated`. First full
+    Rubio finding (analysis_run 39, both models populated): a real
+    model-difference signal — **Gemini surfaces Rubio in 80% of its
+    unnamed responses (avg rank 3.0); ChatGPT in only 40% (avg rank
+    2.0)**. Gemini gives broader organic visibility; ChatGPT gives
+    tighter focus when it surfaces him. The competitive landscapes
+    also differ — ChatGPT names a wider cabinet field (Hegseth,
+    Vance, Gabbard, Waltz); Gemini stays anchored to a Trump–Rubio–
+    Hegseth triangle. Cost: $0.
 
   CLI: `python -m app.cross_analyzer <refresh_run_id>
   [--use-analysis-run N]`. Picks the latest completed analysis_run
@@ -492,7 +496,7 @@ The "editor" layer: reads per-response extractions and produces findings
 |---|---|---|
 | asymmetry | ✓ shipped — `AsymmetryAnalyzer v1.0.0`, pure Python, $0 | per-model gap analysis on category prompt pairs |
 | top_quotes | ✓ shipped — `TopQuotesAnalyzer v1.0.0`, Gemini Flash, ~$0.006 | one global row per refresh, 3-5 verbatim quotes with categorization |
-| share_of_voice | ✓ shipped — `ShareOfVoiceAnalyzer v1.0.0`, pure Python, $0 | per-model mention rate / rank / strength / top competitors. Reads Track C's MentionDetectionExtractor v1.0 columns. Skips rows where the columns are NULL and surfaces coverage in `responses_evaluated`. Today's findings are partial (Gemini only) until Track C completes mention-detection backfill on Rubio's chatgpt unnamed responses. |
+| share_of_voice | ✓ shipped — `ShareOfVoiceAnalyzer v1.0.0`, pure Python, $0 | per-model mention rate / rank / strength / top competitors. Reads Track C's MentionDetectionExtractor v1.0 columns. Both-model findings now in production for Rubio (analysis_run 39): Gemini 80% mention rate at avg rank 3.0; ChatGPT 40% at avg rank 2.0. Track C ran the full Rubio mention-detection backfill in analysis_run 38. |
 | narrative_drift | **blocked — needs ≥2 refreshes per subject** | nothing useful to compute today (every subject has a single refresh) |
 
 | | |
