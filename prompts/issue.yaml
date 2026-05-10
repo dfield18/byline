@@ -26,11 +26,44 @@ setup_inputs:
     auto_suggest: true
     example: a light-touch, innovation-first approach to AI
 
-  - key: domain
-    label: Substantive area
-    description: The substantive area the debate sits in
+  - key: position_c
+    label: Position C
+    description: An optional third position in the debate
+    required: false
+    auto_suggest: true
+    example: industry self-regulation backed by voluntary commitments
+
+  - key: position_d
+    label: Position D
+    description: An optional fourth position in the debate
+    required: false
+    auto_suggest: true
+    example: international treaty governance via multilateral bodies
+
+  - key: primary_domain
+    label: Primary substantive area (single item)
+    description: >
+      The most substantive area the debate sits in. Use exactly one area —
+      if it spans multiple, put others in secondary_domain or
+      tertiary_domain. Avoid compound entries like "X and Y".
     required: true
     example: technology policy and AI governance
+
+  - key: secondary_domain
+    label: Secondary substantive area (single item)
+    description: >
+      A second substantive area the debate also intersects with. Use
+      exactly one area. Leave blank if it has only a primary area.
+    required: false
+    example: labor and workforce policy
+
+  - key: tertiary_domain
+    label: Tertiary substantive area (single item)
+    description: >
+      A third substantive area, if applicable. Use exactly one area.
+      Leave blank if it has only two or fewer.
+    required: false
+    example: national security policy
 
   - key: contextual_domain
     label: Contextual domain
@@ -42,81 +75,182 @@ setup_inputs:
   - key: geography_or_scope
     label: Geography or scope qualifier
     description: An optional geographic or scope qualifier for some prompts
-    required: true
+    required: false
+    auto_suggest: true
     example: the United States
+
+  - key: recent_news
+    label: Recent news
+    description: >
+      A short summary of recent news or current events involving this
+      issue. Auto-populated via web search at subject creation, then
+      refreshed weekly (cached up to 7 days). The companion field
+      recent_news_fetched_at (managed automatically) tracks when this was
+      last refreshed.
+    required: false
+    auto_suggest: true
+    example: >
+      Recent congressional testimony from major AI lab CEOs and a draft
+      executive order on frontier model evaluations.
 
 prompts:
   named:
     - position: 1
       dimension: descriptive baseline
       template: "What is the debate over {name} about?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Establishes the AI's baseline characterization of the debate.
+        High-priority extraction targets here: the FRAMES the AI uses
+        ("safety vs. innovation", "regulation vs. self-governance", etc.)
+        and the CENTRALITY of user-defined position_a / position_b.
 
     - position: 2
       dimension: perspective mapping
       template: "What are the main perspectives on {name}?"
-      version: "1.1.0"
-      notes: >
-        High-priority extraction target — whether user-defined positions
-        (position_a and position_b) appear in the AI's perspective mapping.
-        If they don't, the AI's mental model of the debate doesn't match the
-        user's preferred frame.
+      version: "1.0.0"
+      notes: |
+        High-priority extraction target per the methodology spec: whether
+        user-defined positions appear in the AI's perspective mapping.
+        If position_a / position_b don't surface here, the AI's mental
+        model of the debate doesn't match the user's preferred frame —
+        a meaningful finding in itself.
 
     - position: 3
       dimension: position-favorable A
       template: "What is the case for {position_a}?"
-      version: "1.1.0"
-      notes: >
-        Paired with position-favorable B (position 4). Asymmetry between
-        the two responses is the core finding for the issue category.
+      version: "1.0.0"
+      notes: |
+        Paired with named/4 (position-favorable B). The asymmetry between
+        the two responses — completeness, depth, sources cited — is the
+        core finding for the issue category. Asking for-and-against in
+        SEPARATE prompts (not combined) is intentional methodology.
 
     - position: 4
       dimension: position-favorable B
       template: "What is the case for {position_b}?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Paired with named/3 (position-favorable A). See named/3 notes.
 
     - position: 5
-      dimension: authority framing
-      template: "What do experts say about {name}?"
-      version: "1.1.0"
+      dimension: recent-event framing
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user
+        would type into ChatGPT, that asks how the debate over {name} is
+        being characterized or shaped by ONE specific recent event from
+        the recent context below.
 
-    - position: 6
-      dimension: stakes framing
-      template: "What's at stake in the debate over {name}?"
-      version: "1.1.0"
+        Choose the SINGLE most prominent event and write a question that
+        ties that event to the broader {name} debate. Do NOT combine
+        multiple events. Do NOT list events.
 
-    - position: 7
-      dimension: causal framing
-      template: "What's driving the debate over {name} right now?"
-      version: "1.1.0"
+        Recent context: {recent_news}
 
-    - position: 8
-      dimension: prescriptive framing
-      template: "What should be done about {name}?"
-      version: "1.1.0"
+        Constraints:
+        - Output exactly one question about one specific recent event.
+        - One sentence, under 30 words.
+        - Reference {name} (the issue) in the question.
+        - Don't lead toward any specific position.
+        - Don't add facts not present in the context above.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Issue's only generated named prompt (vs person/org
+        which have 2). The named layer is denser with fixed prompts because
+        of the position-favorable pair (named/3 + named/4) which is core
+        methodology. Methodology consistency relaxed for this slot —
+        recent_news varies, rendered question varies. Cross-run comparison
+        requires inspecting per-row generated text in
+        response_metadata.generation_instruction_rendered.
 
   unnamed:
     - position: 1
       dimension: top-of-mind
       template: "What are the most important {contextual_domain} today?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Captures what label the AI uses for the issue (e.g., "AI regulation"
+        vs. "AI safety" vs. "AI governance") — high-priority extraction
+        target per the methodology spec. If the AI doesn't surface {name}
+        in its top {contextual_domain}, that's also a meaningful finding.
 
     - position: 2
       dimension: pressing-debate framing
-      template: "What are the most pressing policy debates in {domain}?"
-      version: "1.1.0"
+      template: "What are the most pressing policy debates in {primary_domain}?"
+      version: "1.0.0"
+      notes: |
+        Tests organic visibility in a slightly different lens — pressing
+        debates rather than influential topics. Different framing might
+        surface different issues.
 
     - position: 3
-      dimension: domain controversy
-      template: "What controversies are dominating {domain} in {geography_or_scope} right now?"
-      version: "1.1.0"
+      dimension: public-concern framing
+      template: "What are people most concerned about when it comes to {primary_domain}?"
+      version: "1.0.0"
+      notes: |
+        Tests visibility through a public-concern lens. The AI's answer
+        here may differ from named/1 (descriptive) because "concern" is
+        evaluatively loaded. Useful for cross-referencing public framing
+        vs. expert framing.
 
     - position: 4
-      dimension: authority framing
-      template: "Which debates in {domain} are most important according to experts?"
-      version: "1.1.0"
+      dimension: recent-event topic
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user
+        would type into ChatGPT, that asks about which debates or topics
+        in {primary_domain} are getting the most attention right now,
+        based on the SINGLE most prominent topic from the recent context
+        below.
+
+        Do NOT mention {name} (the specific issue we're tracking). The
+        goal is to measure whether {name} surfaces organically when
+        someone asks about current debates in the broader domain.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent topic.
+        - One sentence, under 30 words.
+        - Don't mention {name} specifically by name.
+        - Pick the SINGLE most prominent topic from the recent context.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Mirrors unnamed/4 in person/org 5+5 layouts.
+        Pairs with unnamed/5.
 
     - position: 5
-      dimension: public concern framing
-      template: "What are people most concerned about when it comes to {domain}?"
-      version: "1.1.0"
+      dimension: recent-event topic (alt)
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user
+        would type into ChatGPT, that asks about debates or topics in
+        {primary_domain} that are getting attention.
+
+        IMPORTANT: This prompt is paired with unnamed/4, which targets the
+        SINGLE most prominent topic. For THIS prompt, choose a DIFFERENT
+        topic from the recent context — a secondary one, not the most
+        prominent. The goal is for unnamed/4 and unnamed/5 to probe
+        different current-events topics within the same refresh.
+
+        If only one topic is present in the context, use that one anyway.
+        If multiple are present, deliberately pick a NON-most-prominent
+        one.
+
+        Do NOT mention {name} (the specific issue we're tracking).
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent topic.
+        - One sentence, under 30 words.
+        - Don't mention {name} specifically by name.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Pairs with unnamed/4. Same methodology lens but
+        different topic so a single refresh probes two distinct current
+        events when multiple are available.
