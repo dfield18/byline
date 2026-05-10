@@ -745,10 +745,21 @@ class ScoresExtractor(Extractor):
     Methodology note: scores apply to every response uniformly. Read them
     in context downstream — e.g., criticism_severity on a named/criticism
     prompt should be high; if it's low, that itself is a finding.
+
+    Version history:
+    - v1.0: gemini-2.5-flash baseline
+    - v1.1: gemini-2.5-flash-lite (tested, reverted — calibration drift
+      was meaningful: criticism_severity on adversarial-defense slots
+      weakened from 0.90 to 0.70, and certainty drifted by up to -0.50
+      on individual responses).
+    - v1.2: gemini-2.5-flash (current). Functionally identical to v1.0;
+      kept the version monotonic so the analysis_runs audit trail stays
+      coherent. The flash-lite v1.1 analysis_run on Rubio's refresh-18
+      remains in the DB as a reference for the side-by-side.
     """
 
     name = "scores"
-    version = "1.0"
+    version = "1.2"
     output_column = "scores"
     model_identifier = "gemini-2.5-flash"
 
@@ -887,17 +898,21 @@ class NarrativeThemesExtractor(Extractor):
 
     Free-form labels in v1.0 — taxonomy will fragment across runs but we
     don't yet know what themes to pre-define. Once a corpus exists, a
-    v1.1 can constrain the vocabulary via clustering. Cross-run
+    future version can constrain the vocabulary via clustering. Cross-run
     aggregation requires post-hoc clustering for now.
 
     Writes to two columns: narrative_themes (jsonb list of {label, weight,
     excerpt}) and dominant_theme (text).
+
+    v1.1 onward: gemini-2.5-flash-lite (cheaper tier). Free-form theme
+    labeling is already a noisy task; lite produced labels of comparable
+    quality at lower cost in side-by-side testing.
     """
 
     name = "narrative_themes"
-    version = "1.0"
+    version = "1.1"
     output_column = "narrative_themes"
-    model_identifier = "gemini-2.5-flash"
+    model_identifier = "gemini-2.5-flash-lite"
 
     def __init__(self) -> None:
         self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))

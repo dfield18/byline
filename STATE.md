@@ -71,7 +71,7 @@ runner plus five Extractor subclasses, all under methodology_version
   average; valence distribution is bimodal (~57% neutral factual mentions,
   ~43% non-zero, skewing negative for foreign-policy subjects who name
   adversarial regimes).
-- **scores** v1.0 — gemini-2.5-flash, single-object JSON output. Four
+- **scores** v1.2 — gemini-2.5-flash, single-object JSON output. Four
   response-level numeric scores plus a short rationale: `sentiment`
   (-1..+1, toward subject), `directional_lean` (-1..+1, left/right
   framing of the subject — works for any category), `certainty`
@@ -81,19 +81,26 @@ runner plus five Extractor subclasses, all under methodology_version
   `criticism_severity` near 0 on a `named/3` adversarial-defense slot
   is itself a finding). On Rubio's run 18, `criticism_severity` lands
   ~0.90 on `named/3` for both models; ~0 elsewhere — the asymmetry
-  methodology surfacing cleanly in numeric form.
-- **narrative_themes** v1.0 — gemini-2.5-flash. 1-3 free-form theme
-  labels per response (`label`, `weight`, `excerpt`) plus a single
-  `dominant_theme` text column. Free-form is intentional in v1.0
+  methodology surfacing cleanly in numeric form. **v1.1 was a
+  flash-lite trial that was reverted**: calibration drift was
+  meaningful (criticism_severity weakened from 0.90 → 0.70 on the
+  adversarial-defense slots, certainty drifted by up to -0.50 on
+  individual responses). v1.2 is functionally identical to v1.0; kept
+  the version monotonic.
+- **narrative_themes** v1.1 — gemini-2.5-flash-lite. 1-3 free-form
+  theme labels per response (`label`, `weight`, `excerpt`) plus a
+  single `dominant_theme` text column. Free-form is intentional
   because we don't yet know what themes to pre-define; tradeoff is
   that labels won't aggregate cleanly across runs (e.g., "foreign
   policy hawkishness" / "hawkish foreign policy" / "foreign policy
   leadership" surface as distinct labels for what's plausibly one
-  theme). v1.1 with a constrained taxonomy via post-hoc clustering is
-  the natural next iteration. ~2 of 20 responses in Rubio's run 26
-  produced no themes (brief / unfocused responses on `unnamed/3` and
-  `unnamed/5`); the extractor correctly returned empty rather than
-  forcing a theme.
+  theme). A future v1.2 with constrained taxonomy via post-hoc
+  clustering is the natural next iteration. **v1.1 moved this
+  extractor to flash-lite**: the side-by-side showed only 30%
+  dominant_theme verbatim agreement vs. flash, but free-form themes
+  were already noisy by design at that floor (the agreement rate
+  reflects label-fragmentation noise, not a genuine quality
+  regression), so the cost saving was kept.
 
 Next sub-phase: **add more extractors** to `app/analyzer.py` — natural
 candidates per the spec are sources, entities, scores, narrative_themes.
@@ -121,24 +128,30 @@ app/
 │                              missing required setup_inputs) and weekly
 │                              recent_news cache management.
 ├── analyzer.py              # CLI: python -m app.analyzer <refresh_run_id>
-│                              Extractor ABC + 5 production extractors:
-│                                - DescriptorExtractor v1.3 (gemini, JSON)
-│                                - SourcesExtractor v1.0 (pure Python,
-│                                  domain dict + TLD heuristics)
-│                                - EntitiesExtractor v1.0 (gemini, JSON)
-│                                - ScoresExtractor v1.0 (gemini, JSON
-│                                  object — 4 numeric scores + rationale)
-│                                - NarrativeThemesExtractor v1.0 (gemini,
-│                                  free-form labels + dominant_theme)
-│                              Runner fans out per response, writes
-│                              response_extractions. ExtractionResult
-│                              supports extra_columns for extractors that
-│                              span multiple columns (sources writes both
-│                              `sources` JSONB and `total_sources_cited`
-│                              int; narrative_themes writes both
-│                              `narrative_themes` JSONB and `dominant_theme`
-│                              text). Add new extractors as new Extractor
-│                              subclasses.
+│                              Extractor ABC + 5 production extractors at
+│                              a mixed gemini-flash / flash-lite stack
+│                              (cost-tuned per side-by-side testing):
+│                                - DescriptorExtractor v1.3 (flash, JSON)
+│                                - SourcesExtractor v1.0 (pure Python)
+│                                - EntitiesExtractor v1.1 (flash-LITE)
+│                                - ScoresExtractor v1.2 (flash, JSON
+│                                  object — 4 numeric scores + rationale.
+│                                  v1.1 tested flash-lite and was
+│                                  reverted: calibration drift on
+│                                  criticism_severity was meaningful.)
+│                                - NarrativeThemesExtractor v1.1
+│                                  (flash-LITE, free-form labels)
+│                              Per 20-response refresh: ~$0.035 (was
+│                              ~$0.106 on all-flash). Runner fans out per
+│                              response, writes response_extractions.
+│                              ExtractionResult supports extra_columns for
+│                              extractors that span multiple columns
+│                              (sources writes both `sources` JSONB and
+│                              `total_sources_cited` int;
+│                              narrative_themes writes both
+│                              `narrative_themes` JSONB and
+│                              `dominant_theme` text). Add new extractors
+│                              as new Extractor subclasses.
 └── providers/
     ├── base.py              # Provider abstract + ProviderResponse dataclass
     ├── openai_provider.py   # AsyncOpenAI; Responses API (web_search tool).
@@ -210,8 +223,8 @@ docs/                        # Spec docs (read-only inputs)
 | active prompts (person / organization / issue / policy / event) | 10 / 10 / 10 / 10 / 10 |
 | deprecated prompts (all) | **81** (was 29 — grew with the org/issue/policy/event compactions) |
 | source_types (seeded) | 10 |
-| analysis_runs | **26** (16 v1.3 descriptor backfill + 8 iteration + 2 with the full 5-extractor stack on Rubio's run 18) |
-| response_extractions | ~510 (411 v1.3 backfill + repeated Rubio runs at 3- and 5-extractor stacks) |
+| analysis_runs | **30** (16 v1.3 descriptor backfill + iteration + repeated Rubio runs through the 5-extractor stack at various model tiers) |
+| response_extractions | ~570 (411 v1.3 backfill + repeated Rubio runs) |
 | refresh_analyses | 0 (cross-response findings layer not yet built) |
 
 ### Person category — current 5+5 layout
