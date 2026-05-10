@@ -37,6 +37,16 @@ _PRICE_PER_1M_INPUT = Decimal("0.25")
 _PRICE_PER_1M_OUTPUT = Decimal("2.00")
 _PER_TOKEN = Decimal(1_000_000)
 
+# US-focused system instruction. Applied to every query so the model defaults
+# to US context for political/policy subjects without putting "US" in any
+# rendered prompt. To support non-US subjects later, plumb this through a
+# subject-level scope override (geography_or_scope) instead of hardcoding.
+_US_INSTRUCTIONS = (
+    "Focus your responses on the United States context. When citing examples, "
+    "sources, or comparisons, prioritize US-based ones unless the question "
+    "explicitly asks about other countries."
+)
+
 
 class OpenAIProvider(Provider):
     """OpenAI provider using the Responses API.
@@ -64,13 +74,17 @@ class OpenAIProvider(Provider):
         kwargs: dict[str, Any] = {
             "model": self.model_identifier,
             "input": prompt,
+            "instructions": _US_INSTRUCTIONS,
         }
         if "temperature" in params:
             kwargs["temperature"] = params["temperature"]
         if "max_tokens" in params:
             kwargs["max_output_tokens"] = params["max_tokens"]
         if enable_grounding:
-            kwargs["tools"] = [{"type": "web_search"}]
+            kwargs["tools"] = [{
+                "type": "web_search",
+                "user_location": {"type": "approximate", "country": "US"},
+            }]
 
         # Pick the lowest reasoning effort compatible with the request when
         # reasoning_enabled=False, on gpt-5 family. The web_search tool rejects
@@ -94,6 +108,8 @@ class OpenAIProvider(Provider):
                     "grounding_enabled": enable_grounding,
                     "reasoning_enabled": reasoning_enabled,
                     "reasoning_param_applied": reasoning_param_applied,
+                    "us_focused": True,
+                    "search_user_location_country": "US" if enable_grounding else None,
                 },
                 success=False,
                 error=str(e),
@@ -159,6 +175,8 @@ class OpenAIProvider(Provider):
             "reasoning_enabled": reasoning_enabled,
             "reasoning_param_applied": reasoning_param_applied,
             "retry_count": retry_count,
+            "us_focused": True,
+            "search_user_location_country": "US" if enable_grounding else None,
         }
 
         return ProviderResponse(

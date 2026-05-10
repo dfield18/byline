@@ -43,6 +43,15 @@ _PRICE_PER_1M_INPUT = Decimal("0.30")
 _PRICE_PER_1M_OUTPUT = Decimal("2.50")
 _PER_TOKEN = Decimal(1_000_000)
 
+# US-focused system instruction. Applied to every query so the model defaults
+# to US context. Gemini's GoogleSearch grounding doesn't have a clean country
+# parameter, so the system_instruction is the main lever here.
+_US_SYSTEM_INSTRUCTION = (
+    "Focus your responses on the United States context. When citing examples, "
+    "sources, or comparisons, prioritize US-based ones unless the question "
+    "explicitly asks about other countries."
+)
+
 
 class GeminiProvider(Provider):
     def __init__(self, model_identifier: str) -> None:
@@ -59,7 +68,9 @@ class GeminiProvider(Provider):
     ) -> ProviderResponse:
         start = time.perf_counter()
 
-        config_kwargs: dict[str, Any] = {}
+        config_kwargs: dict[str, Any] = {
+            "system_instruction": _US_SYSTEM_INSTRUCTION,
+        }
         if "temperature" in params:
             config_kwargs["temperature"] = params["temperature"]
         if "max_tokens" in params:
@@ -102,6 +113,7 @@ class GeminiProvider(Provider):
                     "grounding_enabled": enable_grounding,
                     "reasoning_enabled": reasoning_enabled,
                     "thinking_config_applied": thinking_config_applied,
+                    "us_focused": True,
                 },
                 success=False,
                 error=str(e),
@@ -158,6 +170,7 @@ class GeminiProvider(Provider):
             "reasoning_enabled": reasoning_enabled,
             "thinking_config_applied": thinking_config_applied,
             "retry_count": retry_count,
+            "us_focused": True,
         }
 
         return ProviderResponse(
