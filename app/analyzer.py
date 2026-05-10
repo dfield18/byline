@@ -979,6 +979,329 @@ class NarrativeThemesExtractor(Extractor):
         )
 
 
+# ─── combined extractor ────────────────────────────────────────────────
+#
+# Issues ONE LLM call per response that returns all four LLM-extractor
+# outputs together (descriptors, entities, scores, narrative_themes).
+# Sources stays separate — it's pure Python and free, so combining it
+# would only add complexity. The motivation is cost: each separate call
+# repeats the response_text in its input, so 4 calls = 4× input tokens
+# for the same content. One combined call keeps quality at flash-level
+# (no flash-lite calibration drift on scores) while collapsing the
+# token bill.
+#
+# The prompt embeds each individual extractor's full instruction text
+# under a TASK heading, then asks for a single JSON object containing
+# all four named outputs. The schema is the union of the four
+# individual schemas.
+
+_COMBINED_PROMPT = """\
+You will be given an AI assistant's response about {subject_name}. \
+Analyze it on FOUR independent dimensions and return ONE JSON object \
+with all four results. Treat each dimension's rules independently — \
+they're separate analytical tasks that happen to share input.
+
+============================================================
+TASK 1: descriptors
+============================================================
+Extract every adjective or descriptive noun phrase that the response \
+uses to characterize {subject_name} as a person — but ONLY if BOTH of \
+the following are true:
+
+(A) VERBATIM: appears word-for-word in the response.
+(B) GRAMMATICALLY ATTACHED TO THE SUBJECT: describing {subject_name} \
+the person, not their policies, record, actions, initiatives, \
+positions, or other people.
+
+Test for each candidate: ask "Is this adjective describing \
+{subject_name} the person, or something else (their policies, record, \
+actions, initiatives, positions, other people)?" If anything else, \
+do NOT extract.
+
+NOT extracted (even though verbatim):
+- "He has advanced progressive policies" → "progressive" describes \
+the policies, not him
+- "Pragmatic governance is his hallmark" → "pragmatic" describes the \
+governance
+- "Critics call his moderate positions disappointing" → "moderate" \
+describes the positions
+- "Many progressives criticize him" → "progressive" describes the \
+critics
+- Job titles or factual roles ("Senator", "businessman") on their own
+- Descriptors attached to OTHER people, not {subject_name}
+
+DOES count:
+- "Sanders is a progressive" → extract "progressive"
+- "Critics call him a firebrand" → extract "firebrand"
+- "He has been described as polarizing" → extract "polarizing"
+
+For each qualifying descriptor return:
+- word, valence (-1..1), confidence (0..1), excerpt
+
+Empty array is correct and expected for many responses (e.g., \
+responses describing actions or reactions rather than the person).
+
+============================================================
+TASK 2: entities
+============================================================
+Extract every named entity (specific person, organization, policy, \
+event, or location) — but EXCLUDE {subject_name} themselves and any \
+direct variant of their name.
+
+For each entity:
+- name (canonical form: "Donald Trump", not "Trump")
+- type: one of "person" | "organization" | "policy" | "event" | "location"
+- role: short phrase (≤10 words) — how this entity relates to \
+{subject_name} in this response
+- valence (-1..1): how the entity is portrayed in this response
+- excerpt: the sentence containing the most informative mention
+
+Do NOT extract:
+- {subject_name} themselves
+- Generic categories ("Republicans", "voters", "the administration")
+- Job titles without a specific named entity
+
+Empty array is fine if no qualifying entities exist.
+
+============================================================
+TASK 3: scores
+============================================================
+Score the response on four dimensions. Use the full ranges. If a \
+dimension genuinely doesn't apply (e.g., subject barely mentioned), \
+score close to 0.
+
+- sentiment (-1..1): overall sentiment toward {subject_name}.
+- directional_lean (-1..1): how the response FRAMES {subject_name} on \
+a left/right political axis. About the FRAMING, not the subject's \
+politics. Neutral factual writeup of a conservative subject ≈ 0.
+- certainty (0..1): low when hedged ("some say", "critics argue"), \
+high when stated as established fact.
+- criticism_severity (0..1): harshness of criticism. 0 = none, \
+1 = scathing. On non-adversarial prompts this should usually be near 0; \
+that is signal.
+
+Plus a `rationale` field (≤30 words) summarizing why these landed \
+where they did.
+
+============================================================
+TASK 4: narrative_themes
+============================================================
+Identify 1-3 dominant NARRATIVE THEMES the response uses to frame \
+{subject_name}. A theme is a recurring frame or angle, not just any \
+topic mentioned. Themes are what makes two responses about the same \
+subject feel DIFFERENT.
+
+Good theme examples (free-form labels, 2-5 words):
+"presidential ambition", "foreign policy hawkishness", "MAGA loyalty \
+test", "ideological inconsistency", "Cuban-American immigrant story", \
+"scandal management", "generational change".
+
+For each theme: label, weight (0..1, prominence — low values fine for \
+secondary themes), excerpt (representative sentence/phrase).
+
+Then pick a `dominant_theme` (string) — the single most prominent \
+theme. Its label must EXACTLY match one of the labels in the themes \
+array.
+
+Avoid:
+- Themes that just restate the subject's job ("Senator", "is a senator")
+- Bare topics without a frame ("foreign policy", "Cuba")
+- More than 3 themes — pick the strongest 1-3
+
+============================================================
+OUTPUT SHAPE
+============================================================
+Return one JSON object:
+
+{{
+  "descriptors": [...],
+  "entities": [...],
+  "scores": {{ ... }},
+  "narrative_themes": {{
+    "themes": [...],
+    "dominant_theme": "..."
+  }}
+}}
+
+============================================================
+RESPONSE TO ANALYZE
+============================================================
+{response_text}
+"""
+
+
+_COMBINED_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "descriptors": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "word":       {"type": "STRING"},
+                    "valence":    {"type": "NUMBER"},
+                    "confidence": {"type": "NUMBER"},
+                    "excerpt":    {"type": "STRING"},
+                },
+                "required": ["word", "valence", "confidence", "excerpt"],
+            },
+        },
+        "entities": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "name":     {"type": "STRING"},
+                    "type":     {
+                        "type": "STRING",
+                        "enum": ["person", "organization", "policy", "event", "location"],
+                    },
+                    "role":     {"type": "STRING"},
+                    "valence":  {"type": "NUMBER"},
+                    "excerpt":  {"type": "STRING"},
+                },
+                "required": ["name", "type", "role", "valence", "excerpt"],
+            },
+        },
+        "scores": {
+            "type": "OBJECT",
+            "properties": {
+                "sentiment":          {"type": "NUMBER"},
+                "directional_lean":   {"type": "NUMBER"},
+                "certainty":          {"type": "NUMBER"},
+                "criticism_severity": {"type": "NUMBER"},
+                "rationale":          {"type": "STRING"},
+            },
+            "required": [
+                "sentiment", "directional_lean", "certainty",
+                "criticism_severity", "rationale",
+            ],
+        },
+        "narrative_themes": {
+            "type": "OBJECT",
+            "properties": {
+                "themes": {
+                    "type": "ARRAY",
+                    "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "label":   {"type": "STRING"},
+                            "weight":  {"type": "NUMBER"},
+                            "excerpt": {"type": "STRING"},
+                        },
+                        "required": ["label", "weight", "excerpt"],
+                    },
+                },
+                "dominant_theme": {"type": "STRING"},
+            },
+            "required": ["themes", "dominant_theme"],
+        },
+    },
+    "required": ["descriptors", "entities", "scores", "narrative_themes"],
+}
+
+
+class CombinedExtractor(Extractor):
+    """One LLM call per response producing all four LLM-extractor outputs.
+
+    Replaces DescriptorExtractor + EntitiesExtractor + ScoresExtractor +
+    NarrativeThemesExtractor when registered. Uses gemini-2.5-flash
+    (precision-preserving — flash-lite testing showed real calibration
+    drift on scores; the unified prompt context is large enough that
+    flash's output budget is the right tier).
+
+    Writes the descriptors list to its primary output_column, then uses
+    extra_columns to populate `entities`, `scores`, `narrative_themes`,
+    and `dominant_theme` on the same response_extractions row.
+    """
+
+    name = "combined"
+    version = "1.0"
+    output_column = "descriptors"  # primary; the rest land via extra_columns
+    model_identifier = "gemini-2.5-flash"
+
+    def __init__(self) -> None:
+        self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    async def extract(self, response: ResponseToAnalyze) -> ExtractionResult:
+        start = time.perf_counter()
+        prompt = _COMBINED_PROMPT.format(
+            subject_name=response.subject_name,
+            response_text=response.response_text,
+        )
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_COMBINED_SCHEMA,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+
+        try:
+            api_response, _ = await retry_async(
+                lambda: self._client.aio.models.generate_content(
+                    model=self.model_identifier,
+                    contents=prompt,
+                    config=config,
+                ),
+                is_retryable=_is_retryable_gemini,
+            )
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=str(e),
+                cost_usd=Decimal(0),
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
+
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+        usage = getattr(api_response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        prices = _PRICING[self.model_identifier]
+        cost = (
+            Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+            + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
+        )
+
+        try:
+            parsed = json.loads(api_response.text) if api_response.text else {}
+        except Exception as e:
+            return ExtractionResult(
+                output=None,
+                error=f"JSON parse failed: {e}",
+                cost_usd=cost,
+                latency_ms=elapsed_ms,
+            )
+
+        if not isinstance(parsed, dict):
+            return ExtractionResult(
+                output=None,
+                error=f"Combined output not a dict: {type(parsed).__name__}",
+                cost_usd=cost,
+                latency_ms=elapsed_ms,
+            )
+
+        descriptors = parsed.get("descriptors") or []
+        entities = parsed.get("entities") or []
+        scores = parsed.get("scores")
+        themes_obj = parsed.get("narrative_themes") or {}
+        themes_list = themes_obj.get("themes") if isinstance(themes_obj, dict) else None
+        dominant = themes_obj.get("dominant_theme") if isinstance(themes_obj, dict) else None
+
+        return ExtractionResult(
+            output=descriptors,
+            error=None,
+            cost_usd=cost,
+            latency_ms=elapsed_ms,
+            extra_columns={
+                "entities": entities,
+                "scores": scores,
+                "narrative_themes": themes_list,
+                "dominant_theme": dominant,
+            },
+        )
+
+
 # ─── runner ────────────────────────────────────────────────────────────
 
 
@@ -1089,9 +1412,10 @@ def _insert_extraction_row(
             columns[extractor.output_column] = Json(result.output)
         # Extractors that span multiple columns (e.g., sources writes both
         # the sources JSONB and the total_sources_cited int) populate
-        # extra_columns. Values are passed through as-is.
+        # extra_columns. Dict/list values are auto-wrapped for JSONB
+        # columns; scalars pass through unchanged.
         for k, v in result.extra_columns.items():
-            columns[k] = v
+            columns[k] = Json(v) if isinstance(v, (dict, list)) else v
         errors[extractor.name] = result.error
         total_cost += result.cost_usd
         total_latency += result.latency_ms
@@ -1228,16 +1552,30 @@ async def _cli_main() -> None:
         "--max-concurrency", type=int, default=DEFAULT_MAX_CONCURRENCY,
         help=f"Max concurrent extractor calls (default: {DEFAULT_MAX_CONCURRENCY}).",
     )
+    parser.add_argument(
+        "--combined", action="store_true",
+        help=(
+            "Use the combined extractor (one LLM call per response producing "
+            "all four LLM-extractor outputs). Cheaper but consolidates 4 "
+            "tasks into a single context. Sources still runs separately."
+        ),
+    )
     args = parser.parse_args()
 
     source_type_ids = _fetch_source_type_ids()
-    extractors: list[Extractor] = [
-        DescriptorExtractor(),
-        SourcesExtractor(source_type_ids),
-        EntitiesExtractor(),
-        ScoresExtractor(),
-        NarrativeThemesExtractor(),
-    ]
+    if args.combined:
+        extractors: list[Extractor] = [
+            CombinedExtractor(),
+            SourcesExtractor(source_type_ids),
+        ]
+    else:
+        extractors = [
+            DescriptorExtractor(),
+            SourcesExtractor(source_type_ids),
+            EntitiesExtractor(),
+            ScoresExtractor(),
+            NarrativeThemesExtractor(),
+        ]
     print(
         f"Running {len(extractors)} extractor(s) "
         f"({', '.join(f'{e.name}@v{e.version}' for e in extractors)}) "

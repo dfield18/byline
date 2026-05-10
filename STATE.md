@@ -454,6 +454,18 @@ Coordination notes:
   set `name`/`version`/`output_column`, write the prompt + JSON schema,
   add it to the `extractors` list in `_cli_main()`. Runner handles the
   rest. ~50 lines per extractor.
+- **A `CombinedExtractor` exists** (one LLM call per response producing
+  all four LLM-extractor outputs) but is NOT the default. Reachable via
+  `python -m app.analyzer <run_id> --combined`. Side-by-side against
+  the mixed-model 4-call setup on Rubio's run 18 showed combined-on-
+  flash was **2.3× MORE expensive** ($0.082 vs $0.035) AND mildly
+  weakened criticism_severity on adversarial-defense slots (0.90 →
+  0.80) — the prompt-prefix dedup didn't outweigh the cost of putting
+  entities + themes back on flash from flash-lite. Kept in code as
+  `--combined` for cases where consolidating API surface matters more
+  than cost (e.g., simpler error model, working around per-call rate
+  limits) — but the default registers the four individual extractors.
+
 - **Per-response extractor coverage is complete.** All five spec items
   (descriptors, sources, entities, scores, narrative_themes) ship in
   `app/analyzer.py`. The natural next layer of work is **cross-response
