@@ -1,8 +1,8 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-09**, on commit
-> `8206b7f`. Read this first if you're a fresh Claude Code session picking
-> up work. Update when state shifts meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-09 (evening)**, on
+> commit `5498995`. Read this first if you're a fresh Claude Code session
+> picking up work. Update when state shifts meaningfully.
 
 ---
 
@@ -23,16 +23,16 @@ in **`docs/prompts-config-format.md`**.
 
 ## Current phase
 
-The **v1.2 methodology pass is complete and committed**. The foundation
-layer — prompts → providers → engine → DB — is stable and validated across
-5 subjects and 12 refresh runs. There are 312 raw `model_responses` rows
-in the local Postgres DB.
+The **v1.2 methodology pass is complete and refined**. The Person category
+prompt set has been compacted to a **5+5 layout (10 active prompts total)**.
+The foundation layer — prompts → providers → engine → DB — is stable and
+validated across 5 subjects and 13 refresh runs (332 raw responses).
 
 Next major phase: **the analysis layer**. Extract structured findings from
 raw responses (descriptors, sources cited, sentiment/lean, named entities,
 framing devices, etc.) and store them in new tables for downstream
-visualization. This is what the parallel Claude Code session is starting
-on.
+visualization. The parallel Claude Code session is on its own branch
+(`analysis-layer`) working on this.
 
 ---
 
@@ -44,12 +44,16 @@ on.
 app/
 ├── db.py                    # Sync psycopg connection helpers (DATABASE_URL)
 ├── seed.py                  # CLI: seed categories+models or load a YAML
-├── prompt_loader.py         # YAML validate + upsert; handles version bumps
-│                              and `active: false` deactivations
-├── prompt_generator.py      # Meta-LLM for type=generated prompts
+├── prompt_loader.py         # YAML validate + upsert; supports type=generated,
+│                              active:false deactivation, gap-allowed positions
+├── prompt_generator.py      # Meta-LLM (Gemini Flash) for type=generated prompts
 ├── query_engine.py          # async run_refresh — concurrent fan-out via
-│                              psycopg AsyncConnectionPool + Semaphore
+│                              psycopg AsyncConnectionPool + Semaphore.
+│                              Pre-renders generated prompts before fan-out.
 ├── refresh.py               # CLI: python -m app.refresh "Name"
+│                              Includes Option C (interactive prompt for
+│                              missing required setup_inputs) and weekly
+│                              recent_news cache management.
 └── providers/
     ├── base.py              # Provider abstract + ProviderResponse dataclass
     ├── openai_provider.py   # AsyncOpenAI; Responses API (web_search tool)
@@ -57,190 +61,244 @@ app/
     ├── _retry.py            # Exponential-backoff retry helper
     └── __init__.py          # PROVIDERS registry: 'openai' | 'google'
 
-prompts/                     # All five category YAMLs (person at v1.2)
-migrations/                  # 003 migrations applied (initial, grounding, type)
+prompts/                     # All five category YAMLs; person at v1.2 (5+5)
+migrations/                  # 003 applied (initial schema + grounding flag +
+                               prompt type column)
 sql/                         # Hand-written analysis queries
-scripts/                     # One-off diagnostics (test_providers, test_freshness)
+scripts/                     # Diagnostics (test_providers, test_freshness)
 findings/                    # gitignored — local-only response dumps
 docs/                        # Spec docs (read-only inputs)
 ```
 
 ### Conceptual layers
 
-1. **Prompts are data, not code.** Authored in `prompts/*.yaml`,
-   seeded into the `prompts` DB table, queried at refresh time. Templates
-   use `{placeholder}` substitution from a subject's `setup_inputs` JSONB.
+1. **Prompts are data, not code.** Authored in `prompts/*.yaml`, seeded
+   into the `prompts` DB table, queried at refresh time. Templates use
+   `{placeholder}` substitution from a subject's `setup_inputs` JSONB.
 
-2. **Two prompt types** (column `prompts.type`):
+2. **Two prompt types** (`prompts.type` column):
    - **`fixed`** — template is a literal string with placeholders.
    - **`generated`** — template is a meta-LLM generation instruction; at
-     refresh time, Gemini Flash produces a natural question from it.
+     refresh time, Gemini Flash produces a natural question from it. Used
+     for recent-news prompts where consistency-over-time is intentionally
+     relaxed.
 
 3. **Categories are data.** 5 categories: person, organization, policy,
-   issue, event. Adding a 6th later is row inserts + new YAML, no code
-   changes.
+   issue, event. Adding a 6th later is row inserts + new YAML.
 
-4. **Models are configuration.** Currently 2 active rows in `models`:
-   `chatgpt` (gpt-5-mini), `gemini` (gemini-2.5-flash). Brand-level slugs
-   so the version-specific identifier can change without renaming the
-   row.
+4. **Models are configuration.** 2 active rows in `models`:
+   `chatgpt` (gpt-5-mini), `gemini` (gemini-2.5-flash). Brand-level slugs.
 
 5. **Provenance is captured per response.** Every `model_responses` row
-   stores: rendered prompt, prompt_version, model_identifier (the actual
-   API string), full response_metadata as JSONB. Historical responses
-   resolve correctly to the prompt version they used, even after edits.
+   stores: rendered prompt, prompt_version, model_identifier, full
+   `response_metadata` as JSONB. Historical responses resolve correctly
+   to the prompt version they used, even after edits.
 
 ---
 
-## Live data state (commit `8206b7f`)
+## Live data state (commit `5498995`)
 
 | | Count |
 |---|---|
 | categories | 5 |
-| models | 2 (chatgpt, gemini) |
+| models | 2 (chatgpt = gpt-5-mini, gemini = gemini-2.5-flash) |
 | subjects | 5 (Bernie, McConnell, AOC, Cotton, Vance) |
-| refresh_runs | 12 |
-| model_responses | **312** |
-| active prompts | 64 (across all 5 categories) |
-| deprecated prompts | 14 (history of version bumps + 3 active:false) |
+| refresh_runs | 13 |
+| model_responses | **332** |
+| active prompts (all categories) | 62 |
+| active prompts (person) | **10** |
+| deprecated prompts (all) | 29 |
 
-Person category active prompt slots (the most evolved category):
-- **named/1, /2, /4, /7, /8** — `fixed` (the original methodology dimensions
-  minus the three retired)
-- **named/9, /10** — `generated` (recent-event reaction, narrative
-  consistency)
-- **unnamed/1–5** — `fixed`
-- **named/3, /5, /6 are deactivated** (active:false in YAML; rows preserved
-  in DB for historical responses)
+### Person category — current 5+5 layout
 
-12 active prompts × 2 models = **24 queries per Person refresh**.
+| Slot | Dimension | Type | Variables used |
+|---|---|---|---|
+| named/1 | descriptive baseline | fixed | `{name}`, `{pronoun_be}`, `{pronoun_subject}` |
+| named/2 | substantive record | fixed | `{name}`, `{primary_domain}` |
+| named/3 | adversarial defense test | fixed | `{name}` (was named/7) |
+| named/4 | recent-event reaction | **generated** | `{name}`, `{recent_news}` (was named/9) |
+| named/5 | narrative consistency | **generated** | `{name}`, `{pronoun_possessive}`, `{recent_news}`, `{role}`, `{primary_domain}` (was named/10) |
+| unnamed/1 | top-of-mind | fixed | `{contextual_domain}` |
+| unnamed/2 | domain leadership | fixed | `{role_category}`, `{primary_domain}` |
+| unnamed/3 | adjacent position | fixed | `{role_category}`, `{adjacent_position}` (was unnamed/5) |
+| unnamed/4 | recent-event leadership | **generated** | `{role_category}`, `{recent_news}` (was unnamed/7) |
+| unnamed/5 | recent-event leadership (alt) | **generated** | `{role_category}`, `{recent_news}` (was unnamed/8) |
+
+10 active × 2 models = **20 measurement queries per Person refresh**. Plus
+4 meta-LLM pre-render calls (one per generated slot) and 1 web-fetch for
+recent_news (cached 7 days). Wall time ~18s, cost ~$0.06 per refresh.
+
+### Notes on the renumbering
+
+The 5+5 compact layout was achieved on **2026-05-09 (commit `5498995`)** by:
+- Dropping 6 prompts (perception framing, currency check, secondary record,
+  recommendation framing, authority framing, secondary leadership)
+- Renumbering 6 remaining prompts to compact positions
+
+Pre-renumber DB rows for the moved/dropped slots are deactivated with
+`retirement_reason="Renumbered to compact 1-5 / 1-5 positions..."`.
+Historical `model_responses` from earlier runs still resolve to their
+original prompt rows correctly. **Position numbers are not stable across
+the renumber — analyses spanning the renumber boundary should join by
+`prompt_id` or filter by dimension/template, not by raw position.**
+
+### Other categories
+
+Organization, policy, issue, event each have **13 active prompts at v1.1.0**
+(unchanged from earlier work). They have not been compacted to 5+5 yet —
+that's a future methodology pass if/when those categories get used.
 
 ---
 
 ## Subjects in the DB
 
-| id | name | role_category | has_v1.2_fields? |
-|---|---|---|---|
-| 1 | Bernie Sanders | senators | partial — needs primary_domain + pronoun_possessive |
-| 2 | Mitch McConnell | senators | partial — same |
-| 3 | Alexandria Ocasio-Cortez | representatives | partial — same |
-| 4 | Tom Cotton | senators | partial — same |
-| 5 | J.D. Vance | Trump administration officials | **complete (created at v1.2)** |
+| id | name | primary_domain | role_category | last refresh run |
+|---|---|---|---|---|
+| 1 | Bernie Sanders | (still in old `domain`) | senators | 11 |
+| 2 | Mitch McConnell | (still in old `domain`) | senators | 7 |
+| 3 | Alexandria Ocasio-Cortez | (still in old `domain`) | representatives | 8 |
+| 4 | Tom Cotton | (still in old `domain`) | senators | 9 |
+| 5 | J.D. Vance | conservative populism | Trump administration officials | **13** ← latest |
 
-For 1–4, their next refresh will trigger Option C and prompt for
-`primary_domain` and `pronoun_possessive`. For 5, runs cleanly.
+**Subjects 1–4** still have the old `domain` field as orphan data. Their
+`primary_domain` is missing. On their next refresh, Option C will prompt
+for `primary_domain` and `pronoun_possessive`.
 
-The four older subjects' multi-item `domain` (and Vance's old
-`secondary_domain`) values still sit in JSONB as orphan data after the
-domain restructure. Optional cleanup query exists.
+**Subject 5 (Vance)** is fully on v1.2 setup_inputs as of run 13. His
+`secondary_domain` still has multi-item legacy content but no current
+active template references `{secondary_domain}`, so it's effectively
+orphan too.
 
 ---
 
-## Methodology highlights worth knowing
+## Methodology highlights
 
 1. **Two layers per category:**
    - **Named layer** — subject mentioned by name. Measures characterization.
    - **Unnamed layer** — subject NOT mentioned. Measures organic visibility
      (does the subject surface when asked about the topic area?).
 
-2. **Methodology consistency rule**: same prompts asked over time. The
-   `fixed` prompts honor this strictly. The `generated` prompts (named/9,
-   named/10) deliberately relax it because their content depends on
-   weekly-refreshed `recent_news`. Their generation_instruction is
-   version-controlled; the rendered text varies per refresh.
+2. **`recent_news` flow:**
+   - Fetched via Gemini Flash + Google Search at subject creation.
+   - Cached 7 days. Re-fetched lazily on any refresh older than 7 days.
+   - Used by named/4, named/5 (named layer — characterization with name)
+     AND unnamed/4, unnamed/5 (unnamed layer — visibility on a current
+     topic without naming the subject).
+   - Stored as `recent_news` + `recent_news_fetched_at` in setup_inputs JSONB.
 
-3. **Recent_news is web-grounded and 7-day-cached.** Auto-fetched via
-   Gemini Flash + Google Search at subject creation, refreshed lazily on
-   any refresh older than 7 days. Stored as `recent_news` and
-   `recent_news_fetched_at` in setup_inputs JSONB.
+3. **Pair coordination across generated prompts:**
+   - named/4 + unnamed/4 both target the SINGLE most prominent event from
+     `recent_news` (different lenses on the same event: characterization
+     vs. organic visibility).
+   - named/5 + unnamed/5 each pick a DIFFERENT event from the most
+     prominent one. They may pick the same secondary event or different
+     ones; in run 13 they picked different (Iran vs. H1B).
 
-4. **Grounding is on by default; reasoning is off by default.** OpenAI
-   uses `effort="low"` when grounded (the lowest level compatible with
-   `web_search`); `effort="minimal"` when ungrounded. Gemini Flash uses
-   `thinking_budget=0` when reasoning_enabled=False. Both captured per row.
+4. **Methodology consistency:**
+   - The 6 fixed prompts honor "same prompts over time" strictly.
+   - The 4 generated prompts deliberately relax this — recent_news varies,
+     so rendered questions vary. Cross-run comparison on those slots
+     requires inspecting the per-row generated text in
+     `response_metadata.generation_instruction_rendered`, not assuming
+     the question stayed the same.
 
-5. **Concurrency**: `max_concurrency=26` by default — enough for every
-   query in a refresh to fire at once. Wall time floor ≈ slowest single
-   call (~18s for a typical run).
+5. **Grounding on by default; reasoning off by default.** OpenAI uses
+   `effort="low"` when grounded, `"minimal"` when not. Gemini Flash uses
+   `thinking_budget=0`. Captured per row.
+
+6. **Concurrency:** `max_concurrency=26` — every query in a refresh fires
+   at once. Wall-time floor ≈ slowest single call (~18s typical).
 
 ---
 
 ## Conventions for editing
 
 - **Migrations** are sequential in `migrations/NNN_*.sql`. The next
-  available number is **004**.
+  available number is **004** for prompt-iteration concerns. The
+  analysis-layer session is using **010+**.
 - **Prompt content changes** require a `version:` bump in YAML. Loader
   refuses content changes without a bump.
-- **Removing a prompt** uses `active: false` in YAML — does not require a
-  version bump; the loader deactivates the matching DB row.
-- **Setup_input additions** are non-breaking (templates can be unchanged).
-  New required fields auto-prompt existing subjects via Option C
+- **Removing a prompt** has two paths:
+  - Mark `active: false` in YAML (keeps audit trail in YAML).
+  - Remove from YAML entirely (loader's position-uniqueness rule allows
+    gaps; rows persist in DB unless explicitly deactivated).
+- **Position numbers** are not stable identifiers. If you need a stable
+  reference to a prompt, use `prompt_id` or `(layer, dimension, version)`.
+- **Setup_input additions** are non-breaking. New required fields auto-
+  prompt existing subjects via Option C
   (`_ensure_setup_inputs_complete` in `app/refresh.py`).
 - **Provider abstraction**: any new model goes through `Provider` ABC
   (`app/providers/base.py`) and registers in `app/providers/__init__.py`.
-  Engine is provider-agnostic.
 
 ---
 
 ## Active work coordination
 
-**The other Claude Code session is iterating on prompt generation** —
-likely touching `prompts/*.yaml`, `app/prompt_loader.py`,
-`app/query_engine.py`, `app/refresh.py`, `app/prompt_generator.py`.
+**Two parallel Claude Code sessions** sharing the same checkout directory:
 
-To avoid conflicts, **the analysis-layer session should**:
+- **Prompts-iteration session** — works on `main`. Touches prompts YAMLs,
+  `app/prompt_loader.py`, `app/query_engine.py`, `app/refresh.py`,
+  `app/prompt_generator.py`.
+- **Analysis-layer session** — works on `analysis-layer` branch. Touches
+  `migrations/010+`, `app/analyzer.py` (or similar new file), new
+  `analysis_outputs` / `extracted_*` tables.
 
-1. **Use a feature branch.** Suggested name: `analysis-layer`. Run
-   `git checkout -b analysis-layer` before doing any work.
-2. **Avoid editing the files the other session owns** unless absolutely
-   necessary. Prefer creating new files (e.g., `app/analyzer.py`,
-   `app/analysis/`) over modifying existing ones.
-3. **Coordinate migration numbers.** The other session may add `004`. If
-   you need migrations, plan to use **`010`–`019`** to leave room for
-   their work, or check in with the user before picking a number.
-4. **Read** from `model_responses` freely — that's the input to analysis.
-   **Don't write** to `model_responses`, `prompts`, `subjects`, or
-   `refresh_runs` (the engine owns those).
-5. **Add new tables** for analysis output. Don't modify existing schema.
+Coordination notes:
+
+1. **Use feature branches.** When the prompts-iteration session is
+   working, the working tree is on `main`; when analysis-layer is, it's
+   on `analysis-layer`. Switch via `git checkout` between sessions.
+2. **Migration numbers**: prompts work uses 004–009. Analysis-layer
+   uses 010+.
+3. **DB tables**: prompts session reads/writes `categories`, `models`,
+   `prompts`, `subjects`, `refresh_runs`, `model_responses`. Analysis-
+   layer should READ those (especially `model_responses`) but only WRITE
+   to new analysis tables.
+4. **STATE.md** lives on `main`; it should be updated by whichever session
+   makes a meaningful state change. Analysis-layer can update it via the
+   stash-checkout-commit-pop dance, or on merge to main.
 
 ---
 
-## Suggested first moves for the analysis-layer session
+## Suggested entry points for new sessions
 
-1. Read **`docs/product-spec.md`** sections on the analysis layer and
-   recommendation engine.
-2. Read **`docs/database-schema.md`** "Future tables" section — describes
-   `analysis_outputs`, `extracted_sources`, `extracted_descriptors`,
-   `recommendations`. Treat as a starting point but you can refine.
-3. Inspect a few rows from `model_responses` to ground the schema in real
-   data:
-   ```bash
-   psql byline -c "SELECT response_text FROM model_responses WHERE refresh_run_id = 12 LIMIT 3;"
-   ```
-4. Propose a schema (don't run migrations yet) — bring it back for review.
-5. Implement extractors as a separate `app/analyzer.py` module that
-   reads `model_responses` and writes new tables.
-6. Suggested first extractor: **descriptors** (adjectives attached to the
-   subject). Visible high-priority extraction target per the spec; cleanly
-   testable on the existing 312 rows.
+### If you're the prompts-iteration session resuming work:
+- Read this file's "Person category — current 5+5 layout" table.
+- Check `git log --oneline -5` to see what's on main since the last
+  commit on this branch.
+- The next natural prompt-iteration concerns: improve engine to skip-on-
+  missing-optional setup_inputs (so prompts referencing optional fields
+  don't fail render); apply 5+5 compaction to other categories; iterate
+  on generated-prompt instruction language.
+
+### If you're the analysis-layer session resuming work:
+- Read **`docs/product-spec.md`** sections on the analysis layer and
+  recommendation engine.
+- Read **`docs/database-schema.md`** "Future tables" section.
+- Inspect a few rows from `model_responses` to ground the schema in
+  real data:
+  ```bash
+  psql byline -c "SELECT response_text FROM model_responses WHERE refresh_run_id = 13 LIMIT 3;"
+  ```
+- Suggested first extractor: **descriptors** (adjectives attached to the
+  subject) — high-signal extraction target per the spec; cleanly testable
+  on the existing 332 rows.
 
 ---
 
 ## Things deliberately NOT yet built
 
-- A web UI / dashboard (visualization is the eventual end-goal but not
-  this session's scope).
-- The **recommendation engine** (sources to engage, framings to test,
-  counter-narratives to build). Spec'd; deferred until analysis layer
-  produces real data.
-- An **auth / users / orgs / billing** layer.
-- **Alert configurations** for narrative shifts.
-- **Per-prompt model overrides** (currently every prompt runs against
-  every active model).
-- **Scheduled refreshes / cron jobs.** Manual `python -m app.refresh` only.
-- **Cross-category subject linking** (events linked to subjects, etc.).
-- **Stress-test prompts** (deliberately leading prompts) — deferred to
-  v1.5+.
+- A web UI / dashboard for visualization.
+- The recommendation engine (sources to engage, framings to test, etc.).
+- Auth / users / orgs / billing.
+- Alert configurations for narrative shifts.
+- Per-prompt model overrides.
+- Scheduled refreshes / cron jobs (manual `python -m app.refresh` only).
+- Cross-category subject linking (events ↔ people, etc.).
+- Stress-test prompts (deliberately leading) — deferred to v1.5+.
+- 5+5 compaction for organization/policy/issue/event categories.
+- Engine support for skip-on-missing-optional setup_inputs (currently a
+  KeyError causes a partial-status row).
 
 ---
 
@@ -258,4 +316,11 @@ psql byline
 
 # Check the current commit
 git log --oneline -5
+
+# Show active prompts for person
+psql byline -c "
+  SELECT p.layer || '/' || p.position AS slot, p.dimension, p.type, p.version
+  FROM prompts p JOIN categories c ON p.category_id = c.id
+  WHERE c.slug = 'person' AND p.active
+  ORDER BY p.layer DESC, p.position;"
 ```
