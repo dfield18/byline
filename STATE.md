@@ -439,22 +439,28 @@ running concurrently on separate branches. Each track owns a
 non-overlapping slice of the codebase so the two sessions can ship
 work independently without merge conflicts.
 
-### Track A — Cross-response findings (`cross-analyzer` branch)
+### Track A — Cross-response findings (`cross-analyzer` branch — at natural pause)
 
-The "editor" layer: reads the per-response extractions and produces
-findings *across* a whole refresh — asymmetry between paired prompts,
-share-of-voice across the unnamed layer, top quotes, narrative drift.
-Greenfield code; nothing here exists yet.
+The "editor" layer: reads per-response extractions and produces findings
+*across* a whole refresh. **2 of 4 deliverables shipped to main; the
+remaining 2 are blocked on prerequisites:**
+
+| deliverable | status | notes |
+|---|---|---|
+| asymmetry | ✓ shipped — `AsymmetryAnalyzer v1.0.0`, pure Python, $0 | per-model gap analysis on category prompt pairs |
+| top_quotes | ✓ shipped — `TopQuotesAnalyzer v1.0.0`, Gemini Flash, ~$0.006 | one global row per refresh, 3-5 verbatim quotes with categorization |
+| share_of_voice | **blocked on Track C's MentionDetectionExtractor** — needs `response_extractions.subject_mentioned` / `mention_rank` populated | pure Python once columns exist |
+| narrative_drift | **blocked — needs ≥2 refreshes per subject** to compare current vs prior | nothing useful to compute today (every subject has a single refresh) |
 
 | | |
 |---|---|
-| **Owns these files (new or exclusive)** | new `app/cross_analyzer.py`; new CLI entry `python -m app.cross_analyzer <refresh_run_id>` |
-| **Reads** | `response_extractions`, `model_responses`, `prompts`, `analysis_runs` (read-only) |
-| **Writes (DB)** | `refresh_analyses` ONLY (currently empty — no contention) |
-| **Touches existing analyzer.py?** | NO — new file `cross_analyzer.py`, separate from `app/analyzer.py` |
+| **Owns these files** | `app/cross_analyzer.py` (existing — additive only when adding new analyzers; no edits to existing CrossAnalyzer subclasses without version bump) |
+| **Reads** | `response_extractions`, `model_responses`, `prompts`, `analysis_runs`, `refresh_runs` (read-only) |
+| **Writes (DB)** | `refresh_analyses` + a new `analysis_runs` row per cross-analyzer invocation |
+| **Touches `app/analyzer.py`?** | NO — Track C's territory |
 | **Migration numbers** | none expected (schema landed in migration 010) |
-| **STATE.md section** | this Track A subsection + a new "Cross-analysis layer" subsection added under "Architecture" when the runner exists |
-| **Suggested deliverable order** | (1) asymmetry → (2) top quotes → (3) share-of-voice (depends on Track C's mention detection) → (4) narrative drift |
+| **STATE.md section** | this Track A subsection + the "Cross-analysis layer" bullets under "Current phase" |
+| **Status** | `cross-analyzer` branch merged to `main`; both unblocked deliverables shipped. Track A is at a natural pause until Track C ships mention detection or the project gets a second refresh of any subject |
 
 ### Track C — Ops hardening (`ops-hardening` branch)
 
@@ -513,28 +519,31 @@ direction.
 ## Suggested entry points for new sessions
 
 ### If you're the Track A session resuming work:
-- This section + the per-category 5+5 layout tables are your context.
-  Schema for cross-response findings landed in migration 010 — see
-  `docs/database-schema.md` "Analysis layer" for the
-  `refresh_analyses` table shape.
-- Inputs available NOW: 33 analysis_runs, 629 response_extractions
-  rows (all 5 per-response extractors populated), 432 model_responses,
-  18 refresh_runs, 10 subjects across 4 categories. Rubio's run 18 is
-  the freshest data with the full extractor stack.
-- **Suggested first deliverable: `analysis_type='asymmetry'`** for
-  the named-layer pair structure (e.g., person `named/2` substantive
-  record vs. `named/3` adversarial defense; issue `named/3` position-A
-  vs. `named/4` position-B; policy `named/2` favorable vs. `named/3`
-  adversarial). Compare per-pair: response length, descriptor count,
-  source mix, criticism_severity gap, sentiment gap. Outputs a single
-  `refresh_analyses` row per refresh keyed by `analysis_type`.
-- Cross-response findings need a different runner shape than the
-  per-response extractor pattern: they operate on a whole refresh,
-  not one row at a time. Don't reuse the `Extractor` ABC from
-  `analyzer.py`; design fresh.
+- **2 of 4 deliverables already shipped** (asymmetry, top_quotes — see
+  the Cross-analysis layer bullets under "Current phase" for the
+  details). Two remaining are both blocked:
+  - `share_of_voice` waits on Track C's MentionDetectionExtractor
+    (needs `response_extractions.subject_mentioned` / `mention_rank`
+    columns populated; they've been NULL since migration 010 landed).
+    Once Track C ships, share-of-voice is a small pure-Python
+    addition to `app/cross_analyzer.py`: count subject mentions
+    across the unnamed-layer responses, rank against any other
+    entities surfaced in the same responses, write one
+    refresh_analyses row per refresh.
+  - `narrative_drift` needs ≥2 refreshes of the same subject so
+    there's a prior to diff against. Today every subject has one
+    refresh. The simplest unblock is a second Rubio refresh.
+- When picking up new work, follow the existing `CrossAnalyzer` ABC
+  pattern in `app/cross_analyzer.py`: subclass + register in
+  `_cli_main()`. Pair definitions for asymmetry live in
+  `_ASYMMETRY_PAIRS`. New analysis types should pick a fresh
+  `analysis_type` string (the `refresh_analyses.analysis_type`
+  column), and use `analysis_key` for any sub-keying.
 - Re-runnable: a new cross-analyzer methodology version creates a new
-  `refresh_analyses` row; old rows stay intact for historical
-  comparison.
+  `analysis_run` and new `refresh_analyses` rows; old rows stay
+  intact for historical comparison.
+- Don't touch `app/analyzer.py` (Track C's file). Don't touch
+  prompt YAMLs or refresh.py.
 
 ### If you're the Track C session resuming work:
 - This section is your context plus the per-extractor version table
@@ -587,12 +596,12 @@ direction.
 > session per "Active work coordination" above. Unmarked items are
 > uncommitted backlog.
 
-- The cross-response findings layer — **(Track A: asymmetry shipped;
-  top quotes, share-of-voice, narrative drift remain)** —
-  `refresh_analyses` is live. Asymmetry v1.0.0 is in production. Next
-  Track A deliverables in priority order: top quotes, then
-  share-of-voice (waits on Track C's mention detection), then
-  narrative drift.
+- The cross-response findings layer — **(Track A: asymmetry +
+  top_quotes shipped; share_of_voice + narrative_drift blocked)** —
+  `refresh_analyses` is live with 5 rows. The two remaining
+  deliverables are blocked on prerequisites: `share_of_voice` needs
+  Track C's mention detection; `narrative_drift` needs a second
+  refresh of any subject so there's a prior to diff against.
 - Mention detection extractor — **(Track C — share-of-voice
   prerequisite)** — populates the unpopulated `subject_mentioned`,
   `mention_rank`, `mention_strength`, `mention_excerpt` columns.
