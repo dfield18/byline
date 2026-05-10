@@ -1259,15 +1259,37 @@ class MentionDetectionExtractor(Extractor):
     comprehension + ordinal counting + light disambiguation — well within
     flash-lite's capability per the same reasoning that put EntitiesExtractor
     on flash-lite.
+
+    Version history:
+    - v1.0: gemini-2.5-flash-lite baseline.
+    - v1.1: retry-on-parse-failure (mirrors the entities v1.3 pattern).
+      Flash-lite occasionally produces truncated structured-JSON output on
+      long responses with many competitors named (~3-5% incidence). v1.1
+      retries the call once on `JSONDecodeError` before giving up.
+      Observed during the QA cleanup pass: 4 cumulative truncations
+      across ~250 mention_detection calls. The retry costs ~$0.0005 per
+      failed call; net effect is dropping the truncation failure rate
+      from ~3-5% to roughly its square (~0.1-0.25%).
     """
 
     name = "mention_detection"
-    version = "1.0"
+    version = "1.1"
     output_column = "competitors_mentioned"
     model_identifier = "gemini-2.5-flash-lite"
 
     def __init__(self) -> None:
         self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    async def _call_once(self, prompt: str, config: types.GenerateContentConfig):
+        api_response, _ = await retry_async(
+            lambda: self._client.aio.models.generate_content(
+                model=self.model_identifier,
+                contents=prompt,
+                config=config,
+            ),
+            is_retryable=_is_retryable_gemini,
+        )
+        return api_response
 
     async def extract(self, response: ResponseToAnalyze) -> ExtractionResult:
         start = time.perf_counter()
@@ -1290,43 +1312,49 @@ class MentionDetectionExtractor(Extractor):
             thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
 
-        try:
-            api_response, _ = await retry_async(
-                lambda: self._client.aio.models.generate_content(
-                    model=self.model_identifier,
-                    contents=prompt,
-                    config=config,
-                ),
-                is_retryable=_is_retryable_gemini,
+        prices = _PRICING[self.model_identifier]
+        total_cost = Decimal(0)
+        last_error: str | None = None
+        parsed = None
+
+        # Up to two attempts on JSON parse failure (truncated output).
+        for attempt in range(2):
+            try:
+                api_response = await self._call_once(prompt, config)
+            except Exception as e:
+                return ExtractionResult(
+                    output=None,
+                    error=str(e),
+                    cost_usd=total_cost,
+                    latency_ms=int((time.perf_counter() - start) * 1000),
+                )
+
+            usage = getattr(api_response, "usage_metadata", None)
+            input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+            output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+            total_cost += (
+                Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+                + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
             )
-        except Exception as e:
+
+            try:
+                parsed = json.loads(api_response.text) if api_response.text else {}
+                break  # parsed cleanly; exit retry loop
+            except json.JSONDecodeError as e:
+                last_error = f"JSON parse failed (attempt {attempt + 1}): {e}"
+                continue  # retry once
+
+        if parsed is None:
+            elapsed_ms = int((time.perf_counter() - start) * 1000)
             return ExtractionResult(
                 output=None,
-                error=str(e),
-                cost_usd=Decimal(0),
-                latency_ms=int((time.perf_counter() - start) * 1000),
+                error=last_error or "JSON parse failed after retry",
+                cost_usd=total_cost,
+                latency_ms=elapsed_ms,
             )
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
-
-        usage = getattr(api_response, "usage_metadata", None)
-        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
-        prices = _PRICING[self.model_identifier]
-        cost = (
-            Decimal(input_tokens) * prices["input"] / _PER_TOKEN
-            + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
-        )
-
-        try:
-            parsed = json.loads(api_response.text) if api_response.text else {}
-        except Exception as e:
-            return ExtractionResult(
-                output=None,
-                error=f"JSON parse failed: {e}",
-                cost_usd=cost,
-                latency_ms=elapsed_ms,
-            )
+        cost = total_cost
 
         if not isinstance(parsed, dict):
             return ExtractionResult(
