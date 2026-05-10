@@ -57,17 +57,30 @@ runner plus five Extractor subclasses, all under methodology_version
   rather than directly (e.g., a Gemini response saying "Rubio advocates
   for an assertive role" produces 0, while ChatGPT saying "Rubio is
   hawkish" produces hits — a real model-difference finding).
-- **sources** v1.0 — pure-Python (no LLM), maps citation domains against
+- **sources** v1.1 — pure-Python (no LLM), maps citation domains against
   the `source_types` vocabulary using a curated dict + TLD heuristics
   (`.gov` → government, `.edu` → academic). Reads from
   `model_responses.response_metadata.citations` (already populated by
   the providers at refresh time). Writes `sources` JSONB plus
-  `total_sources_cited` int. **~72% of citations classify across the
-  full 3016-citation corpus** (28% land in `unknown` after Track C's
-  recent dict expansion — added ~40 high-frequency domains spanning
-  news, think tanks, advocacy, and campaign categories). Long-tail
-  unknowns are inevitable at this stage; an LLM fallback for `unknown`
-  classification is a possible v1.1 extension if needed.
+  `total_sources_cited` int and **`cited_own_site` bool** (v1.1
+  addition). **~72% of citations classify across the full
+  3016-citation corpus** (28% land in `unknown` after Track C's
+  dict expansion — added ~50 high-frequency domains spanning news,
+  think tanks, advocacy, and campaign categories). v1.1 adds
+  `cited_own_site` matching: if `subjects.setup_inputs.canonical_url`
+  is set for a subject, the extractor checks each citation's hostname
+  against the canonical hostname (matching exact + subdomain). Stored
+  per-source on each citation as `is_own_site`, plus a row-level
+  `cited_own_site` bool aggregating across the row.
+  `subjects.setup_inputs.canonical_url` is the convention rather than
+  a new column on `subjects` — keeps with the existing per-subject-
+  config pattern (no migration needed). NULL when canonical_url isn't
+  configured for the subject. Heritage Foundation backfilled (`https://www.heritage.org`)
+  as the v1.1 proof-of-concept; first run surfaced a clean methodology
+  signal — AIs cite heritage.org heavily on `named/1` (descriptive
+  baseline) and `named/2` (track record) but ZERO own-site citations
+  on `named/3` (criticism), confirming AIs don't go to the org's own
+  materials when prompted for critique.
 - **entities** v1.3 — gemini-2.5-flash-lite with structured JSON
   output. Extracts named people / organizations / policies / events /
   locations *other than the subject*, each with type,
@@ -560,8 +573,8 @@ anything else in Track C.
 | **Migration numbers** | 004+ (e.g., `004_subjects_canonical_url.sql` for sources v1.1's `cited_own_site`) |
 | **STATE.md section** | this Track C subsection + edits to "Suggested next" / "Things not yet built" lists as items are picked off |
 | **Shipped** | ✓ `MentionDetectionExtractor v1.0` — `gemini-2.5-flash-lite` extractor populating the six previously-NULL mention columns on unnamed-layer responses (`subject_mentioned`, `mention_rank`, `mention_strength`, `mention_excerpt`, `disambiguation_confidence`, `competitors_mentioned`). Validated on Rubio's run 18; backfill of older refreshes deferred (288 unnamed-layer rows still NULL on prior analysis_runs). |
-| **Recently shipped (this session)** | ✓ Event subject end-to-end test (subject 11) · ✓ Sources dict expansion (~40 domains; unknown 34% → 28% across the full 3016-citation corpus) · ✓ Entities v1.3 retry-on-parse-failure |
-| **Remaining pickable items** | Sources v1.1 with `cited_own_site` (needs `004_subjects_canonical_url.sql` migration) · backfill mention detection across the historical refreshes (unblocks Track A's share-of-voice on the older subjects; ~$0.04 per refresh for re-run via full analyzer, ~$0.7 across all 17 historical) |
+| **Recently shipped (this session)** | ✓ Event subject end-to-end test (subject 11) · ✓ Sources dict expansion (~50 domains; unknown 34% → 28% across the full 3016-citation corpus) · ✓ Entities v1.3 retry-on-parse-failure · ✓ Sources v1.1 with `cited_own_site` (stored as `subjects.setup_inputs.canonical_url`, no migration needed) |
+| **Remaining pickable items** | backfill mention detection across the historical refreshes (unblocks Track A's share-of-voice on the older subjects; ~$0.04 per refresh for re-run via full analyzer, ~$0.7 across all 17 historical) · backfill canonical_url for other subjects (currently only Heritage has it set) |
 
 ### Cross-track dependency to be aware of
 

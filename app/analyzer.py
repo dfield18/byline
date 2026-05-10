@@ -540,6 +540,22 @@ def _domain_from_citation(cite: dict) -> str | None:
         return None
 
 
+def _canonical_domain(url: str | None) -> str | None:
+    """Return the registered hostname of a URL, lowercased and www-stripped.
+    Used by `cited_own_site` matching."""
+    if not url:
+        return None
+    from urllib.parse import urlparse
+    try:
+        host = urlparse(url).hostname
+    except Exception:
+        return None
+    if not host:
+        return None
+    h = host.lower()
+    return h[4:] if h.startswith("www.") else h
+
+
 class SourcesExtractor(Extractor):
     """Classify the citations a model_response cited against the source_types
     vocabulary. Pure Python — no LLM call. Reads from response_metadata
@@ -547,14 +563,30 @@ class SourcesExtractor(Extractor):
 
     Writes:
       - sources (jsonb): [{url, domain, source_type_slug, source_type_id,
-                           classified_via, title}, ...]
+                           classified_via, title, is_own_site}, ...]
       - total_sources_cited (int): count of citations
-      - cited_own_site (bool): NULL for now — depends on a subject_url
-        field that doesn't exist yet on subjects.
+      - cited_own_site (bool): True if any citation's hostname matches the
+        subject's canonical_url hostname (or a subdomain thereof). NULL if
+        the subject has no canonical_url configured.
+
+    Version history:
+    - v1.0: domain-dict + TLD heuristic classification; cited_own_site
+      always NULL (deferred).
+    - v1.1: cited_own_site populated from `setup_inputs.canonical_url`.
+      Per-source `is_own_site` flag added to each entry in the sources
+      JSONB array, alongside the row-level `cited_own_site` bool. Stored
+      as a setup_input rather than a new column on `subjects` to keep
+      with the existing per-subject-config pattern (no migration needed;
+      backfill is a setup_inputs UPDATE).
+
+    `cited_own_site` matching: the citation's hostname is `endswith`-
+    matched against the canonical hostname so subdomain links count
+    (e.g., a citation to `press.heritage.org` counts as own-site for a
+    subject whose canonical_url is `https://www.heritage.org`).
     """
 
     name = "sources"
-    version = "1.0"
+    version = "1.1"
     output_column = "sources"
 
     def __init__(self, source_type_ids: dict[str, int]) -> None:
@@ -567,12 +599,30 @@ class SourcesExtractor(Extractor):
         meta = response.response_metadata or {}
         citations = meta.get("citations") or []
 
+        # Pull canonical_url for the subject, normalize to a hostname for
+        # the matching test below.
+        subj_inputs = response.subject_setup_inputs or {}
+        canonical_url = subj_inputs.get("canonical_url")
+        canonical_host = _canonical_domain(canonical_url) if canonical_url else None
+
         sources_out: list[dict[str, Any]] = []
+        any_own_site = False
         for c in citations:
             if not isinstance(c, dict):
                 continue
             domain = _domain_from_citation(c)
             slug = _classify_domain(domain or "")
+
+            is_own = False
+            if canonical_host and domain:
+                d = domain.lower()
+                if d.startswith("www."):
+                    d = d[4:]
+                # Match exact or subdomain (e.g., press.heritage.org → heritage.org)
+                if d == canonical_host or d.endswith("." + canonical_host):
+                    is_own = True
+                    any_own_site = True
+
             sources_out.append({
                 "url": c.get("url") or c.get("uri"),
                 "domain": domain,
@@ -580,9 +630,14 @@ class SourcesExtractor(Extractor):
                 "source_type_slug": slug,
                 "source_type_id": self._source_type_ids.get(slug),
                 "classified_via": "domain_lookup",
+                "is_own_site": is_own if canonical_host else None,
             })
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+        # cited_own_site: True/False if canonical_url is set; None if the
+        # subject hasn't configured one (we can't tell either way).
+        cited_own_site = any_own_site if canonical_host else None
 
         return ExtractionResult(
             output=sources_out,
@@ -591,7 +646,7 @@ class SourcesExtractor(Extractor):
             latency_ms=elapsed_ms,
             extra_columns={
                 "total_sources_cited": len(sources_out),
-                # cited_own_site: deferred — needs subjects.canonical_url
+                "cited_own_site": cited_own_site,
             },
         )
 
