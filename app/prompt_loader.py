@@ -50,11 +50,18 @@ def _validate(data: dict[str, Any]) -> None:
             raise PromptLoaderError(f"missing 'prompts.{layer}'")
         prompts_list = data["prompts"][layer]
 
+        # Positions must be unique positive integers. Gaps are allowed —
+        # deactivated prompts can be omitted entirely from YAML rather than
+        # kept around with active:false placeholders. The DB rows for
+        # historically-used positions persist regardless of YAML presence.
         positions = [p["position"] for p in prompts_list]
-        expected = list(range(1, len(prompts_list) + 1))
-        if positions != expected:
+        if len(positions) != len(set(positions)):
             raise PromptLoaderError(
-                f"{layer} positions must be sequential starting at 1; got {positions}"
+                f"{layer} positions must be unique within layer; got {positions}"
+            )
+        if any(not isinstance(pos, int) or pos < 1 for pos in positions):
+            raise PromptLoaderError(
+                f"{layer} positions must be positive integers; got {positions}"
             )
 
         for p in prompts_list:

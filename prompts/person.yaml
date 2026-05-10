@@ -141,45 +141,10 @@ prompts:
         Original 1.0.0 used a compound {domain} value (e.g., "X and Y"); the
         new structure constrains each to one substantive area.
 
-    - position: 3
-      dimension: adversarial / criticism
-      template: "What are the main criticisms, controversies, or concerns about {name}?"
-      version: "1.0.0"
-      active: false
-      retirement_reason: "Removed from active rotation per methodology decision"
-      notes: >
-        Reformulated from "What controversies has X been involved in?" to remove
-        the presupposition that controversies exist. Allows the AI to honestly
-        say "no major controversies have been reported" when that's the answer.
-        Removed from active rotation; named/7 (adversarial defense test) covers
-        adversarial framing.
-
     - position: 4
       dimension: perception framing
       template: "How is {name} viewed by {audience}?"
       version: "1.0.0"
-
-    - position: 5
-      dimension: network framing
-      template: "Who are {name}'s allies and political opponents?"
-      version: "1.0.0"
-      active: false
-      retirement_reason: "Removed from active rotation per methodology decision"
-      notes: >
-        Surfaces named entities (people and orgs). High-priority extraction target —
-        feeds the recommendation engine directly.
-        Removed from active rotation.
-
-    - position: 6
-      dimension: comparative framing
-      template: "How does {name} compare to similar political figures?"
-      version: "1.0.0"
-      active: false
-      retirement_reason: "Removed from active rotation per methodology decision"
-      notes: >
-        Per the locked decision, comparator is unprompted — the AI picks who counts
-        as similar. Which figures the AI surfaces is itself a finding.
-        Removed from active rotation.
 
     - position: 7
       dimension: adversarial defense test
@@ -202,19 +167,23 @@ prompts:
       type: generated
       template: |
         Generate one natural-sounding question, the kind a casual user would
-        type into ChatGPT, that asks how people or the political community have
-        been reacting to {name}'s recent activity. Use the following recent
-        context as the basis:
+        type into ChatGPT, that asks how people or the political community
+        have been reacting to ONE specific recent event involving {name}.
 
-        {recent_news}
+        From the recent context below, choose the SINGLE most prominent
+        event and write a question about that event only. Do NOT combine
+        multiple events into one question. Do NOT list events.
+
+        Recent context: {recent_news}
 
         Constraints:
-        - Output exactly one question, in one sentence, under 30 words.
+        - Output exactly one question about one specific event.
+        - One sentence, under 30 words.
         - Use {name} (or a natural shortening) by name.
         - Don't lead toward criticism, praise, or any specific framing.
         - Don't add facts not present in the context above.
         - Output only the question — no preamble, no quotes, no explanation.
-      version: "1.0.0"
+      version: "1.0.1"
       notes: |
         type=generated. The template above is a generation instruction sent to
         a meta-LLM (Gemini Flash); the meta-LLM produces the actual question
@@ -224,36 +193,56 @@ prompts:
         requires inspecting the per-row generated text captured in
         response_metadata.generation_instruction_rendered, not assuming the
         question stayed the same.
+        v1.0.1: Constrained meta-LLM to focus on ONE specific recent event
+        (not combine multiple). Original v1.0.0 produced multi-event questions
+        like "what's the reaction to X and Y and Z?" which conflate signals.
 
     - position: 10
       dimension: narrative consistency
       type: generated
       template: |
         Generate one natural-sounding question, the kind a casual user would
-        type into ChatGPT, that asks whether {name}'s recent activity is
-        consistent with {pronoun_possessive} established record and known
-        positions.
+        type into ChatGPT, that asks whether ONE specific recent action by
+        {name} is consistent with {pronoun_possessive} established record
+        and known positions.
+
+        IMPORTANT: This prompt is paired with another prompt (named/9) that
+        focuses on the SINGLE most prominent event in the recent context.
+        For THIS prompt, choose a DIFFERENT recent action — a secondary
+        event in the summary, not the most prominent one. The goal is for
+        named/9 and named/10 to probe different events within the same
+        refresh.
+
+        If only one event is present in the context, use that one anyway.
+        If multiple events are present, deliberately pick a NON-most-
+        prominent one.
 
         Recent context: {recent_news}
         Established context: {role}, focused on {primary_domain}.
 
         Constraints:
-        - Output exactly one question, in one sentence, under 30 words.
+        - Output exactly one question about one specific recent action.
+        - One sentence, under 30 words.
         - Use {name} (or a natural shortening) by name.
         - Don't lead toward "yes" or "no".
         - Don't add facts not present in the context above.
         - Output only the question — no preamble, no quotes, no explanation.
-      version: "1.0.2"
+      version: "1.0.4"
       notes: |
         type=generated. Pairs with named/9 — same generation pattern, different
         dimensional intent. Tests narrative drift: does the AI see recent
         actions as continuous with the established record? Methodology
         consistency relaxed (see named/9 notes).
         v1.0.1: replaced {pronoun_subject} with {pronoun_possessive} so the
-        instruction reads grammatically ("his/her/their established record"
-        instead of "he/she/they established record").
-        v1.0.2: Renamed {domain} -> {primary_domain} as part of the domain
-        restructuring (primary/secondary/tertiary single-item fields).
+        instruction reads grammatically.
+        v1.0.2: Renamed {domain} -> {primary_domain}.
+        v1.0.3: Constrained meta-LLM to focus on ONE specific recent action
+        (not combine multiple).
+        v1.0.4: Constrained meta-LLM to deliberately pick a DIFFERENT event
+        from the one named/9 will pick (which targets the most prominent
+        event). Coordinates coverage across the named/9 + named/10 pair so
+        a single refresh probes two distinct recent events when multiple
+        are available.
 
   unnamed:
     - position: 1
