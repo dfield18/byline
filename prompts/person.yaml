@@ -244,6 +244,21 @@ prompts:
         a single refresh probes two distinct recent events when multiple
         are available.
 
+    - position: 11
+      dimension: substantive record (secondary)
+      template: "What is {name}'s record on {secondary_domain}?"
+      version: "1.0.0"
+      notes: |
+        Mirrors named/2 but probes the subject's secondary substantive area.
+        Measures whether the AI is aware of the subject's secondary work
+        beyond their primary_domain. Pairs naturally with named/2 for
+        comparison: how does the AI's depth of knowledge differ between
+        primary and secondary domains?
+        Caveat: requires secondary_domain to be populated in setup_inputs
+        (it's an optional field). Subjects without it will get partial-run
+        status until the engine learns to skip-on-missing-optional. As of
+        this commit, only J.D. Vance (id=5) has secondary_domain populated.
+
   unnamed:
     - position: 1
       dimension: top-of-mind
@@ -298,3 +313,83 @@ prompts:
         the broader debate the person is associated with — for Sanders that's
         "corporate influence"; for a conservative senator on immigration it
         might be "stricter immigration enforcement."
+
+    - position: 6
+      dimension: domain leadership (secondary)
+      template: "Who are the {role_category} leading on {secondary_domain} in the US right now?"
+      version: "1.0.0"
+      notes: |
+        Mirrors unnamed/2 but probes the subject's secondary substantive area.
+        Tests organic visibility in the secondary domain's leader space —
+        does the subject surface when asked about leaders of their secondary
+        area without being named?
+        Caveat: requires secondary_domain to be populated in setup_inputs
+        (optional field). See named/11's caveat for the same issue.
+
+    - position: 7
+      dimension: recent-event leadership
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user would
+        type into ChatGPT, that asks about which {role_category} are most
+        actively involved in, deciding on, or leading the SINGLE most
+        prominent topic from the recent context below.
+
+        Do NOT name any specific person. The goal is to measure whether a
+        subject surfaces organically when someone asks about leaders of
+        a current-events topic.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent-events topic.
+        - One sentence, under 30 words.
+        - Use the {role_category} category in the question (e.g.,
+          "senators", "representatives", "Trump administration officials")
+          so the answer space is constrained to that category.
+        - Don't mention any individual person by name.
+        - Pick the SINGLE most prominent topic from the recent context.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Uses recent_news as topic input but does NOT name the
+        subject. Measures organic visibility on a current-events topic — does
+        the subject surface among the {role_category} the AI cites as
+        leading or deciding on this topic? Pairs with unnamed/8 (different
+        topic). Methodology consistency relaxed for this slot (recent_news
+        varies over time); cross-run comparison requires inspecting per-row
+        captured questions in response_metadata.
+
+    - position: 8
+      dimension: recent-event leadership (alt)
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user would
+        type into ChatGPT, that asks about which {role_category} are most
+        actively involved in, deciding on, or leading a recent-events topic.
+
+        IMPORTANT: This prompt is paired with unnamed/7, which targets the
+        SINGLE most prominent topic. For THIS prompt, choose a DIFFERENT
+        topic from the recent context — a secondary one, not the most
+        prominent. The goal is for unnamed/7 and unnamed/8 to probe
+        different current-events topics within the same refresh.
+
+        If only one topic is present in the context, use that one anyway.
+        If multiple are present, deliberately pick a NON-most-prominent one.
+
+        Do NOT name any specific person.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent-events topic.
+        - One sentence, under 30 words.
+        - Use the {role_category} category in the question.
+        - Don't mention any individual person by name.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Pairs with unnamed/7. Same methodology lens (organic
+        visibility on a current-events topic, no subject name in the prompt)
+        but deliberately probes a DIFFERENT topic so unnamed/7 + unnamed/8
+        cover two distinct events per refresh when multiple are available.
