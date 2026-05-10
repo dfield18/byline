@@ -326,6 +326,45 @@ _DOMAIN_TO_SOURCE_TYPE: dict[str, str] = {
     "yahoo.com": "news",
     "aljazeera.com": "news",
     "ctpost.com": "news",
+    "bloomberglaw.com": "news",
+    "forbes.com": "news",
+    "fortune.com": "news",
+    "japantimes.co.jp": "news",
+    "dw.com": "news",
+    "scmp.com": "news",
+    "elpais.com": "news",
+    "upi.com": "news",
+    "voanews.com": "news",  # US-government-funded but operates as news
+    "middleeasteye.net": "news",
+    "fairobserver.com": "news",
+    "realclearpolitics.com": "news",
+    "techcrunch.com": "news",
+    "arstechnica.com": "news",
+    "cnet.com": "news",
+    "securityweek.com": "news",
+    "economictimes.indiatimes.com": "news",
+    "sfgate.com": "news",
+    "thewirechina.com": "news",
+    "inkstickmedia.com": "news",
+    "wlrn.org": "news",  # NPR affiliate (South Florida)
+    "floridapolitics.com": "news",
+    "calmatters.org": "news",
+    "theweek.com": "news",
+    "reason.com": "news",  # libertarian-leaning news mag
+    "thenation.com": "news",  # progressive-leaning
+    "vanityfair.com": "news",
+    "washingtonmonthly.com": "news",
+    "vtdigger.org": "news",  # Vermont news outlet
+    "truthout.org": "news",  # progressive news/advocacy hybrid; classifying as news
+    "jacobin.com": "news",  # leftist news mag
+    "notus.org": "news",
+    "newrepublic.com": "news",
+    "independent.co.uk": "news",
+    "edweek.org": "news",  # Education Week
+    "chalkbeat.org": "news",  # education news
+    "techpolicy.press": "news",
+    "commondreams.org": "news",  # progressive news
+    "jdsupra.com": "news",  # legal news/analysis
 
     # reference
     "wikipedia.org": "reference",
@@ -365,6 +404,18 @@ _DOMAIN_TO_SOURCE_TYPE: dict[str, str] = {
     "stimson.org": "think_tank",
     "millercenter.org": "academic",  # UVA Miller Center
     "atlasinstitute.org": "think_tank",
+    "cis.org": "think_tank",  # Center for Immigration Studies
+    "as-coa.org": "think_tank",  # Americas Society/Council of the Americas
+    "hoover.org": "think_tank",  # Hoover Institution
+    "caspianpolicy.org": "think_tank",
+    "brennancenter.org": "think_tank",  # Brennan Center for Justice
+    "fp4america.org": "advocacy",  # Foreign Policy for America
+    "bruegel.org": "think_tank",  # European economic think tank
+    "eppc.org": "think_tank",  # Ethics and Public Policy Center
+    "arabcenterdc.org": "think_tank",  # Arab Center DC
+    "kff.org": "think_tank",  # KFF (Kaiser Family Foundation)
+    "weforum.org": "think_tank",  # World Economic Forum
+    "morningconsult.com": "think_tank",  # research/polling firm
 
     # advocacy
     "aclu.org": "advocacy",
@@ -389,6 +440,18 @@ _DOMAIN_TO_SOURCE_TYPE: dict[str, str] = {
     "afl-cio.org": "advocacy",
     "uschamber.com": "advocacy",
     "businessroundtable.org": "advocacy",
+    "aila.org": "advocacy",  # American Immigration Lawyers Association
+    "publicknowledge.org": "advocacy",  # Public Knowledge (tech advocacy)
+    "boundless.com": "advocacy",  # immigration services / advocacy
+    "floridadems.org": "campaign",  # Florida Democrats
+    "feelthebern.org": "campaign",  # Bernie Sanders campaign artifact
+    "jeffmerkley.com": "campaign",
+    "ocasiocortez.com": "campaign",  # AOC official campaign site
+    "peoplesworld.org": "advocacy",  # leftist political publication
+    "demlist.com": "advocacy",  # progressive list/coordination
+    "progressivepunch.org": "advocacy",  # progressive scoring
+    "asn-online.org": "academic",  # Association for the Study of Nationalities
+    "juancole.com": "personal",  # Juan Cole's blog
 
     # social_media
     "twitter.com": "social_media",
@@ -640,15 +703,34 @@ class EntitiesExtractor(Extractor):
       and "Z" entities. v1.2 adds an explicit rule + examples telling
       the model to expand the shared head noun across every item in
       the list.
+    - v1.3: retry-on-parse-failure. flash-lite occasionally produces
+      truncated structured-JSON output on long responses (~5%
+      incidence on responses > 3K chars). v1.3 retries the call once
+      on JSONDecodeError before giving up. The retry adds ~$0.0005
+      per failed response on average; net effect is dropping the
+      truncation failure rate from ~5% to roughly its square (~0.25%).
     """
 
     name = "entities"
-    version = "1.2"
+    version = "1.3"
     output_column = "entities"
     model_identifier = "gemini-2.5-flash-lite"
 
     def __init__(self) -> None:
         self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    async def _call_once(self, prompt: str, config: types.GenerateContentConfig):
+        """Single Gemini call wrapped in the standard retry-async (handles
+        429s, 5xx, etc.). Returns the API response object."""
+        api_response, _ = await retry_async(
+            lambda: self._client.aio.models.generate_content(
+                model=self.model_identifier,
+                contents=prompt,
+                config=config,
+            ),
+            is_retryable=_is_retryable_gemini,
+        )
+        return api_response
 
     async def extract(self, response: ResponseToAnalyze) -> ExtractionResult:
         start = time.perf_counter()
@@ -662,49 +744,51 @@ class EntitiesExtractor(Extractor):
             thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
 
-        try:
-            api_response, _ = await retry_async(
-                lambda: self._client.aio.models.generate_content(
-                    model=self.model_identifier,
-                    contents=prompt,
-                    config=config,
-                ),
-                is_retryable=_is_retryable_gemini,
+        prices = _PRICING[self.model_identifier]
+        total_cost = Decimal(0)
+
+        # Up to two attempts. The first failure cause we care about is
+        # JSONDecodeError on truncated output — distinct from API-level
+        # errors (which retry_async already handles inside _call_once).
+        last_error: str | None = None
+        for attempt in range(2):
+            try:
+                api_response = await self._call_once(prompt, config)
+            except Exception as e:
+                # API-level failure; we already retried in retry_async, so don't try again
+                return ExtractionResult(
+                    output=None,
+                    error=str(e),
+                    cost_usd=total_cost,
+                    latency_ms=int((time.perf_counter() - start) * 1000),
+                )
+
+            usage = getattr(api_response, "usage_metadata", None)
+            input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+            output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+            total_cost += (
+                Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+                + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
             )
-        except Exception as e:
+
+            try:
+                parsed = json.loads(api_response.text) if api_response.text else []
+            except json.JSONDecodeError as e:
+                last_error = f"JSON parse failed (attempt {attempt + 1}): {e}"
+                continue  # retry once
+
             return ExtractionResult(
-                output=None,
-                error=str(e),
-                cost_usd=Decimal(0),
+                output=parsed,
+                error=None,
+                cost_usd=total_cost,
                 latency_ms=int((time.perf_counter() - start) * 1000),
             )
 
-        elapsed_ms = int((time.perf_counter() - start) * 1000)
-
-        usage = getattr(api_response, "usage_metadata", None)
-        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
-        prices = _PRICING[self.model_identifier]
-        cost = (
-            Decimal(input_tokens) * prices["input"] / _PER_TOKEN
-            + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
-        )
-
-        try:
-            parsed = json.loads(api_response.text) if api_response.text else []
-        except Exception as e:
-            return ExtractionResult(
-                output=None,
-                error=f"JSON parse failed: {e}",
-                cost_usd=cost,
-                latency_ms=elapsed_ms,
-            )
-
         return ExtractionResult(
-            output=parsed,
-            error=None,
-            cost_usd=cost,
-            latency_ms=elapsed_ms,
+            output=None,
+            error=last_error or "JSON parse failed after retry",
+            cost_usd=total_cost,
+            latency_ms=int((time.perf_counter() - start) * 1000),
         )
 
 

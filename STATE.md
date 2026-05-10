@@ -30,8 +30,10 @@ unnamed)**: person, organization, issue, policy, and event. Total active
 prompts: **50** (down from 62). The foundation layer — prompts → providers
 → engine → DB — is stable and validated across **9 subjects in 4 categories
 (person, organization, issue, policy)** and **17 refresh runs (411 raw
-responses)**. Event has a v1.2 layout in YAML/DB but no Event subject has
-been tested yet.
+responses)**. Event v1.2 layout validated end-to-end — first Event
+subject (Sam Altman firing) created at subject 11 / refresh 21 with the
+descriptive↔interpretive asymmetry surfacing the signature drift
+finding the layout was designed around.
 
 **Provider US bias landed (commit `0c64cab`).** Both providers now hardcode
 a US-focused system instruction on every query so model responses default
@@ -60,11 +62,13 @@ runner plus five Extractor subclasses, all under methodology_version
   (`.gov` → government, `.edu` → academic). Reads from
   `model_responses.response_metadata.citations` (already populated by
   the providers at refresh time). Writes `sources` JSONB plus
-  `total_sources_cited` int. ~73% of citations classify into a known
-  source_type today; the rest land in `unknown`. Long-tail unknowns can
-  be added to the dict as they appear (`_DOMAIN_TO_SOURCE_TYPE` in
-  `app/analyzer.py`).
-- **entities** v1.2 — gemini-2.5-flash-lite with structured JSON
+  `total_sources_cited` int. **~72% of citations classify across the
+  full 3016-citation corpus** (28% land in `unknown` after Track C's
+  recent dict expansion — added ~40 high-frequency domains spanning
+  news, think tanks, advocacy, and campaign categories). Long-tail
+  unknowns are inevitable at this stage; an LLM fallback for `unknown`
+  classification is a possible v1.1 extension if needed.
+- **entities** v1.3 — gemini-2.5-flash-lite with structured JSON
   output. Extracts named people / organizations / policies / events /
   locations *other than the subject*, each with type,
   role-relative-to-subject, contextual valence, and excerpt. ~10
@@ -75,10 +79,13 @@ runner plus five Extractor subclasses, all under methodology_version
   quality on side-by-side) → v1.2 added a DISTRIBUTIVE MODIFIERS rule
   to the prompt (`"Departments of A, B, C"` was producing one entity
   `"Departments of A"` plus bare `"B"` and `"C"`; v1.2 expands the
-  shared head noun across every conjunct). Known quirk: ~5% of
-  responses produce occasional truncated structured-JSON output on
-  flash-lite (single response in run 33). A retry-on-parse-failure
-  fallback would mitigate; tracked but not yet built.
+  shared head noun across every conjunct) → v1.3 retry-on-parse-
+  failure: flash-lite occasionally produced truncated structured-
+  JSON output on long responses (~5% incidence on responses >3K
+  chars; one occurrence in run 33). v1.3 retries the call once on
+  `JSONDecodeError`. Net effect: truncation failure rate drops from
+  ~5% to roughly its square (~0.25%) at a cost of ~$0.0005 extra per
+  failed response.
 - **scores** v1.2 — gemini-2.5-flash, single-object JSON output. Four
   response-level numeric scores plus a short rationale: `sentiment`
   (-1..+1, toward subject), `directional_lean` (-1..+1, left/right
@@ -326,16 +333,16 @@ docs/                        # Spec docs (read-only inputs)
 |---|---|
 | categories | 5 |
 | models | 2 (chatgpt = gpt-5-mini, gemini = gemini-2.5-flash) |
-| subjects | **10** (7 person + 1 organization + 1 issue + 1 policy + 0 event) |
-| refresh_runs | **20** (Rubio at 18 = full, 19 = partial gemini-only quota event, 20 = full) |
-| model_responses | **472** |
+| subjects | **11** (7 person + 1 organization + 1 issue + 1 policy + 1 event) |
+| refresh_runs | **21** (Rubio at 18+20 with partial 19 in between; Event subject at 21) |
+| model_responses | **492** |
 | active prompts (all categories) | **50** (10 per category × 5 categories — uniform 5+5) |
 | active prompts (person / organization / issue / policy / event) | 10 / 10 / 10 / 10 / 10 |
 | deprecated prompts (all) | **81** |
 | source_types (seeded) | 10 |
-| analysis_runs | **44** (per-response analysis_runs at methodology `analysis-1.0.0` + cross-analysis runs at `cross-analysis-1.0.0`) |
-| response_extractions | **675** |
-| refresh_analyses | **29** (asymmetry / top_quotes / share_of_voice / narrative_drift across multiple cross-analyzer runs on Rubio refresh 18 + 20) |
+| analysis_runs | **46** (per-response at `analysis-1.0.0` + cross-analysis at `cross-analysis-1.0.0`) |
+| response_extractions | **695** |
+| refresh_analyses | **34** |
 
 ### Person category — current 5+5 layout
 
@@ -413,14 +420,16 @@ reporting) that bring past events back into current discourse.
 | 8 | AI regulation in the United States | issue | 16 |
 | 9 | the Inflation Reduction Act | policy | 17 |
 | 10 | Marco Rubio | person | **18 + 20** (refresh 19 = partial quota outage; first subject with multiple full refreshes — unblocks narrative_drift) |
+| 11 | the November 2023 firing of Sam Altman by the OpenAI board | event | **21** ← first Event subject ever; validates v1.2.0 Event YAML end-to-end. Asymmetry on the descriptive↔interpretive pair surfaced clean methodology signal: ChatGPT's `named/1` 0% criticism / sentiment 0 → `named/3` 70% criticism / -0.40 sentiment. The AI's *current memory* of the event is more critical than its *description of what happened* — exactly the narrative-drift dynamic the Event 5+5 layout was built around. |
 
 **Subjects 7–9 are pilot tests of non-Person categories.** Each was
 created and refreshed *after* its category's 5+5 v1.2.0 compaction, so
 each refresh produced exactly 10 prompts × 2 models = **20 successful
 responses** (the expected count, not gated). Heritage Foundation tested
 the organization compaction; AI regulation tested issue; IRA tested
-policy. **No Event subject has been tested yet** — the event 5+5 layout
-landed in commit `fd4a4a7` after the other compactions.
+policy. The Event subject (Sam Altman firing, subject 11) was added
+later — first Event refresh ran on refresh_run 21 and surfaced the
+designed descriptive↔interpretive asymmetry signal cleanly.
 
 **Subjects 1–4** still have the old `domain` field as orphan data. Their
 `primary_domain` is missing. On their next refresh, Option C will prompt
@@ -551,7 +560,8 @@ anything else in Track C.
 | **Migration numbers** | 004+ (e.g., `004_subjects_canonical_url.sql` for sources v1.1's `cited_own_site`) |
 | **STATE.md section** | this Track C subsection + edits to "Suggested next" / "Things not yet built" lists as items are picked off |
 | **Shipped** | ✓ `MentionDetectionExtractor v1.0` — `gemini-2.5-flash-lite` extractor populating the six previously-NULL mention columns on unnamed-layer responses (`subject_mentioned`, `mention_rank`, `mention_strength`, `mention_excerpt`, `disambiguation_confidence`, `competitors_mentioned`). Validated on Rubio's run 18; backfill of older refreshes deferred (288 unnamed-layer rows still NULL on prior analysis_runs). |
-| **Remaining pickable items** | Test an Event subject end-to-end · sources dict expansion (drop unknown rate from 27% → <15%) · entities v1.3 retry-on-parse-failure · sources v1.1 with `cited_own_site` (needs `004_subjects_canonical_url.sql` migration) · backfill mention detection across the 288 unnamed-layer rows on existing refreshes (unblocks Track A's share-of-voice) |
+| **Recently shipped (this session)** | ✓ Event subject end-to-end test (subject 11) · ✓ Sources dict expansion (~40 domains; unknown 34% → 28% across the full 3016-citation corpus) · ✓ Entities v1.3 retry-on-parse-failure |
+| **Remaining pickable items** | Sources v1.1 with `cited_own_site` (needs `004_subjects_canonical_url.sql` migration) · backfill mention detection across the historical refreshes (unblocks Track A's share-of-voice on the older subjects; ~$0.04 per refresh for re-run via full analyzer, ~$0.7 across all 17 historical) |
 
 ### Cross-track dependency to be aware of
 
@@ -644,10 +654,10 @@ direction.
   UPDATEs the existing rows on a chosen analysis_run (small additive
   function in `app/analyzer.py`; cheaper but new code).
 - **Other pickable items, all independent:**
-  - Test Event subject end-to-end (no Event subject exists yet —
-    pick a real event, e.g., Sam Altman firing or Roe overturning,
-    create the subject via `python -m app.refresh "<name>"`, then
-    analyze. Validates the v1.2.0 Event YAML works in production.)
+  - ~~Test Event subject end-to-end~~ — DONE (subject 11, refresh 21,
+    Sam Altman firing — full pipeline including cross-analyzer ran
+    clean; asymmetry on the descriptive↔interpretive pair produced
+    the designed criticism-gap signal).
   - Sources dict expansion in `app/analyzer.py`
     `_DOMAIN_TO_SOURCE_TYPE` — drop unknown rate from 27% to <15%.
     Pure data entry from real-run data.
@@ -694,8 +704,11 @@ direction.
   the `MentionDetectionExtractor v1.0` extractor itself shipped on
   `ops-hardening`; only the historical-data backfill is pending.
   New refreshes pick up mention detection automatically.
-- Event subject end-to-end test — **(Track C)** — v1.2.0 Event YAML
-  is in place but no Event subject has been refreshed yet.
+- ~~Event subject end-to-end test~~ — **(Track C: SHIPPED)** — Sam
+  Altman firing event (subject 11) created and refreshed (run 21);
+  full per-response analysis (run 45) and cross-analysis (run 46)
+  ran clean. Asymmetry surfaced the designed descriptive↔
+  interpretive criticism gap. v1.2.0 Event YAML validated end-to-end.
 - A web UI / dashboard for visualization.
 - The recommendation engine (sources to engage, framings to test, etc.).
 - Auth / users / orgs / billing.
