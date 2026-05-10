@@ -601,14 +601,18 @@ class EntitiesExtractor(Extractor):
     """Pulls named entities (other than the subject) mentioned in the response.
 
     Captures who/what else is named in discussions of the subject — feeds
-    co-mention analysis and competitive positioning. Uses gemini-2.5-flash
-    with structured-output JSON schema. No web grounding.
+    co-mention analysis and competitive positioning. Uses
+    gemini-2.5-flash-lite (v1.1 onward) with structured-output JSON
+    schema; no web grounding. Flash-lite is ~4x cheaper than flash and
+    quality on this task held in side-by-side testing — entities
+    extraction is structured pattern matching, well within flash-lite's
+    capabilities.
     """
 
     name = "entities"
-    version = "1.0"
+    version = "1.1"
     output_column = "entities"
-    model_identifier = "gemini-2.5-flash"
+    model_identifier = "gemini-2.5-flash-lite"
 
     def __init__(self) -> None:
         self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
