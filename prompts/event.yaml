@@ -2,8 +2,8 @@ category:
   slug: event
   name: Event
   framing_question: >
-    What happened, who's responsible, what does it mean, what's the lasting
-    takeaway?
+    What happened, who's responsible, how is it remembered, and what's still
+    contested?
 
 setup_inputs:
   - key: name
@@ -31,81 +31,212 @@ setup_inputs:
     auto_suggest: true
     example: major events in the AI industry
 
-  - key: adjacent_period
-    label: Adjacent period
-    description: A broader temporal scope for visibility framing
-    required: true
+  - key: recent_news
+    label: Recent news
+    description: >
+      A short summary of recent developments that bring this event back into
+      current discourse — anniversaries, lawsuits, books or films, court
+      rulings, follow-up reporting, or current actions by the same parties.
+      Auto-populated via web search at subject creation, then refreshed
+      weekly (cached up to 7 days). The companion field
+      recent_news_fetched_at (managed automatically) tracks when this was
+      last refreshed.
+    required: false
     auto_suggest: true
-    example: tech industry controversies in recent years
+    example: >
+      A recent biography revisited the boardroom dynamics, and a current
+      lawsuit by former employees brought the firing back into headlines.
 
 prompts:
   named:
     - position: 1
       dimension: descriptive baseline
       template: "What happened with {name}?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Establishes the AI's baseline characterization of what happened.
+        Pair with named/3 (interpretive framing) — comparing the two reveals
+        narrative drift between "what happened" and "how it's remembered,"
+        one of the most distinctive findings the event category produces.
 
     - position: 2
       dimension: responsibility framing
       template: "Who is responsible for {name} and what role did each party play?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        High-priority extraction target per the methodology spec: named
+        entities (people, organizations, agencies attributed responsibility)
+        feed the recommendation engine directly. The "what role did each
+        party play" probes the AI's understanding of attribution structure.
 
     - position: 3
-      dimension: causal framing
-      template: "Why did {name} happen?"
-      version: "1.1.0"
+      dimension: interpretive framing
+      template: "How is {name} understood or remembered today?"
+      version: "1.0.0"
+      notes: |
+        Pair with named/1 (descriptive baseline). The drift between the two
+        — what facts get omitted, which framings dominate, who becomes the
+        protagonist or villain in retrospect — is the signature finding of
+        the event category. This is why it survives the 5+5 compaction
+        when consequence/lessons/causal do not.
 
     - position: 4
-      dimension: evaluative framing
-      template: "Was {name} handled well or poorly?"
-      version: "1.1.0"
+      dimension: adversarial / criticism
+      template: "What are the main criticisms or controversies surrounding {name}?"
+      version: "1.0.0"
+      notes: |
+        Forces the AI to articulate the contested or critical view of the
+        event. Functional analog of the favorable/adversarial pair in
+        issue/policy, but for events the pairing is asymmetric: criticism
+        vs. interpretive (named/3) rather than two symmetric positions,
+        because most past events don't have a clean two-position framing.
 
     - position: 5
-      dimension: consequence framing
-      template: "What were the consequences of {name}?"
-      version: "1.1.0"
+      dimension: recent-development reframing
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user would
+        type into ChatGPT, that asks how {name} is being reinterpreted,
+        revisited, or brought back into discussion by ONE specific recent
+        development from the recent context below.
 
+        Choose the SINGLE most prominent recent development and write a
+        question that ties it to {name}. Do NOT combine multiple
+        developments. Do NOT list developments.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent development.
+        - One sentence, under 30 words.
+        - Reference {name} (the event) in the question.
+        - Don't lead toward a favorable or critical reading.
+        - Don't add facts not present in the context above.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Event's only generated named prompt. The named
+        layer is denser with fixed prompts because of the
+        descriptive/interpretive pair (named/1 + named/3) which is core
+        methodology for narrative-drift findings. Methodology consistency
+        relaxed for this slot — recent_news varies, rendered question
+        varies. Cross-run comparison requires inspecting per-row generated
+        text in response_metadata.generation_instruction_rendered.
+
+    # Positions retired in the v1.2.0 5+5 compaction. Kept here as
+    # active:false placeholders so the loader retires the v1.1.0 rows
+    # at these positions; new prompts that share these dimensions live
+    # at different positions in the v1.2.0 layout.
     - position: 6
       dimension: interpretive framing
       template: "How is {name} understood or remembered today?"
       version: "1.1.0"
-      notes: >
-        Comparing this prompt to position 1 (descriptive baseline) reveals
-        narrative drift — one of the most distinctive findings this category
-        produces.
+      active: false
+      retirement_reason: >
+        Retired in v1.2.0 5+5 compaction. Dimension preserved at
+        named/3 in the new layout.
 
     - position: 7
       dimension: lessons framing
       template: "What lessons should be drawn from {name}?"
       version: "1.1.0"
+      active: false
+      retirement_reason: >
+        Retired in v1.2.0 5+5 compaction. Lessons-framing redundant
+        with interpretive (named/3) and adversarial (named/4).
 
     - position: 8
       dimension: adversarial / criticism
       template: "What are the main criticisms or controversies surrounding {name}?"
       version: "1.1.0"
+      active: false
+      retirement_reason: >
+        Retired in v1.2.0 5+5 compaction. Dimension preserved at
+        named/4 in the new layout.
 
   unnamed:
     - position: 1
       dimension: top-of-mind
-      template: "What were the most significant {contextual_domain} in {date_or_period} and recently?"
-      version: "1.1.0"
+      template: "What are the most important {contextual_domain}?"
+      version: "1.0.0"
 
     - position: 2
       dimension: domain-shaping
       template: "What events have most shaped {domain} in recent years?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Tests visibility through a domain-impact lens. Surfaces {name} only
+        if the AI considers it among the events that meaningfully shaped
+        {domain} — a stricter bar than top-of-mind.
 
     - position: 3
-      dimension: controversy framing
-      template: "What are the biggest controversies that have happened in {contextual_domain}?"
-      version: "1.1.0"
-
-    - position: 4
       dimension: authority framing
       template: "Which moments in {domain} do experts consider most consequential?"
-      version: "1.1.0"
+      version: "1.0.0"
+      notes: |
+        Tests visibility through an expert-authority lens. The AI's answer
+        here may differ from unnamed/2 because "experts consider" is a
+        sourcing/credibility cue — useful for cross-referencing public
+        framing vs. expert framing.
+
+    - position: 4
+      dimension: recent-development resurfacing
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user
+        would type into ChatGPT, that asks which past events in {domain}
+        are getting renewed attention right now, based on the SINGLE most
+        prominent topic from the recent context below.
+
+        Do NOT name {name} (the specific event we're tracking). The goal
+        is to measure whether {name} surfaces organically when someone
+        asks about past events resurfacing in current discourse.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent topic.
+        - One sentence, under 30 words.
+        - Reference {domain} so the answer space stays in the right area.
+        - Don't mention {name} specifically.
+        - Pick the SINGLE most prominent topic from the recent context.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Mirrors unnamed/4 in policy/issue 5+5 layouts but
+        scoped to the resurfacing-of-past-events angle that's specific to
+        the event category. Pairs with unnamed/5 (different topic).
 
     - position: 5
-      dimension: adjacent visibility
-      template: "What were the defining {adjacent_period}?"
-      version: "1.1.0"
+      dimension: recent-development resurfacing (alt)
+      type: generated
+      template: |
+        Generate one natural-sounding question, the kind a casual user
+        would type into ChatGPT, that asks which past events in {domain}
+        are getting renewed attention.
+
+        IMPORTANT: This prompt is paired with unnamed/4, which targets the
+        SINGLE most prominent topic. For THIS prompt, choose a DIFFERENT
+        topic from the recent context — a secondary one, not the most
+        prominent. The goal is for unnamed/4 and unnamed/5 to probe
+        different current-events topics within the same refresh.
+
+        If only one topic is present in the context, use that one anyway.
+        If multiple are present, deliberately pick a NON-most-prominent
+        one.
+
+        Do NOT name {name}.
+
+        Recent context: {recent_news}
+
+        Constraints:
+        - Output exactly one question about one specific recent topic.
+        - One sentence, under 30 words.
+        - Reference {domain} so the answer space stays in the right area.
+        - Don't mention {name} specifically.
+        - Output only the question — no preamble, no quotes, no explanation.
+      version: "1.0.0"
+      notes: |
+        type=generated. Pairs with unnamed/4. Different topic for cross-
+        topic visibility coverage when recent_news contains multiple
+        resurfacing developments.
