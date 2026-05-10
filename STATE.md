@@ -1,8 +1,8 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-09 (late evening)**,
-> on commit `37bb5ab`. Read this first if you're a fresh Claude Code session
-> picking up work. Update when state shifts meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-09 (late evening,
+> after descriptor extractor backfill)**. Read this first if you're a fresh
+> Claude Code session picking up work. Update when state shifts meaningfully.
 
 ---
 
@@ -23,20 +23,25 @@ in **`docs/prompts-config-format.md`**.
 
 ## Current phase
 
-The **v1.2 methodology pass is complete and refined**. The Person category
-prompt set has been compacted to a **5+5 layout (10 active prompts total)**.
-The foundation layer — prompts → providers → engine → DB — is stable and
-validated across 6 subjects and 14 refresh runs (352 raw responses).
+The **v1.2 methodology pass is complete**. The Person category prompt set is
+compacted to a **5+5 layout (10 active prompts total)**. The foundation layer
+— prompts → providers → engine → DB — is stable and validated across **9
+subjects in 4 categories (person, organization, issue, policy)** and **17
+refresh runs (411 raw responses)**.
 
-Next major phase: **the analysis layer**. The **schema is landed** as of
-commit `d311001` (migration 010) — three tables (`analysis_runs`,
-`response_extractions`, `refresh_analyses`) plus a `source_types` lookup
-vocabulary. Methodology version is `analysis-1.0.0`. Schema design lives
-in the migration file's header comment.
+The **analysis layer is bootstrapping**. Schema is in place
+(commit `d311001`, migration 010). The **descriptor extractor is
+built and the back-catalog is fully analyzed** — `app/analyzer.py`
+holds the runner + the first extractor. v1.3 of the descriptor extractor
+(gemini-2.5-flash with verbatim+grammatical-attachment rules) is the
+production version; 411 responses backfilled across 16 analysis_runs
+for ~$0.30, methodology_version `analysis-1.0.0`. 46% of responses
+produce ≥1 descriptor.
 
-Next sub-phase: **implement the extractors** (`app/analyzer.py` or
-similar new module). Suggested first extractor is **descriptors** — see
-"Suggested entry points" below.
+Next sub-phase: **add more extractors** to `app/analyzer.py` — natural
+candidates per the spec are sources, entities, scores, narrative_themes.
+Each adds ~50 lines (one Extractor subclass + one prompt + schema) and
+slots into the existing runner. See "Suggested entry points" below.
 
 ---
 
@@ -58,6 +63,12 @@ app/
 │                              Includes Option C (interactive prompt for
 │                              missing required setup_inputs) and weekly
 │                              recent_news cache management.
+├── analyzer.py              # CLI: python -m app.analyzer <refresh_run_id>
+│                              Extractor ABC + DescriptorExtractor (v1.3,
+│                              gemini-2.5-flash, structured JSON output).
+│                              Runner fans out per response, writes
+│                              response_extractions. Add new extractors as
+│                              new Extractor subclasses.
 └── providers/
     ├── base.py              # Provider abstract + ProviderResponse dataclass
     ├── openai_provider.py   # AsyncOpenAI; Responses API (web_search tool)
@@ -112,20 +123,22 @@ docs/                        # Spec docs (read-only inputs)
 
 ---
 
-## Live data state (commit `37bb5ab`)
+## Live data state
 
 | | Count |
 |---|---|
 | categories | 5 |
 | models | 2 (chatgpt = gpt-5-mini, gemini = gemini-2.5-flash) |
-| subjects | 6 (Bernie, McConnell, AOC, Cotton, Vance, Newsom) |
-| refresh_runs | 14 |
-| model_responses | **352** |
+| subjects | **9** (6 person + 1 organization + 1 issue + 1 policy) |
+| refresh_runs | **17** |
+| model_responses | **411** (410 successful) |
 | active prompts (all categories) | 62 |
-| active prompts (person) | **10** |
+| active prompts (person) | 10 |
 | deprecated prompts (all) | 29 |
 | source_types (seeded) | 10 |
-| analysis_runs / response_extractions / refresh_analyses | 0 (schema only) |
+| analysis_runs | **21** (16 v1.3 production + 5 test/iteration) |
+| response_extractions | **~431** (411 backfilled at v1.3 + ~20 test rows) |
+| refresh_analyses | 0 (no cross-response findings yet) |
 
 ### Person category — current 5+5 layout
 
@@ -170,14 +183,23 @@ that's a future methodology pass if/when those categories get used.
 
 ## Subjects in the DB
 
-| id | name | primary_domain | role_category | last refresh run |
-|---|---|---|---|---|
-| 1 | Bernie Sanders | (still in old `domain`) | senators | 11 |
-| 2 | Mitch McConnell | (still in old `domain`) | senators | 7 |
-| 3 | Alexandria Ocasio-Cortez | (still in old `domain`) | representatives | 8 |
-| 4 | Tom Cotton | (still in old `domain`) | senators | 9 |
-| 5 | J.D. Vance | conservative populism | Trump administration officials | 13 |
-| 6 | Gavin Newsom | progressive state governance | governors | **14** ← latest |
+| id | name | category | last refresh run |
+|---|---|---|---|
+| 1 | Bernie Sanders | person | 11 |
+| 2 | Mitch McConnell | person | 7 |
+| 3 | Alexandria Ocasio-Cortez | person | 8 |
+| 4 | Tom Cotton | person | 9 |
+| 5 | J.D. Vance | person | 13 |
+| 6 | Gavin Newsom | person | 14 |
+| 7 | Heritage Foundation | organization | 15 |
+| 8 | AI regulation in the United States | issue | 16 |
+| 9 | the Inflation Reduction Act | policy | **17** ← latest |
+
+**Subjects 7–9 are pilot tests of non-Person categories.** They use the
+existing v1.1.0 prompt sets for organization/issue/policy (8+5 = 13 prompts
+each, 26 responses per refresh × 2 models — but the actual refresh counts
+of 20 suggest some prompts may have been gated or skipped; check the
+refresh_runs row for partial-status if curious).
 
 **Subjects 1–4** still have the old `domain` field as orphan data. Their
 `primary_domain` is missing. On their next refresh, Option C will prompt
@@ -295,22 +317,30 @@ Coordination notes:
   on generated-prompt instruction language.
 
 ### If you're the analysis-layer session resuming work:
-- Schema is in place — read **`migrations/010_analysis_layer.sql`** for
-  the table shapes and the documented JSONB blob structures.
-- Read **`docs/product-spec.md`** sections on the analysis layer and
-  recommendation engine for the methodology context.
-- Note: **`docs/database-schema.md` does not yet document the analysis
-  tables** — it still lists them under "Future tables." Updating that
-  doc is a good next chore.
-- Inspect a few rows from `model_responses` to ground extractor design
-  in real data:
-  ```bash
-  psql byline -c "SELECT response_text FROM model_responses WHERE refresh_run_id = 13 LIMIT 3;"
-  ```
-- Suggested first extractor: **descriptors** (adjectives attached to the
-  subject) — high-signal extraction target per the spec; cleanly testable
-  on the existing 332 rows. Writes to `response_extractions.descriptors`
-  JSONB. Methodology version `analysis-1.0.0`.
+- Schema is in place — see **`docs/database-schema.md`** "Analysis layer"
+  section (full table definitions, JSONB shapes, design rationale).
+- The first extractor (**descriptors**) is in **`app/analyzer.py`** as
+  `DescriptorExtractor` (v1.3, gemini-2.5-flash with verbatim +
+  grammatical-attachment rules). Production runs for all 17 refreshes
+  exist in `analysis_runs` (rows 5-21). 46% of responses have ≥1
+  descriptor; ~$0.30 total cost.
+- **To add another extractor**: subclass `Extractor` in `app/analyzer.py`,
+  set `name`/`version`/`output_column`, write the prompt + JSON schema,
+  add it to the `extractors` list in `_cli_main()`. Runner handles the
+  rest. ~50 lines per extractor.
+- **Suggested next extractors** in priority order (per the product spec):
+  1. **sources** — cited sources/URLs in the response, classified against
+     `source_types` vocabulary. Highest product priority per spec.
+  2. **entities** — people/orgs/policies named, with role + sentiment.
+  3. **scores** — sentiment / directional_lean / certainty / criticism_severity.
+  4. **narrative_themes** + dominant_theme.
+- **Re-running an extractor** (e.g., bumping descriptors to v1.4) creates
+  a new `analysis_run` with new rows; old rows stay intact for historical
+  comparison. The runner backfills cleanly across all refresh_run_ids.
+- **For cross-response findings** (asymmetry, narrative drift, share of
+  voice, top quotes), they go in `refresh_analyses` and need a different
+  runner shape (operates on a refresh as a whole, not per-response).
+  Not built yet.
 
 ---
 
