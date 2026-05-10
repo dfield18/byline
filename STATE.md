@@ -404,113 +404,170 @@ primary/secondary/tertiary domains.
 
 ## Active work coordination
 
-**Two parallel Claude Code sessions** sharing the same checkout directory.
-The `analysis-layer` feature branch has been merged into `main` (as of
-commit `d311001`); both sessions now work directly on `main` until either
-needs a new feature branch.
+**Two parallel Claude Code sessions, one feature branch each.** The
+prompts-iteration + analysis-layer split that ran earlier in the
+project has wrapped (both delivered). The current parallel split is
+**Track A** (cross-response findings) and **Track C** (ops hardening),
+running concurrently on separate branches. Each track owns a
+non-overlapping slice of the codebase so the two sessions can ship
+work independently without merge conflicts.
 
-- **Prompts-iteration session** — touches prompts YAMLs,
-  `app/prompt_loader.py`, `app/query_engine.py`, `app/refresh.py`,
-  `app/prompt_generator.py`.
-- **Analysis-layer session** — touches `migrations/011+`, will create
-  `app/analyzer.py` (or similar) and write to the new analysis tables.
+### Track A — Cross-response findings (`cross-analyzer` branch)
 
-Coordination notes:
+The "editor" layer: reads the per-response extractions and produces
+findings *across* a whole refresh — asymmetry between paired prompts,
+share-of-voice across the unnamed layer, top quotes, narrative drift.
+Greenfield code; nothing here exists yet.
 
-1. **Cut a feature branch when starting non-trivial work**, then merge
-   back to main when done — same flow that landed `010`.
-2. **Migration numbers**: prompts work uses 004–009. Analysis-layer
-   uses 011+ (010 is taken).
-3. **DB tables**: prompts session reads/writes `categories`, `models`,
-   `prompts`, `subjects`, `refresh_runs`, `model_responses`. Analysis-
-   layer should READ those (especially `model_responses`) but only WRITE
-   to `analysis_runs`, `response_extractions`, `refresh_analyses`, and
-   (rarely) `source_types`.
-4. **STATE.md** lives on `main`; it should be updated by whichever session
-   makes a meaningful state change. If you're on a feature branch, sync
-   `main` in (or wait until merge) before editing it.
+| | |
+|---|---|
+| **Owns these files (new or exclusive)** | new `app/cross_analyzer.py`; new CLI entry `python -m app.cross_analyzer <refresh_run_id>` |
+| **Reads** | `response_extractions`, `model_responses`, `prompts`, `analysis_runs` (read-only) |
+| **Writes (DB)** | `refresh_analyses` ONLY (currently empty — no contention) |
+| **Touches existing analyzer.py?** | NO — new file `cross_analyzer.py`, separate from `app/analyzer.py` |
+| **Migration numbers** | none expected (schema landed in migration 010) |
+| **STATE.md section** | this Track A subsection + a new "Cross-analysis layer" subsection added under "Architecture" when the runner exists |
+| **Suggested deliverable order** | (1) asymmetry → (2) top quotes → (3) share-of-voice (depends on Track C's mention detection) → (4) narrative drift |
+
+### Track C — Ops hardening (`ops-hardening` branch)
+
+Surgical reliability + completeness work. Each item is small enough
+to land independently. Pickable in any order; nothing here blocks
+anything else in Track C.
+
+| | |
+|---|---|
+| **Owns these files** | `app/analyzer.py` (additive — new extractors append; no edits to existing extractor classes), `app/refresh.py`, prompt YAMLs, scripts/, migrations/ |
+| **Reads** | everything |
+| **Writes (DB)** | `subjects` (new Event subject), `subjects.canonical_url` if added (migration), `response_extractions.subject_mentioned` / `mention_rank` / etc., `prompts` (none — categories already at v1.2.0) |
+| **Touches existing cross_analyzer.py?** | NO — Track A's file |
+| **Migration numbers** | 004+ (e.g., `004_subjects_canonical_url.sql` for sources v1.1's `cited_own_site`) |
+| **STATE.md section** | this Track C subsection + edits to "Suggested next" / "Things not yet built" lists as items are picked off |
+| **Pickable items** | Test an Event subject end-to-end · sources dict expansion (drop unknown rate from 27% → <15%) · MentionDetectionExtractor (populates the unpopulated mention_* columns; required input for Track A's share-of-voice) · entities v1.3 retry-on-parse-failure · sources v1.1 with `cited_own_site` (needs subjects.canonical_url migration) |
+
+### Cross-track dependency to be aware of
+
+**Track A's share-of-voice analysis** needs **Track C's mention
+detection** to populate `response_extractions.subject_mentioned` /
+`mention_rank` / `mention_strength`. Until Track C builds and runs
+that extractor, those columns are NULL across the board, so Track A's
+share-of-voice computation has nothing to count from. Mitigation: do
+Track A's asymmetry + top-quotes deliverables first (no Track C
+dependency); Track C can prioritize mention detection if Track A
+gets to share-of-voice quickly. No other dependencies in either
+direction.
+
+### Coordination protocol
+
+1. **Branch per track.** `cross-analyzer` and `ops-hardening`,
+   branched off `main`. Both branches rebase on top of latest `main`
+   before merging back. Each merge can go in either order — neither
+   blocks the other.
+2. **No shared files in active edits.** Track A only creates new files
+   in `app/`. Track C edits existing files but appends to
+   `app/analyzer.py` (no edits to existing Extractor subclasses).
+   Provider files, prompt YAMLs, query_engine, prompt_loader,
+   prompt_generator are quiet zones — neither track is expected to
+   touch them.
+3. **Migration numbering.** Track C owns 004+ for prompts/subject
+   schema changes. Track A is not expected to need migrations.
+4. **STATE.md edit protocol.** Each track edits ITS OWN subsection of
+   "Active work coordination" (above) plus its own dedicated section
+   when it lands code. The shared "Live data state" count table at
+   the top is the only true shared surface; if both tracks update it
+   in the same hour, the second to push rebases. Section-level
+   conflicts resolve trivially.
+5. **Production analyzer status updates.** Per-extractor version bumps
+   in the "Current phase" prose belong to Track C since it owns
+   `app/analyzer.py`. Cross-analyzer status updates belong to Track A.
 
 ---
 
 ## Suggested entry points for new sessions
 
-### If you're the prompts-iteration session resuming work:
-- Read this file's per-category 5+5 table under "Other categories — also
-  at 5+5 v1.2.0" plus the Person table for the most detailed per-slot
-  layout.
-- Check `git log --oneline -5` to see what's on main since the last
-  commit on this branch.
-- The next natural prompt-iteration concerns:
-  - Test an Event subject end-to-end (the v1.2 layout landed but no Event
-    subject has been refreshed yet).
-  - Plumb a per-subject `geography_or_scope` override so non-US subjects
-    can opt out of the hardcoded US bias (currently every query is
-    US-biased system-wide).
-  - Improve engine to skip-on-missing-optional setup_inputs (so prompts
-    referencing optional fields don't fail render).
-  - Iterate on generated-prompt instruction language if the meta-LLM
-    starts producing weak questions.
+### If you're the Track A session resuming work:
+- This section + the per-category 5+5 layout tables are your context.
+  Schema for cross-response findings landed in migration 010 — see
+  `docs/database-schema.md` "Analysis layer" for the
+  `refresh_analyses` table shape.
+- Inputs available NOW: 33 analysis_runs, 629 response_extractions
+  rows (all 5 per-response extractors populated), 432 model_responses,
+  18 refresh_runs, 10 subjects across 4 categories. Rubio's run 18 is
+  the freshest data with the full extractor stack.
+- **Suggested first deliverable: `analysis_type='asymmetry'`** for
+  the named-layer pair structure (e.g., person `named/2` substantive
+  record vs. `named/3` adversarial defense; issue `named/3` position-A
+  vs. `named/4` position-B; policy `named/2` favorable vs. `named/3`
+  adversarial). Compare per-pair: response length, descriptor count,
+  source mix, criticism_severity gap, sentiment gap. Outputs a single
+  `refresh_analyses` row per refresh keyed by `analysis_type`.
+- Cross-response findings need a different runner shape than the
+  per-response extractor pattern: they operate on a whole refresh,
+  not one row at a time. Don't reuse the `Extractor` ABC from
+  `analyzer.py`; design fresh.
+- Re-runnable: a new cross-analyzer methodology version creates a new
+  `refresh_analyses` row; old rows stay intact for historical
+  comparison.
 
-### If you're the analysis-layer session resuming work:
-- Schema is in place — see **`docs/database-schema.md`** "Analysis layer"
-  section (full table definitions, JSONB shapes, design rationale).
-- The first extractor (**descriptors**) is in **`app/analyzer.py`** as
-  `DescriptorExtractor` (v1.3, gemini-2.5-flash with verbatim +
-  grammatical-attachment rules). Production runs for all 17 refreshes
-  exist in `analysis_runs` (rows 5-21). 46% of responses have ≥1
-  descriptor; ~$0.30 total cost.
-- **To add another extractor**: subclass `Extractor` in `app/analyzer.py`,
-  set `name`/`version`/`output_column`, write the prompt + JSON schema,
-  add it to the `extractors` list in `_cli_main()`. Runner handles the
-  rest. ~50 lines per extractor.
-- **A `CombinedExtractor` exists** (one LLM call per response producing
-  all four LLM-extractor outputs) but is NOT the default. Reachable via
-  `python -m app.analyzer <run_id> --combined`. Side-by-side against
-  the mixed-model 4-call setup on Rubio's run 18 showed combined-on-
-  flash was **2.3× MORE expensive** ($0.082 vs $0.035) AND mildly
-  weakened criticism_severity on adversarial-defense slots (0.90 →
-  0.80) — the prompt-prefix dedup didn't outweigh the cost of putting
-  entities + themes back on flash from flash-lite. Kept in code as
-  `--combined` for cases where consolidating API surface matters more
-  than cost (e.g., simpler error model, working around per-call rate
-  limits) — but the default registers the four individual extractors.
-
-- **Per-response extractor coverage is complete.** All five spec items
-  (descriptors, sources, entities, scores, narrative_themes) ship in
-  `app/analyzer.py`. The natural next layer of work is **cross-response
-  findings** that operate on a refresh as a whole rather than one
-  response at a time:
-  1. **Asymmetry analysis** — for prompts that pair (e.g., issue/policy
-     `named/2` + `named/3`, or person `named/3` adversarial-defense vs.
-     other named slots), compute completeness/depth/sources gap. Lives
-     in `refresh_analyses` keyed by `analysis_type='asymmetry'`.
-  2. **Share of voice** — for unnamed-layer responses, count how often
-     the subject surfaces vs. comparable peers. Inputs: `subject_mentioned`
-     + `mention_rank` columns we haven't populated yet.
-  3. **Top quotes** — pick the most representative or extreme passages
-     across the refresh. Cheaper to produce by selecting from existing
-     extraction excerpts than re-running on full text.
-  4. **Theme clustering / narrative drift** — cluster v1.0 free-form
-     theme labels into a stable taxonomy (offline/post-hoc), then bump
-     `narrative_themes` to v1.1 with constrained vocabulary. Also enables
-     drift detection across refreshes.
-- **Per-extractor v1.1+ refinements** worth tracking but not blocking:
-  descriptors v1.4 to capture action-attached descriptors with a
-  `directness` field; sources v1.1 to add `cited_own_site` once
-  `subjects.canonical_url` is plumbed; entities v1.1 to add a
-  `competitors_mentioned` derivation for the recommendation engine.
-- **Re-running an extractor** (e.g., bumping descriptors to v1.4) creates
-  a new `analysis_run` with new rows; old rows stay intact for historical
-  comparison. The runner backfills cleanly across all refresh_run_ids.
-- **For cross-response findings** (asymmetry, narrative drift, share of
-  voice, top quotes), they go in `refresh_analyses` and need a different
-  runner shape (operates on a refresh as a whole, not per-response).
-  Not built yet.
+### If you're the Track C session resuming work:
+- This section is your context plus the per-extractor version table
+  in "Current phase" above (entities at v1.2, scores at v1.2,
+  narrative_themes at v1.1, descriptors at v1.3, sources at v1.0).
+- **Highest-leverage Track C item:** MentionDetectionExtractor.
+  Populates `response_extractions.subject_mentioned`,
+  `mention_rank`, `mention_strength`, `mention_excerpt`,
+  `disambiguation_confidence` — schema columns from migration 010
+  that have been NULL since the table landed. Track A's
+  share-of-voice analysis needs these populated.
+- **Other pickable items, all independent:**
+  - Test Event subject end-to-end (no Event subject exists yet —
+    pick a real event, e.g., Sam Altman firing or Roe overturning,
+    create the subject via `python -m app.refresh "<name>"`, then
+    analyze. Validates the v1.2.0 Event YAML works in production.)
+  - Sources dict expansion in `app/analyzer.py`
+    `_DOMAIN_TO_SOURCE_TYPE` — drop unknown rate from 27% to <15%.
+    Pure data entry from real-run data.
+  - Entities v1.3 retry-on-parse-failure: occasional flash-lite
+    truncated structured-JSON output on long responses (~5%
+    incidence; one occurrence in run 33). Add a re-call on
+    `JSONDecodeError` with the response text intact.
+  - Sources v1.1 with `cited_own_site`: needs migration
+    `004_subjects_canonical_url.sql` to add a
+    `subjects.canonical_url` column, then sources extractor checks
+    each citation domain against it.
+- **To add another extractor**: subclass `Extractor` in
+  `app/analyzer.py`, set `name`/`version`/`output_column`, write the
+  prompt + JSON schema, add it to the `extractors` list in
+  `_cli_main()`. Runner handles the rest. ~50 lines per extractor.
+- **A `CombinedExtractor` exists** (one LLM call per response
+  producing all four LLM-extractor outputs) but is NOT the default.
+  Reachable via `python -m app.analyzer <run_id> --combined`.
+  Side-by-side on Rubio's run 18 showed combined-on-flash was 2.3×
+  MORE expensive than the mixed-model 4-call default ($0.082 vs.
+  $0.035) AND mildly weakened criticism_severity on
+  adversarial-defense slots (0.90 → 0.80). Kept in code for cases
+  where consolidating API surface matters more than cost.
+- **Re-running an extractor** (bumping a version) creates a new
+  `analysis_run` with new rows; old rows stay intact for historical
+  comparison. The runner backfills cleanly across all
+  refresh_run_ids.
 
 ---
 
 ## Things deliberately NOT yet built
 
+> Items marked **(Track A)** or **(Track C)** are claimed by an active
+> session per "Active work coordination" above. Unmarked items are
+> uncommitted backlog.
+
+- The cross-response findings layer — **(Track A in progress)** —
+  asymmetry, share-of-voice, top quotes, narrative drift in
+  `refresh_analyses`.
+- Mention detection extractor — **(Track C — share-of-voice
+  prerequisite)** — populates the unpopulated `subject_mentioned`,
+  `mention_rank`, `mention_strength`, `mention_excerpt` columns.
+- Event subject end-to-end test — **(Track C)** — v1.2.0 Event YAML
+  is in place but no Event subject has been refreshed yet.
 - A web UI / dashboard for visualization.
 - The recommendation engine (sources to engage, framings to test, etc.).
 - Auth / users / orgs / billing.
