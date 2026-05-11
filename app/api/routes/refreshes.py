@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.auth import User, current_user
+from app.api.auth import User, assert_refresh_in_org, current_user
 from dashboard.lib.queries import get_cross_findings, get_refresh_responses
 
 
@@ -21,15 +21,17 @@ async def list_refresh_responses(
 ):
     """All successful model_responses in a refresh, with their per-response
     extractor outputs aggregated latest-non-null across analysis_runs
-    (the same semantics the dashboard uses)."""
+    (the same semantics the dashboard uses).
+
+    Multi-tenancy: 404s if the refresh's subject doesn't belong to the
+    caller's org. Don't leak existence of refreshes the caller can't
+    see."""
+    assert_refresh_in_org(refresh_run_id, user)
     rows = get_refresh_responses(refresh_run_id)
     if not rows:
-        # Distinguish "refresh exists but no successful responses" from
-        # "refresh doesn't exist" via a separate lookup, but for v0 the
-        # caller can treat empty + 404 the same way.
         raise HTTPException(
             status_code=404,
-            detail=f"refresh_run {refresh_run_id} not found or has no successful responses",
+            detail=f"refresh_run {refresh_run_id} has no successful responses",
         )
     return rows
 
@@ -41,4 +43,5 @@ async def list_cross_findings(
     """Cross-analyzer findings (asymmetry / top_quotes / share_of_voice /
     narrative_drift) for the refresh, from the latest cross_analyzer
     pass. Returns [] if no cross_analyzer has run yet."""
+    assert_refresh_in_org(refresh_run_id, user)
     return get_cross_findings(refresh_run_id)

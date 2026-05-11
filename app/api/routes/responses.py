@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.auth import User, current_user
+from app.api.auth import User, assert_response_in_org, current_user
 from dashboard.lib.queries import get_response
 
 
@@ -19,7 +19,9 @@ async def get_response_detail(
     model_response_id: int, user: User = Depends(current_user),
 ):
     """One model_response with prompt, response text, all extractor
-    outputs, and citations metadata."""
+    outputs, and citations metadata. 404s if the underlying subject
+    doesn't belong to the caller's org."""
+    assert_response_in_org(model_response_id, user)
     r = get_response(model_response_id)
     if not r:
         raise HTTPException(

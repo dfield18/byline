@@ -27,6 +27,25 @@ async function apiGet<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `byline API POST ${path} → HTTP ${res.status}: ${text.slice(0, 300)}`
+    );
+  }
+  return (await res.json()) as T;
+}
+
 // ─── types ───────────────────────────────────────────────────────────
 
 export type Subject = {
@@ -71,5 +90,25 @@ export const getSubject = (id: number) =>
 
 export const listSlots = (categorySlug: string) =>
   apiGet<Slot[]>(`/api/categories/${categorySlug}/slots`);
+
+// Write paths
+
+export type CreateSubjectPayload = {
+  name: string;
+  category: Subject["category"];
+  setup_inputs: Record<string, unknown>;
+};
+
+export type CreatedSubject = {
+  id: number;
+  name: string;
+  category: Subject["category"];
+  setup_inputs: Record<string, unknown>;
+  created_at: string;
+  org_id: string;
+};
+
+export const createSubject = (payload: CreateSubjectPayload) =>
+  apiPost<CreatedSubject>("/api/subjects", payload);
 
 // More wrappers (responses, findings) added when the corresponding pages are built.

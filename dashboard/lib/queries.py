@@ -45,11 +45,19 @@ def _latest_per_column_sql(col: str) -> str:
 # ─── subject + refresh queries ─────────────────────────────────────────
 
 
-def list_subjects() -> list[dict[str, Any]]:
+def list_subjects(org_id: str | None = None) -> list[dict[str, Any]]:
     """All subjects with category, refresh count, latest refresh metadata,
-    and a couple of cross-analyzer signals for the index view."""
+    and a couple of cross-analyzer signals for the index view.
+
+    Multi-tenancy: when `org_id` is passed, returns only that org's
+    subjects (the customer-facing API path). When None, returns every
+    subject including NULL-org seed rows (the operator path used by the
+    Streamlit dashboard).
+    """
+    where_clause = "WHERE s.org_id = %s" if org_id is not None else ""
+    params: tuple = (org_id,) if org_id is not None else ()
     with get_cursor(commit=False) as cur:
-        cur.execute("""
+        cur.execute(f"""
             WITH per_subject AS (
                 SELECT s.id, s.name, c.slug AS category, s.setup_inputs, s.created_at,
                        COUNT(rr.id) AS n_refreshes,
@@ -58,6 +66,7 @@ def list_subjects() -> list[dict[str, Any]]:
                 FROM subjects s
                 JOIN categories c ON c.id = s.category_id
                 LEFT JOIN refresh_runs rr ON rr.subject_id = s.id
+                {where_clause}
                 GROUP BY s.id, s.name, c.slug, s.setup_inputs, s.created_at
             )
             SELECT ps.id, ps.name, ps.category, ps.setup_inputs,
@@ -66,7 +75,7 @@ def list_subjects() -> list[dict[str, Any]]:
                     WHERE ra.subject_id = ps.id) AS n_findings
             FROM per_subject ps
             ORDER BY ps.name
-        """)
+        """, params)
         rows = cur.fetchall()
     return [
         {
@@ -83,15 +92,29 @@ def list_subjects() -> list[dict[str, Any]]:
     ]
 
 
-def get_subject(subject_id: int) -> dict[str, Any] | None:
-    """Subject + setup_inputs + all refreshes for it."""
+def get_subject(
+    subject_id: int, org_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Subject + setup_inputs + all refreshes for it.
+
+    Multi-tenancy: when `org_id` is passed, returns None if the subject
+    doesn't belong to that org. When None, no scoping (operator path).
+    """
     with get_cursor(commit=False) as cur:
-        cur.execute("""
-            SELECT s.id, s.name, c.slug, s.setup_inputs, s.created_at
-            FROM subjects s
-            JOIN categories c ON c.id = s.category_id
-            WHERE s.id = %s
-        """, (subject_id,))
+        if org_id is not None:
+            cur.execute("""
+                SELECT s.id, s.name, c.slug, s.setup_inputs, s.created_at
+                FROM subjects s
+                JOIN categories c ON c.id = s.category_id
+                WHERE s.id = %s AND s.org_id = %s
+            """, (subject_id, org_id))
+        else:
+            cur.execute("""
+                SELECT s.id, s.name, c.slug, s.setup_inputs, s.created_at
+                FROM subjects s
+                JOIN categories c ON c.id = s.category_id
+                WHERE s.id = %s
+            """, (subject_id,))
         row = cur.fetchone()
         if not row:
             return None
@@ -121,6 +144,63 @@ def get_subject(subject_id: int) -> dict[str, Any] | None:
         ]
     subj["refreshes"] = refreshes
     return subj
+
+
+def create_subject(
+    org_id: str,
+    category_slug: str,
+    name: str,
+    setup_inputs: dict[str, Any],
+) -> dict[str, Any]:
+    """Create a new subject. Caller is responsible for providing valid
+    setup_inputs for the category — the API layer should validate the
+    required fields against the category's YAML before calling this.
+
+    Returns the created subject (id + name + category + setup_inputs +
+    created_at) so the caller can immediately redirect to its detail page.
+
+    Raises ValueError if the category slug is invalid or a subject with
+    the same (org_id, name) pair already exists.
+    """
+    # Make sure 'name' is in setup_inputs (mirrors the existing CLI flow
+    # in app/refresh.py which seeds it there from the CLI argument).
+    if "name" not in setup_inputs:
+        setup_inputs = {**setup_inputs, "name": name}
+
+    with get_cursor() as cur:
+        cur.execute("SELECT id FROM categories WHERE slug = %s", (category_slug,))
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"category '{category_slug}' not found")
+        cat_id = row[0]
+
+        cur.execute(
+            "SELECT id FROM subjects WHERE org_id = %s AND name = %s",
+            (org_id, name),
+        )
+        if cur.fetchone():
+            raise ValueError(
+                f"a subject named '{name}' already exists for this org"
+            )
+
+        cur.execute(
+            """
+            INSERT INTO subjects (category_id, name, setup_inputs, org_id)
+            VALUES (%s, %s, %s::jsonb, %s)
+            RETURNING id, name, created_at
+            """,
+            (cat_id, name, json.dumps(setup_inputs), org_id),
+        )
+        sid, sname, created = cur.fetchone()
+
+    return {
+        "id": sid,
+        "name": sname,
+        "category": category_slug,
+        "setup_inputs": setup_inputs,
+        "created_at": created,
+        "org_id": org_id,
+    }
 
 
 def list_active_slots(category_slug: str) -> list[dict[str, Any]]:

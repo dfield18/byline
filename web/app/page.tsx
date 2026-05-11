@@ -20,6 +20,30 @@ const CATEGORY_BADGE: Record<Subject["category"], string> = {
 export default async function Home() {
   const subjects = await listSubjects();
 
+  // Empty-state on a fresh org — direct the user straight to subject creation
+  // rather than showing an empty table with no path forward.
+  if (subjects.length === 0) {
+    return (
+      <div className="min-h-screen bg-zinc-50 dark:bg-black">
+        <main className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 py-12 text-center">
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+            byline
+          </h1>
+          <p className="mt-3 max-w-lg text-zinc-600 dark:text-zinc-400">
+            No subjects yet for your organization. Create one to start tracking
+            how AI search engines characterize them.
+          </p>
+          <Link
+            href="/subjects/new"
+            className="mt-6 rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            + Create your first subject
+          </Link>
+        </main>
+      </div>
+    );
+  }
+
   const totalRefreshes = subjects.reduce((s, x) => s + x.n_refreshes, 0);
   const totalFindings = subjects.reduce((s, x) => s + x.n_findings, 0);
   const categoryCount = new Set(subjects.map((s) => s.category)).size;
@@ -27,13 +51,21 @@ export default async function Home() {
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-black">
       <main className="mx-auto max-w-6xl px-6 py-12">
-        <header className="mb-8">
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            byline
-          </h1>
-          <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-            AI search visibility for political &amp; public-affairs subjects.
-          </p>
+        <header className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+              byline
+            </h1>
+            <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+              AI search visibility for political &amp; public-affairs subjects.
+            </p>
+          </div>
+          <Link
+            href="/subjects/new"
+            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            + New subject
+          </Link>
         </header>
 
         {/* Headline metrics */}

@@ -1,9 +1,53 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-09 (late evening,
-> after the v1.2 5+5 compaction across all categories + provider US bias +
-> descriptor extractor backfill)**. Read this first if you're a fresh Claude
-> Code session picking up work. Update when state shifts meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-11 (after Phase A:
+> multi-tenancy + subject-creation write paths)**. Read this first if you're
+> a fresh Claude Code session picking up work. Update when state shifts
+> meaningfully.
+
+---
+
+## When you come back — quick resume
+
+The active branch is **`fastapi-scaffold`** (also on `origin/main`). The
+Phase A work is committed; see "Customer-facing web app" under Current
+phase for full detail. To resume:
+
+1. `git pull origin main` (sync any other session's changes)
+2. Start the API: `BYLINE_AUTH=disabled uvicorn app.api.main:app --reload --port 8000`
+3. Start the web app: `cd web && npm run dev` → http://localhost:3000
+4. (Optional) Start the operator dashboard: `streamlit run dashboard/Home.py`
+
+**Next-priority items, in order:**
+
+1. **Clerk auth wiring (Phase A2)** — replace the mock-user TODO in
+   `app/api/auth.py` with real Clerk JWT validation. Sign up for Clerk
+   first, get the JWKS issuer URL, then plumb it through. Frontend
+   integration via `@clerk/nextjs` from the Vercel Marketplace. ~half a
+   day.
+
+2. **Async job pattern (Phase B)** — needed before the UI can have a
+   "Trigger refresh" button. `POST /api/subjects/{id}/refresh` should
+   queue a job, return job_id, frontend polls a `GET /api/jobs/{id}`.
+   Needs a `jobs` table migration (005 or 006) + a small worker. ~1 day.
+
+3. **Scheduled refreshes (Phase B)** — APScheduler or cron so
+   `narrative_drift` findings accumulate weekly without manual
+   triggers. ~half a day.
+
+4. **Recommendation engine (Phase C)** — the spec's main value-add
+   layer. The biggest remaining gap between "viewer of findings" and
+   "actionable tool." Several days.
+
+5. **Frontend drill-down pages (Phase D)** — per-refresh findings page
+   + response detail page in `web/`, mirroring what the internal
+   Streamlit dashboard already shows.
+
+Migration ordering note: 005 is the next free number for prompt-side
+concerns; 011 is next free for analysis-layer concerns. Phase B's
+`jobs` table fits the 005 slot.
+
+---
 
 ---
 
@@ -319,10 +363,14 @@ app/api/                     # FastAPI public API for the customer-facing web ap
 
 web/                         # Customer-facing Next.js app (App Router, TS, Tailwind)
 ├── app/page.tsx             #   subject list — calls FastAPI server-side
-├── app/subjects/[id]/page.tsx  #   subject profile + refresh history
-├── lib/api.ts               #   typed fetch client for the FastAPI
+├── app/subjects/[id]/page.tsx     #   subject profile + refresh history
+├── app/subjects/new/page.tsx      #   create-subject form (Phase A)
+├── app/subjects/new/actions.ts    #   Server Action wrapping POST /api/subjects
+├── lib/api.ts               #   typed fetch client (incl. createSubject)
 └── .env.example             #   BYLINE_API_URL + BYLINE_API_TOKEN
                              # Run: `cd web && npm run dev` (after API is up)
+
+migrations/                  # 5 applied: 001-003 + 010 (analysis) + 004 (org_id)
 ```
 
 ### Conceptual layers
@@ -757,30 +805,91 @@ direction.
   no auth, no write paths, no charts — just tables/tabs/metrics over
   the local data. See `dashboard/README.md` for details.
 
-- **Customer-facing web app (Next.js + FastAPI) — v0 scaffold shipped.**
+- **Customer-facing web app (Next.js + FastAPI) — v0 scaffold + Phase A
+  multi-tenancy/writes shipped.**
   The internal Streamlit dashboard is for the operator; customer-facing
-  UI is a separate stack. v0 scaffold lives in `app/api/` (FastAPI
-  backend, 7 read endpoints mirroring `dashboard/lib/queries.py`) +
-  `web/` (Next.js App Router + TS + Tailwind, two pages: subject list
-  and subject detail). Auth is placeholder bearer-token in mock-user
-  mode (`BYLINE_AUTH=disabled`); Clerk JWT validation is the TODO in
-  `app/api/auth.py`. Run locally:
+  UI is a separate stack. Lives in `app/api/` (FastAPI backend) +
+  `web/` (Next.js App Router + TS + Tailwind). Run locally:
   ```
   BYLINE_AUTH=disabled uvicorn app.api.main:app --reload --port 8000
-  cd web && npm run dev
+  cd web && npm run dev   # http://localhost:3000
   ```
-  End-to-end flow validated: browser → Next.js SSR → fetch FastAPI →
-  Postgres → render. Production deploy plan: Next.js → Vercel,
-  FastAPI → Render/Fly/Railway, Postgres → Neon/Supabase. See
-  `web/README.md` for the Next.js details.
 
-  **Not yet built (frontend backlog):** write paths (subject creation
-  form, refresh trigger), per-refresh findings drill-down, response
-  detail view, recommendation engine (the "what should you do about
-  it" layer per the product spec — biggest gap before customer-ready),
-  scheduled refreshes (cron / APScheduler so narrative_drift
-  accumulates without manual triggers), Clerk auth integration, real
-  multi-tenancy via `subjects.org_id`.
+  **Phase A landed (this commit):**
+  - Migration `004_subjects_org_id.sql` adds nullable `subjects.org_id`
+    + index. The 11 seed subjects stay with NULL org_id (operator-only,
+    invisible to customers). New customer subjects get the requesting
+    user's Clerk-style org id.
+  - `dashboard/lib/queries.py`:
+    - `list_subjects(org_id=None)` and `get_subject(id, org_id=None)`
+      take an optional org_id filter. When None → unscoped (Streamlit
+      operator view); when set → only that org's subjects.
+    - New `create_subject(org_id, category_slug, name, setup_inputs)`
+      write helper. Rejects duplicate (org_id, name) pairs.
+  - `app/api/auth.py`:
+    - Mock user now has `org_id="org_internal"` (not None), so the
+      seed 11 subjects are correctly invisible to dev API callers.
+    - Two helper functions, `assert_refresh_in_org` and
+      `assert_response_in_org`, used by the refreshes/responses
+      routes to 404-not-403 when the underlying subject belongs to
+      another org. Defensive checks against ID-guessing.
+    - Clerk JWT validation is the explicit TODO — see the long
+      docstring + `env vars` for what to plumb when you sign up for
+      Clerk.
+  - `app/api/routes/`:
+    - `subjects.py`: `GET /api/subjects` and `GET /api/subjects/{id}`
+      now scope to `user.org_id`. New `POST /api/subjects` accepts a
+      `{name, category, setup_inputs}` payload, validates category,
+      delegates to `create_subject`. Returns 201 + the created row.
+    - `refreshes.py`, `responses.py`: both call `assert_*_in_org`
+      before serving data.
+  - `web/lib/api.ts`: new `createSubject({name, category, setup_inputs})`
+    helper.
+  - `web/app/subjects/new/` — Server Action + form to create a subject.
+    Person-specific fields rendered inline; other categories accept the
+    create call but require subsequent CLI refresh for missing required
+    fields (interactive prompt fallback). Form fields prefixed `si__`
+    collect into the `setup_inputs` payload.
+  - `web/app/page.tsx`: empty-state UI when an org has no subjects yet
+    (a fresh customer lands on "Create your first subject" instead of
+    a blank table).
+
+  **Phase A end-to-end validation:**
+  ```
+  GET  /api/subjects                            → []  (mock org_internal has no subjects)
+  POST /api/subjects {name=Test, category=person, setup_inputs={…}}
+                                                → 201 {id: 12, org_id: "org_internal"}
+  GET  /api/subjects                            → [{id: 12, ...}]
+  GET  /api/subjects/7  (Heritage, NULL org_id) → 404 "not found"  ← correctly invisible
+  ```
+  Test subject deleted after verification.
+
+  **Still pending for "real" production (the bigger remaining gaps,
+  in priority order):**
+
+  1. **Clerk auth wiring (Phase A2)** — the placeholder accepts any
+     bearer token. Per `app/api/auth.py` docstring, sign up for Clerk,
+     populate `CLERK_ISSUER` env var, replace the TODO with JWKS
+     validation. Frontend integration via `@clerk/nextjs` (Vercel
+     Marketplace integration auto-provisions env vars). ~half a day.
+
+  2. **Async job pattern (Phase B)** — `POST /api/subjects/{id}/refresh`
+     can't synchronously call `app.refresh` (30+ second operation).
+     Needs a `jobs` table migration + a small worker loop. Frontend
+     polls `GET /api/jobs/{id}` for completion. ~1 day.
+
+  3. **Scheduled refreshes (Phase B)** — APScheduler or cron wrapping
+     `python -m app.refresh` so `narrative_drift` findings accumulate
+     weekly without manual triggers. ~half a day.
+
+  4. **Recommendation engine (Phase C)** — the spec's main value-add
+     layer. "AI says X about you → here's what you should do." Several
+     days; the difference between "viewer of findings" and "actionable
+     tool customers pay for."
+
+  5. **Frontend pages (Phase D)** — per-refresh findings drill-down,
+     response detail view, category-aware setup_inputs forms. After
+     Phase B's async jobs land, also wire a "Trigger refresh" button.
 - The recommendation engine (sources to engage, framings to test, etc.).
 - Auth / users / orgs / billing.
 - Alert configurations for narrative shifts.
