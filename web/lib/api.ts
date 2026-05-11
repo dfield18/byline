@@ -1,21 +1,34 @@
 /**
  * Thin fetch wrapper for the byline FastAPI. Server-side only.
  *
- * In v0 the bearer token is read from `BYLINE_API_TOKEN` (works because
- * the API is in mock-user mode when `BYLINE_AUTH=disabled`). Once Clerk
- * lands, the frontend will pass the user's Clerk JWT through here
- * instead.
+ * Every request forwards the caller's Clerk session JWT to the backend.
+ * The backend (`app/api/auth.py`) validates that JWT against Clerk's
+ * JWKS and uses `org_id` from the claims to scope all queries.
+ *
+ * If `BYLINE_API_TOKEN` is set, it overrides the Clerk path — used when
+ * the backend runs with `BYLINE_AUTH=disabled` and accepts any bearer.
  */
+import { auth } from "@clerk/nextjs/server";
 
 const API_URL = process.env.BYLINE_API_URL ?? "http://localhost:8000";
-const API_TOKEN = process.env.BYLINE_API_TOKEN ?? "";
+const DEV_TOKEN_OVERRIDE = process.env.BYLINE_API_TOKEN ?? "";
+
+async function bearerToken(): Promise<string> {
+  if (DEV_TOKEN_OVERRIDE) return DEV_TOKEN_OVERRIDE;
+  const { getToken } = await auth();
+  const token = await getToken();
+  if (!token) {
+    throw new Error(
+      "No Clerk session token available — user is not signed in"
+    );
+  }
+  return token;
+}
 
 async function apiGet<T>(path: string): Promise<T> {
+  const token = await bearerToken();
   const res = await fetch(`${API_URL}${path}`, {
-    headers: {
-      Authorization: `Bearer ${API_TOKEN}`,
-    },
-    // No caching during dev so changes show up immediately.
+    headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
   if (!res.ok) {
@@ -28,10 +41,11 @@ async function apiGet<T>(path: string): Promise<T> {
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const token = await bearerToken();
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${API_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -91,6 +105,23 @@ export const getSubject = (id: number) =>
 export const listSlots = (categorySlug: string) =>
   apiGet<Slot[]>(`/api/categories/${categorySlug}/slots`);
 
+export type SetupInput = {
+  key: string;
+  label: string;
+  description: string | null;
+  required: boolean;
+  example: string | null;
+  type: "string" | "boolean" | string;
+};
+
+export type SetupInputsSchema = {
+  category: string;
+  setup_inputs: SetupInput[];
+};
+
+export const getSetupInputsSchema = (categorySlug: string) =>
+  apiGet<SetupInputsSchema>(`/api/categories/${categorySlug}/setup-inputs`);
+
 // Write paths
 
 export type CreateSubjectPayload = {
@@ -111,4 +142,25 @@ export type CreatedSubject = {
 export const createSubject = (payload: CreateSubjectPayload) =>
   apiPost<CreatedSubject>("/api/subjects", payload);
 
-// More wrappers (responses, findings) added when the corresponding pages are built.
+// Jobs
+
+export type JobStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type Job = {
+  id: number;
+  subject_id: number;
+  org_id: string;
+  kind: "refresh";
+  status: JobStatus;
+  enqueued_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error: string | null;
+  refresh_run_id: number | null;
+  result: Record<string, unknown> | null;
+};
+
+export const triggerRefresh = (subjectId: number) =>
+  apiPost<Job>(`/api/subjects/${subjectId}/refresh`, {});
+
+export const getJob = (jobId: number) => apiGet<Job>(`/api/jobs/${jobId}`);

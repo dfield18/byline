@@ -34,14 +34,16 @@ from __future__ import annotations
 
 import os
 
+# Load .env BEFORE importing routes — `app.api.auth` reads CLERK_ISSUER
+# at module-load time when BYLINE_AUTH != "disabled".
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-from app.api.routes import categories, refreshes, responses, subjects
-
 
 load_dotenv()
+
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+from app.api.routes import categories, jobs, refreshes, responses, subjects  # noqa: E402
 
 
 app = FastAPI(
@@ -90,3 +92,4 @@ app.include_router(subjects.router)
 app.include_router(refreshes.router)
 app.include_router(responses.router)
 app.include_router(categories.router)
+app.include_router(jobs.router)

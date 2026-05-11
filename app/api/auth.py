@@ -11,37 +11,37 @@ Two modes:
 
   Prod mode (BYLINE_AUTH unset/anything else): every request must
             present an `Authorization: Bearer <jwt>` header. The JWT is
-            validated against Clerk's JWKS (TODO — see below) and the
-            User shape is populated from the standard Clerk claims.
+            validated against Clerk's JWKS and the User shape is
+            populated from the standard Clerk claims.
 
 The User shape is intentionally minimal — user_id, org_id, email. Routes
 declare `Depends(current_user)` and the multi-tenancy filter in the
 query layer uses `user.org_id`.
 
-Wiring Clerk (when you sign up for Clerk and have a project):
+Required env vars in prod mode:
+    CLERK_ISSUER   e.g., https://united-crayfish-78.clerk.accounts.dev
+                   (the host portion of the publishable key, base64-
+                   decoded — also visible on the Clerk dashboard).
 
-  1. Get the Frontend API URL from Clerk dashboard → API Keys → "JWT
-     issuer". Looks like https://<your-app>.clerk.accounts.dev or
-     similar.
-  2. Set env vars:
-         CLERK_ISSUER=https://<your-app>.clerk.accounts.dev
-         CLERK_AUDIENCE=<your-frontend-api-key>   # optional but recommended
-  3. Implement the TODO below — fetch JWKS from
-     `${CLERK_ISSUER}/.well-known/jwks.json`, cache it, use
-     python-jose to validate the bearer token against it. Extract
-     `sub` → user_id and `org_id` → org_id from the claims.
-
-The placeholder version below accepts ANY bearer token and resolves to
-the mock User. This keeps the contract in place so routes can declare
-the Depends and the frontend can already pass bearer tokens; production
-deploy MUST replace the TODO before going live.
+Optional:
+    CLERK_AUDIENCE — only set if you've configured a custom audience
+                     claim in the Clerk dashboard. Most byline setups
+                     leave this unset.
 """
 from __future__ import annotations
 
+import logging
 import os
+import threading
+import time
 from dataclasses import dataclass
 
+import httpx
 from fastapi import Header, HTTPException, status
+from jose import jwt
+from jose.exceptions import JWTError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -55,15 +55,8 @@ class User:
     email: str | None = None
 
 
-# Switch off for local dev / internal scripts: BYLINE_AUTH=disabled
 _AUTH_DISABLED = os.environ.get("BYLINE_AUTH", "").lower() == "disabled"
 
-# Dev mode mock user. The org_id here separates dev-created subjects
-# from the 11 NULL-org seed subjects, so the operator (Streamlit) and
-# the API see distinct scopes:
-#   - Streamlit (unscoped queries) → 11 seed + any dev-created
-#   - API in dev mode (scoped to org_internal) → only dev-created
-# In production, Clerk org_ids look like "org_2abc...".
 _MOCK_USER = User(
     user_id="user_dev",
     org_id="org_internal",
@@ -71,11 +64,92 @@ _MOCK_USER = User(
 )
 
 
+# ─── Clerk JWKS cache ────────────────────────────────────────────────
+#
+# Clerk rotates signing keys infrequently. Strategy:
+#   1. Fetch JWKS lazily on first request.
+#   2. Cache in memory for _JWKS_TTL_SECONDS.
+#   3. If a JWT carries a `kid` we don't have, refetch immediately
+#      (handles rotation that happens between TTL refreshes).
+# Single-process cache is fine — uvicorn workers each warm their own.
+
+_JWKS_TTL_SECONDS = 3600
+_jwks_cache: dict[str, list[dict]] = {}  # issuer -> list of JWK dicts
+_jwks_fetched_at: dict[str, float] = {}
+_jwks_lock = threading.Lock()
+
+
+def _fetch_jwks(issuer: str) -> list[dict]:
+    """Fetch JWKS for an issuer. Raises HTTPException(503) on network failure."""
+    url = issuer.rstrip("/") + "/.well-known/jwks.json"
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            return resp.json()["keys"]
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        logger.error("Failed to fetch Clerk JWKS from %s: %s", url, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Auth provider unavailable",
+        ) from exc
+
+
+def _get_jwk_for_kid(issuer: str, kid: str) -> dict:
+    """Return the JWK matching `kid`, refetching if the cached set doesn't have it."""
+    with _jwks_lock:
+        cached = _jwks_cache.get(issuer)
+        fetched_at = _jwks_fetched_at.get(issuer, 0)
+        stale = (time.time() - fetched_at) > _JWKS_TTL_SECONDS
+
+        if not cached or stale:
+            cached = _fetch_jwks(issuer)
+            _jwks_cache[issuer] = cached
+            _jwks_fetched_at[issuer] = time.time()
+
+        for jwk in cached:
+            if jwk.get("kid") == kid:
+                return jwk
+
+        # Unknown kid — could be a fresh rotation. Refetch once.
+        cached = _fetch_jwks(issuer)
+        _jwks_cache[issuer] = cached
+        _jwks_fetched_at[issuer] = time.time()
+        for jwk in cached:
+            if jwk.get("kid") == kid:
+                return jwk
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Unknown token signing key",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _require_env(name: str) -> str:
+    val = os.environ.get(name)
+    if not val:
+        raise RuntimeError(
+            f"{name} is required when BYLINE_AUTH is not 'disabled'. "
+            "Set it to your Clerk Frontend API URL "
+            "(e.g., https://<your-app>.clerk.accounts.dev)."
+        )
+    return val
+
+
+# Fail fast on startup if prod-mode env is incomplete.
+if not _AUTH_DISABLED:
+    _CLERK_ISSUER = _require_env("CLERK_ISSUER")
+    _CLERK_AUDIENCE = os.environ.get("CLERK_AUDIENCE") or None
+else:
+    _CLERK_ISSUER = ""
+    _CLERK_AUDIENCE = None
+
+
 def assert_refresh_in_org(refresh_run_id: int, user: User) -> None:
     """Raise 404 if the refresh_run's subject doesn't belong to user.org_id.
     Defensive check used by routes that take a refresh_run_id as input
     so a customer can't poke around guessing refresh IDs."""
-    from fastapi import HTTPException
     from app.db import get_cursor
 
     if not user.org_id:
@@ -91,7 +165,6 @@ def assert_refresh_in_org(refresh_run_id: int, user: User) -> None:
             (refresh_run_id,),
         )
         row = cur.fetchone()
-    # Use 404 (not 403) — don't leak that the refresh exists elsewhere.
     if not row or row[0] != user.org_id:
         raise HTTPException(
             status_code=404,
@@ -101,7 +174,6 @@ def assert_refresh_in_org(refresh_run_id: int, user: User) -> None:
 
 def assert_response_in_org(model_response_id: int, user: User) -> None:
     """Same as assert_refresh_in_org but for model_responses."""
-    from fastapi import HTTPException
     from app.db import get_cursor
 
     if not user.org_id:
@@ -124,6 +196,73 @@ def assert_response_in_org(model_response_id: int, user: User) -> None:
         )
 
 
+def _validate_clerk_jwt(token: str) -> User:
+    """Validate a Clerk JWT against the cached JWKS and return a User.
+
+    Raises HTTPException(401) on any validation failure.
+    """
+    try:
+        header = jwt.get_unverified_header(token)
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Malformed token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    kid = header.get("kid")
+    if not kid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing 'kid' header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    jwk = _get_jwk_for_kid(_CLERK_ISSUER, kid)
+
+    try:
+        # Clerk default JWTs don't carry an `aud` claim, so we skip
+        # audience verification unless CLERK_AUDIENCE is explicitly set.
+        decode_kwargs: dict = {
+            "algorithms": [jwk.get("alg", "RS256")],
+            "issuer": _CLERK_ISSUER,
+        }
+        if _CLERK_AUDIENCE:
+            decode_kwargs["audience"] = _CLERK_AUDIENCE
+        else:
+            decode_kwargs["options"] = {"verify_aud": False}
+
+        claims = jwt.decode(token, jwk, **decode_kwargs)
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {exc}",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    sub = claims.get("sub")
+    if not sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing 'sub' claim",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Clerk v2 session tokens nest org info under `o.id`. Older versions
+    # used a top-level `org_id`; we accept either so the code doesn't
+    # break across token-format upgrades.
+    org_claim = claims.get("o")
+    org_id = org_claim.get("id") if isinstance(org_claim, dict) else None
+    if not org_id:
+        org_id = claims.get("org_id")
+
+    return User(
+        user_id=sub,
+        org_id=org_id,
+        email=claims.get("email"),
+    )
+
+
 async def current_user(authorization: str | None = Header(default=None)) -> User:
     """FastAPI dependency. Returns the authenticated user, or 401s."""
     if _AUTH_DISABLED:
@@ -136,24 +275,5 @@ async def current_user(authorization: str | None = Header(default=None)) -> User
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # token = authorization[len("Bearer "):]
-    #
-    # TODO (production): validate `token` against Clerk's JWKS.
-    #
-    #   from jose import jwt
-    #   issuer = os.environ["CLERK_ISSUER"]
-    #   jwks = _load_jwks_cached(issuer + "/.well-known/jwks.json")
-    #   claims = jwt.decode(token, jwks, algorithms=["RS256"], issuer=issuer,
-    #                       audience=os.environ.get("CLERK_AUDIENCE"))
-    #   return User(
-    #       user_id=claims["sub"],
-    #       org_id=claims.get("org_id"),
-    #       email=claims.get("email"),
-    #   )
-    #
-    # Until that's wired, ANY bearer token resolves to the mock user.
-    # This keeps the bearer-token contract in place and lets the
-    # frontend pass dev tokens without errors, but it MUST be replaced
-    # before any production traffic. Refuse to start with
-    # BYLINE_AUTH=production set if Clerk env vars are missing.
-    return _MOCK_USER
+    token = authorization[len("Bearer "):].strip()
+    return _validate_clerk_jwt(token)
