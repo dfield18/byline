@@ -300,6 +300,12 @@ sql/                         # Hand-written analysis queries
 scripts/                     # Diagnostics (test_providers, test_freshness)
 findings/                    # gitignored — local-only response dumps
 docs/                        # Spec docs (read-only inputs)
+dashboard/                   # Streamlit internal dashboard (read-only)
+├── Home.py                  #   entry — subject list + headline metrics
+├── pages/01_subject.py      #   one subject's findings + drill-down
+├── pages/02_response.py     #   one model_response, all extractors inline
+└── lib/queries.py           #   shared read-only query layer
+                             # Run: `streamlit run dashboard/Home.py`
 ```
 
 ### Conceptual layers
@@ -722,7 +728,18 @@ direction.
   full per-response analysis (run 45) and cross-analysis (run 46)
   ran clean. Asymmetry surfaced the designed descriptive↔
   interpretive criticism gap. v1.2.0 Event YAML validated end-to-end.
-- A web UI / dashboard for visualization.
+- ~~A web UI / dashboard for visualization~~ — **internal v0 shipped**
+  (Streamlit, read-only). Lives in `dashboard/` at the repo root.
+  Three pages: Home (subject list + headline metrics) · Subject detail
+  (one subject's cross-analyzer findings + per-response drill-down) ·
+  Response detail (one model_response with all six extractor outputs
+  inline). Reads via `dashboard/lib/queries.py` which uses the same
+  latest-non-null-per-column aggregation as cross_analyzer
+  (post-Issue-1). Run: `streamlit run dashboard/Home.py`. v0 scope:
+  no auth, no write paths, no charts — just tables/tabs/metrics over
+  the local data. See `dashboard/README.md` for details. Future
+  productization (auth, comparison views, charts, scheduled-refresh
+  display, hosted deploy) is intentionally deferred.
 - The recommendation engine (sources to engage, framings to test, etc.).
 - Auth / users / orgs / billing.
 - Alert configurations for narrative shifts.
