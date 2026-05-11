@@ -16,31 +16,168 @@ if str(_REPO_ROOT) not in sys.path:
 
 import streamlit as st
 
-from dashboard.lib.queries import get_response
+from dashboard.lib.queries import (
+    get_response, list_subjects, get_subject, get_refresh_responses,
+)
 
 
 st.set_page_config(page_title="byline · response", layout="wide")
 
 
-# pick model_response_id from session or query param
-mr_id = st.session_state.get("model_response_id")
-if mr_id is None and "model_response_id" in st.query_params:
-    try:
-        mr_id = int(st.query_params["model_response_id"])
-    except (ValueError, TypeError):
-        mr_id = None
+@st.cache_data(ttl=60)
+def _subjects():
+    return list_subjects()
 
-mr_id_input = st.sidebar.number_input(
-    "model_response_id",
-    min_value=1, value=mr_id or 1, step=1,
-)
-mr_id = int(mr_id_input)
-st.session_state["model_response_id"] = mr_id
+
+@st.cache_data(ttl=60)
+def _subject(subject_id: int):
+    return get_subject(subject_id)
+
+
+@st.cache_data(ttl=60)
+def _responses(refresh_run_id: int):
+    return get_refresh_responses(refresh_run_id)
 
 
 @st.cache_data(ttl=60)
 def _response(model_response_id: int):
     return get_response(model_response_id)
+
+
+# ─── sidebar filters: category → subject → refresh → slot → model ──────
+#
+# When the user lands here from Subject page (or via session_state from
+# another navigation), we pre-fill all the dropdowns from the response
+# currently in session_state. Any filter change cascades downward and
+# resolves to a new model_response_id.
+
+st.sidebar.header("Find a response")
+
+incoming_mr_id = st.session_state.get("model_response_id")
+incoming = _response(incoming_mr_id) if incoming_mr_id else None
+
+all_subjects = _subjects()
+
+# Build categories list from what's actually present in the DB
+categories = sorted({s["category"] for s in all_subjects})
+CATEGORY_LABELS = {
+    "person":       "Person (politician)",
+    "organization": "Organization (group / institution)",
+    "issue":        "Issue (contested topic)",
+    "policy":       "Policy (legislation / regulation)",
+    "event":        "Event (specific moment)",
+}
+
+default_cat = incoming["category"] if incoming else categories[0]
+cat = st.sidebar.selectbox(
+    "Category",
+    options=categories,
+    format_func=lambda c: CATEGORY_LABELS.get(c, c.title()),
+    index=categories.index(default_cat) if default_cat in categories else 0,
+)
+
+# Subjects in that category
+cat_subjects = [s for s in all_subjects if s["category"] == cat]
+if not cat_subjects:
+    st.sidebar.warning(f"No subjects in category '{cat}'")
+    st.stop()
+
+default_subj_id = incoming["subject_id"] if (incoming and incoming["category"] == cat) else cat_subjects[0]["id"]
+subj_idx = next((i for i, s in enumerate(cat_subjects) if s["id"] == default_subj_id), 0)
+subj = st.sidebar.selectbox(
+    "Subject",
+    options=cat_subjects,
+    format_func=lambda s: s["name"],
+    index=subj_idx,
+)
+
+# Refreshes for the chosen subject
+subj_detail = _subject(subj["id"])
+refreshes = subj_detail["refreshes"] if subj_detail else []
+if not refreshes:
+    st.sidebar.warning(f"{subj['name']} has no refreshes yet")
+    st.stop()
+
+default_rr_id = (
+    incoming["refresh_run_id"]
+    if (incoming and incoming["subject_id"] == subj["id"]
+        and any(r["id"] == incoming["refresh_run_id"] for r in refreshes))
+    else refreshes[0]["id"]
+)
+rr_idx = next((i for i, r in enumerate(refreshes) if r["id"] == default_rr_id), 0)
+rr = st.sidebar.selectbox(
+    "Refresh",
+    options=refreshes,
+    format_func=lambda r: (
+        f"refresh {r['id']} "
+        f"({r['started_at']:%Y-%m-%d %H:%M}, {r['n_ok']}/{r['n_responses']})"
+    ),
+    index=rr_idx,
+)
+
+# Responses in that refresh — slot picker
+responses = _responses(rr["id"])
+if not responses:
+    st.sidebar.warning(f"No successful responses in refresh {rr['id']}")
+    st.stop()
+
+# Unique slots, sorted: named first, then unnamed; position ascending
+slots = sorted(
+    {(r["layer"], r["position"], r["dimension"]) for r in responses},
+    key=lambda s: (0 if s[0] == "named" else 1, s[1]),
+)
+
+default_slot = None
+if incoming and incoming["refresh_run_id"] == rr["id"]:
+    default_slot = (incoming["layer"], incoming["position"], incoming["dimension"])
+slot_idx = next((i for i, s in enumerate(slots) if s == default_slot), 0)
+slot = st.sidebar.selectbox(
+    "Slot (the question type)",
+    options=slots,
+    format_func=lambda s: f"{s[0]}/{s[1]} — {s[2]}",
+    index=slot_idx,
+)
+
+# Models that ran on that slot in this refresh
+models_in_slot = sorted({
+    r["model_slug"] for r in responses
+    if r["layer"] == slot[0] and r["position"] == slot[1]
+})
+if not models_in_slot:
+    st.sidebar.warning("No model responses for this slot")
+    st.stop()
+
+default_model = incoming["model_slug"] if (incoming and incoming["model_slug"] in models_in_slot) else models_in_slot[0]
+model_slug = st.sidebar.selectbox(
+    "Model",
+    options=models_in_slot,
+    index=models_in_slot.index(default_model),
+)
+
+# Resolve filters → model_response_id
+mr_id = next(
+    (r["model_response_id"] for r in responses
+     if r["layer"] == slot[0]
+        and r["position"] == slot[1]
+        and r["model_slug"] == model_slug),
+    None,
+)
+if mr_id is None:
+    st.sidebar.warning("No response matches the current filters")
+    st.stop()
+
+st.session_state["model_response_id"] = mr_id
+
+# ── Fallback: direct ID picker, tucked under Advanced ──
+with st.sidebar.expander("Advanced: select by ID"):
+    direct_id = st.number_input(
+        "model_response_id (overrides filters)",
+        min_value=1, step=1, value=mr_id,
+    )
+    if direct_id != mr_id:
+        # User overrode the filter-derived ID; honor it
+        mr_id = int(direct_id)
+        st.session_state["model_response_id"] = mr_id
 
 
 r = _response(mr_id)
