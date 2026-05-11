@@ -7,6 +7,16 @@ The dashboard is read-only on the Postgres DB. No auth (internal-only).
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Streamlit runs this file from `dashboard/`, not the repo root, so the
+# `dashboard.*` and `app.*` packages aren't importable by default. Inject
+# the repo root into sys.path. Must run before any project imports.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import streamlit as st
 
 from dashboard.lib.queries import list_subjects

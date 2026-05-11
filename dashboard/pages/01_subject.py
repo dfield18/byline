@@ -5,6 +5,14 @@ cross-analyzer findings (asymmetry / top_quotes / share_of_voice /
 narrative_drift), and a per-response drill-down list."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Repo-root path injection — see dashboard/Home.py for the explanation.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import json
 import streamlit as st
 
