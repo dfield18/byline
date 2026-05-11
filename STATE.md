@@ -1,51 +1,188 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-11 (after Phase A:
-> multi-tenancy + subject-creation write paths)**. Read this first if you're
-> a fresh Claude Code session picking up work. Update when state shifts
-> meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-11 (after Phase A2:
+> Clerk auth + Phase B: async job pattern shipped)**. Read this first if
+> you're a fresh Claude Code session picking up work. Update when state
+> shifts meaningfully.
 
 ---
 
 ## When you come back — quick resume
 
-The active branch is **`fastapi-scaffold`** (also on `origin/main`). The
-Phase A work is committed; see "Customer-facing web app" under Current
-phase for full detail. To resume:
+The active branch is **`main`**. The `fastapi-scaffold` branch was merged
+and deleted (locally and on `origin`). To resume:
 
 1. `git pull origin main` (sync any other session's changes)
-2. Start the API: `BYLINE_AUTH=disabled uvicorn app.api.main:app --reload --port 8000`
-3. Start the web app: `cd web && npm run dev` → http://localhost:3000
-4. (Optional) Start the operator dashboard: `streamlit run dashboard/Home.py`
+2. Start the API:
+   - Dev (mock user): `BYLINE_AUTH=disabled uvicorn app.api.main:app --reload --port 8000`
+   - Real Clerk: `uvicorn app.api.main:app --reload --port 8000` (requires `CLERK_ISSUER` in `.env`)
+3. Start the worker (Phase B): `python -m app.worker` — long-running
+   process that picks queued jobs off the `jobs` table and runs the
+   refresh + analyzer + cross_analyzer chain.
+4. Start the web app: `cd web && npm run dev` → http://localhost:3000
+   - Signed-out users get redirected to the Clerk-hosted sign-in.
+5. (Optional) Start the operator dashboard: `streamlit run dashboard/Home.py`
 
 **Next-priority items, in order:**
 
-1. **Clerk auth wiring (Phase A2)** — replace the mock-user TODO in
-   `app/api/auth.py` with real Clerk JWT validation. Sign up for Clerk
-   first, get the JWKS issuer URL, then plumb it through. Frontend
-   integration via `@clerk/nextjs` from the Vercel Marketplace. ~half a
-   day.
-
-2. **Async job pattern (Phase B)** — needed before the UI can have a
-   "Trigger refresh" button. `POST /api/subjects/{id}/refresh` should
-   queue a job, return job_id, frontend polls a `GET /api/jobs/{id}`.
-   Needs a `jobs` table migration (005 or 006) + a small worker. ~1 day.
-
-3. **Scheduled refreshes (Phase B)** — APScheduler or cron so
+1. **Scheduled refreshes (Phase B)** — APScheduler or cron so
    `narrative_drift` findings accumulate weekly without manual
-   triggers. ~half a day.
+   triggers. With Phase B's job queue in place, this is just a
+   scheduled `INSERT INTO jobs (subject_id, kind) VALUES (?, 'refresh')`
+   per subject per week. ~half a day.
 
-4. **Recommendation engine (Phase C)** — the spec's main value-add
+2. **Recommendation engine (Phase C)** — the spec's main value-add
    layer. The biggest remaining gap between "viewer of findings" and
    "actionable tool." Several days.
 
-5. **Frontend drill-down pages (Phase D)** — per-refresh findings page
+3. **Frontend drill-down pages (Phase D)** — per-refresh findings page
    + response detail page in `web/`, mirroring what the internal
-   Streamlit dashboard already shows.
+   Streamlit dashboard already shows. This is the **customer-facing**
+   findings UI; today customers can trigger a refresh but have nowhere
+   in the product to see what was found.
+
+   **Open structural questions to settle before building** (deferred
+   pending product input, 2026-05-11):
+   - **Top-level orientation on a subject's findings page.** Latest
+     snapshot? Drift vs prior? Per-model side-by-side? Action items
+     (depends on Phase C)?
+   - **URL shape.** `/subjects/13/refresh/23` (operator-style,
+     refresh-as-page) vs `/subjects/13/findings` (product-style,
+     refresh-as-filter with a timeline).
+   - **Density.** One big page (everything visible like Streamlit) vs
+     tabs per finding type (Asymmetry / Quotes / SoV / Drift) vs
+     narrative summary card on top + sections.
+   - **Per-response drill-down.** Streamlit has one; customer-facing
+     might keep it as-is, hide behind a "raw responses" toggle, or
+     cut. The data is there either way.
+   - **Reference points:** the operator Streamlit dashboard
+     (`streamlit run dashboard/Home.py`) renders all this data
+     operator-style — fire it up first to see what's there before
+     designing the customer-facing shape.
 
 Migration ordering note: 005 is the next free number for prompt-side
 concerns; 011 is next free for analysis-layer concerns. Phase B's
 `jobs` table fits the 005 slot.
+
+**Phase A2 (Clerk) — shipped this session:**
+- `app/api/auth.py` now validates Clerk JWTs against the JWKS at
+  `${CLERK_ISSUER}/.well-known/jwks.json`. In-memory cache with TTL
+  + refetch on unknown `kid` (handles rotation). Fails fast at module
+  load if `CLERK_ISSUER` is missing and `BYLINE_AUTH` isn't `disabled`.
+- `web/proxy.ts` (Next.js 16 renamed `middleware.ts` → `proxy.ts`) runs
+  `clerkMiddleware()` and redirects signed-out users to the Clerk-
+  hosted sign-in (`<app>.accounts.dev/sign-in`).
+- `web/app/layout.tsx` wrapped with `<ClerkProvider>`; header shows
+  `<SignInButton>`/`<SignUpButton>` for signed-out, `<UserButton>`
+  for signed-in (uses Clerk v7's `<Show when="...">` pattern, not the
+  old `<SignedIn>`/`<SignedOut>` components).
+- `web/lib/api.ts` reads the session JWT via `auth().getToken()` from
+  `@clerk/nextjs/server` and forwards it to the FastAPI. Falls back to
+  `BYLINE_API_TOKEN` env var if set (used when backend runs with
+  `BYLINE_AUTH=disabled`).
+- Env vars: backend uses `CLERK_ISSUER` (+ optional `CLERK_AUDIENCE`);
+  frontend uses `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
+  `CLERK_SECRET_KEY`. Both `.env` and `.env.local` are gitignored.
+- Smoke-tested: backend correctly 401s no-token / bad-token / forged-
+  kid requests; frontend correctly 307-redirects signed-out users to
+  the Clerk hosted sign-in URL.
+- **End-to-end confirmed** (2026-05-11): real Gmail sign-up → org
+  creation in Clerk's hosted UI → home page → subject create form →
+  POST /api/subjects → subject 13 ("Barack Obama") landed in DB with
+  the user's real Clerk `org_id`.
+
+**Phase B (async job pattern) — shipped this session:**
+- Migration `005_jobs.sql` adds the `jobs` table: `(id, subject_id,
+  org_id, kind, status, enqueued_at, started_at, completed_at, error,
+  refresh_run_id, result JSONB)`. Kind: only `'refresh'` today.
+  Status state machine: queued → running → succeeded | failed.
+  Partial index on `(enqueued_at) WHERE status='queued'` drives the
+  worker's claim query.
+- `POST /api/subjects/{id}/refresh` enqueues a `refresh` job, returns
+  `{id, status, enqueued_at, …}` immediately. Org-scoped via the
+  existing `_require_org`.
+- `GET /api/jobs/{job_id}` returns the current status. 404s on cross-
+  org access to avoid leaking ID existence.
+- `app/worker.py` is a long-running process started with
+  `python -m app.worker`. Polls every 1s, claims one job at a time
+  via `SELECT … FOR UPDATE SKIP LOCKED` so multiple worker processes
+  coexist safely. On claim, runs in-process:
+  `_ensure_recent_news_fresh` → `run_refresh` → `run_analysis` (full
+  6-extractor stack) → `run_cross_analysis` (full 4-analyzer stack).
+  Uses `asyncio.to_thread(...)` for the two sync chain steps that
+  internally call `asyncio.run()` — avoids the "cannot call
+  asyncio.run() from a running event loop" collision with the
+  worker's outer loop.
+- `app/api/routes/subjects.py` and `app/api/routes/jobs.py` carry the
+  endpoints; `web/lib/api.ts` carries `triggerRefresh` / `getJob`;
+  `web/app/subjects/[id]/refresh-button.tsx` is the client component
+  that triggers + polls + revalidates the subject page on success.
+- `web/app/api/jobs/[id]/route.ts` is a Next-side proxy route the
+  client uses to poll while authenticated via the Clerk session.
+- **Cost/timing budgets observed:** job 2 ran in ~66s wall time at
+  $0.0131 cost for a partial refresh (4/20 successful responses).
+  A full 20/20 person refresh runs ~$0.11 end-to-end (refresh ~$0.06
+  + analyzer ~$0.04 + cross-analyzer ~$0.011) in roughly 60-90s.
+- **Timing gotcha caught + fixed:** Postgres `NOW()` returns the
+  transaction start time, not wall-clock time. On a long-lived
+  worker connection, two consecutive UPDATE … SET ts=NOW() statements
+  recorded the same time even when 60s apart in real life. Switched
+  to `clock_timestamp()` for `started_at` / `completed_at`. Lesson
+  to carry forward: use `clock_timestamp()` whenever you actually
+  want wall-clock time in a long-lived connection.
+- **Failure-path UX confirmed:** job 1 (the first click, with the
+  asyncio.run bug pre-fix) flipped status='failed' and the button
+  surfaced the error text inline — proves the client polling +
+  error surfacing works end-to-end.
+- **Architectural caveat (not yet relevant):** the worker is
+  unsupervised. If it crashes mid-job, the row stays
+  `status='running'` forever (no stuck-job reaper). Acceptable for
+  dev; add a reaper or per-job timeout before any real traffic.
+
+**Schema-driven new-subject form — shipped this session:**
+- `GET /api/categories/{slug}/setup-inputs` (in
+  `app/api/routes/categories.py`) reads `prompts/{slug}.yaml` and
+  returns the setup_inputs schema as JSON (key, label, description,
+  required, example, type). Filters out `type: generated` fields
+  (e.g., `recent_news`, which is fetched server-side at refresh time
+  via web search, not by the user).
+- `web/app/subjects/new/page.tsx` is now a Server Component that
+  pre-fetches all five category schemas in parallel and hands them
+  to a Client Component, `new-subject-form.tsx`. No per-category
+  round trip in the browser; the form changes shape instantly when
+  the user picks a category.
+- Required fields get a red asterisk; helpers come from the YAML
+  `description`; placeholders come from the YAML `example`. Boolean
+  fields (today only `presidential_candidate_2028`) render as
+  Yes/No selects.
+- The Server Action (`actions.ts`) was refactored to return a
+  discriminated `{ok: true, id} | {ok: false, error}` and is called
+  from JS — not from `<form action={…}>` — which sidesteps the
+  Next.js 16 / React 19 void-action constraint and lets the client
+  surface validation errors inline.
+- Backfilled subject 13 (Barack Obama) with full person setup_inputs
+  so the next refresh can hit 20/20.
+
+**Live e2e Phase B confirmation (2026-05-11, this session):**
+- Subject 13 (Barack Obama, org_3DaL42EuU4M4hN9OGLznf9L2Syi)
+- Job #1: failed — caught the worker's nested `asyncio.run()` bug
+  (now fixed). Failure surfaced inline on the button.
+- Job #2: succeeded — partial refresh (4/20 — Obama's setup_inputs
+  were incomplete pre-backfill). refresh_run 22, analysis_run 98,
+  cross_analysis_run 99. Cost $0.0131, ~66s wall time.
+- Job #3: succeeded — full refresh (20/20) after SQL backfill of
+  Obama's setup_inputs. refresh_run 23, ~$0.06, ~60s. All four
+  cross-analyzer findings populated for refresh 23.
+- The "completed" green status row in `web/app/subjects/[id]/page.tsx`
+  was rendering correctly the whole time; we'd just only ever
+  rendered "partial" before.
+- **Clerk JWT claim format gotcha:** modern Clerk (v7 SDK / v2 token
+  format) nests org info under a top-level `o` object — `o.id`,
+  `o.rol`, `o.slg`. Older Clerk versions used a flat top-level
+  `org_id`. `app/api/auth.py` accepts either, but be aware: if you
+  see "This endpoint requires an organization-scoped user" 403s, the
+  cause is usually that `o.id` is missing because the user doesn't
+  have an active org session (vs. the JWT claim name being wrong).
 
 ---
 
