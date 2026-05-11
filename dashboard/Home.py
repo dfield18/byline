@@ -108,9 +108,10 @@ ids = {f'{s["name"]} ({s["category"]}, id={s["id"]})': s["id"] for s in subjects
 choice = st.selectbox("Subject", options=list(ids.keys()), index=None, placeholder="pick one…")
 if choice:
     sid = ids[choice]
-    st.page_link(f"pages/01_subject.py?subject_id={sid}", label=f"→ Open subject detail for id={sid}")
-    # Streamlit handles query params via session_state on the destination page.
+    # Set the destination page's selection via session_state, then link to
+    # the page. (st.page_link doesn't accept query strings in the path.)
     st.session_state["subject_id"] = sid
+    st.page_link("pages/01_subject.py", label=f"→ Open subject detail for id={sid}")
 
 st.divider()
 st.caption(

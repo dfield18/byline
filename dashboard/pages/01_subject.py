@@ -266,5 +266,5 @@ else:
     )
     if picked_mr_id:
         st.session_state["model_response_id"] = picked_mr_id
-        st.page_link(f"pages/02_response.py?model_response_id={picked_mr_id}",
+        st.page_link("pages/02_response.py",
                      label=f"→ Open response detail for mr {picked_mr_id}")
