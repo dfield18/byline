@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSubject } from "@/lib/api";
+import { RefreshButton } from "./refresh-button";
 
 type Params = { id: string };
 
@@ -46,15 +47,18 @@ export default async function SubjectPage({
           ← All subjects
         </Link>
 
-        <header className="mt-4 mb-8">
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            {subject.name}
-          </h1>
-          <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-            {subject.n_refreshes} refresh{subject.n_refreshes === 1 ? "" : "es"} ·{" "}
-            {subject.n_findings} findings · created{" "}
-            {new Date(subject.created_at).toLocaleDateString()}
-          </p>
+        <header className="mt-4 mb-8 flex items-start justify-between gap-6">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+              {subject.name}
+            </h1>
+            <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+              {subject.n_refreshes} refresh{subject.n_refreshes === 1 ? "" : "es"} ·{" "}
+              {subject.n_findings} findings · created{" "}
+              {new Date(subject.created_at).toLocaleDateString()}
+            </p>
+          </div>
+          <RefreshButton subjectId={subject.id} />
         </header>
 
         {/* Setup inputs */}

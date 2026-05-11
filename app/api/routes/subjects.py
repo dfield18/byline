@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.auth import User, current_user
+from app.db import get_cursor
 from dashboard.lib.queries import create_subject, get_subject, list_subjects
 
 
@@ -95,3 +96,35 @@ async def create_new_subject(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{subject_id}/refresh", status_code=202)
+async def trigger_refresh(subject_id: int, user: User = Depends(current_user)):
+    """Enqueue a refresh job for the subject. Returns the new job_id
+    immediately — the worker process picks the job up and runs the
+    refresh + analyzer + cross_analyzer chain. The frontend polls
+    GET /api/jobs/{job_id} for status."""
+    org_id = _require_org(user)
+
+    s = get_subject(subject_id, org_id=org_id)
+    if not s:
+        raise HTTPException(status_code=404, detail=f"subject {subject_id} not found")
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            INSERT INTO jobs (subject_id, org_id, kind, status)
+            VALUES (%s, %s, 'refresh', 'queued')
+            RETURNING id, status, enqueued_at
+            """,
+            (subject_id, org_id),
+        )
+        job_id, status, enqueued_at = cur.fetchone()
+
+    return {
+        "id": job_id,
+        "subject_id": subject_id,
+        "kind": "refresh",
+        "status": status,
+        "enqueued_at": enqueued_at.isoformat(),
+    }
