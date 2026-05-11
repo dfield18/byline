@@ -18,6 +18,7 @@ import streamlit as st
 
 from dashboard.lib.queries import (
     get_response, list_subjects, get_subject, get_refresh_responses,
+    list_active_slots,
 )
 
 
@@ -37,6 +38,11 @@ def _subject(subject_id: int):
 @st.cache_data(ttl=60)
 def _responses(refresh_run_id: int):
     return get_refresh_responses(refresh_run_id)
+
+
+@st.cache_data(ttl=60)
+def _slots(category_slug: str):
+    return list_active_slots(category_slug)
 
 
 @st.cache_data(ttl=60)
@@ -91,6 +97,27 @@ subj = st.sidebar.selectbox(
     index=subj_idx,
 )
 
+# Slot — derived from the category's canonical prompt set, so the user
+# can pick "what kind of question" before choosing which refresh to view.
+# Slots are stable per category (every refresh uses the same 5+5 active
+# prompts).
+slot_rows = _slots(cat)
+slots = [(s["layer"], s["position"], s["dimension"]) for s in slot_rows]
+if not slots:
+    st.sidebar.warning(f"No active prompts for category '{cat}'")
+    st.stop()
+
+default_slot = None
+if incoming and incoming["category"] == cat:
+    default_slot = (incoming["layer"], incoming["position"], incoming["dimension"])
+slot_idx = next((i for i, s in enumerate(slots) if s == default_slot), 0)
+slot = st.sidebar.selectbox(
+    "Slot (the question type)",
+    options=slots,
+    format_func=lambda s: f"{s[0]}/{s[1]} — {s[2]}",
+    index=slot_idx,
+)
+
 # Refreshes for the chosen subject
 subj_detail = _subject(subj["id"])
 refreshes = subj_detail["refreshes"] if subj_detail else []
@@ -115,36 +142,22 @@ rr = st.sidebar.selectbox(
     index=rr_idx,
 )
 
-# Responses in that refresh — slot picker
+# Responses in that refresh — filter to the chosen slot
 responses = _responses(rr["id"])
 if not responses:
     st.sidebar.warning(f"No successful responses in refresh {rr['id']}")
     st.stop()
 
-# Unique slots, sorted: named first, then unnamed; position ascending
-slots = sorted(
-    {(r["layer"], r["position"], r["dimension"]) for r in responses},
-    key=lambda s: (0 if s[0] == "named" else 1, s[1]),
-)
-
-default_slot = None
-if incoming and incoming["refresh_run_id"] == rr["id"]:
-    default_slot = (incoming["layer"], incoming["position"], incoming["dimension"])
-slot_idx = next((i for i, s in enumerate(slots) if s == default_slot), 0)
-slot = st.sidebar.selectbox(
-    "Slot (the question type)",
-    options=slots,
-    format_func=lambda s: f"{s[0]}/{s[1]} — {s[2]}",
-    index=slot_idx,
-)
-
-# Models that ran on that slot in this refresh
+# Models that ran on the chosen slot in this refresh
 models_in_slot = sorted({
     r["model_slug"] for r in responses
     if r["layer"] == slot[0] and r["position"] == slot[1]
 })
 if not models_in_slot:
-    st.sidebar.warning("No model responses for this slot")
+    st.sidebar.warning(
+        f"No responses for slot {slot[0]}/{slot[1]} in refresh {rr['id']}. "
+        "Pick a different refresh or slot."
+    )
     st.stop()
 
 default_model = incoming["model_slug"] if (incoming and incoming["model_slug"] in models_in_slot) else models_in_slot[0]

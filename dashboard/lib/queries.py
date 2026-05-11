@@ -123,6 +123,29 @@ def get_subject(subject_id: int) -> dict[str, Any] | None:
     return subj
 
 
+def list_active_slots(category_slug: str) -> list[dict[str, Any]]:
+    """All active prompt slots for a category — the canonical 5+5 layout.
+    Returns rows ordered named-first then by position.
+
+    Slots are stable per category (every refresh of any subject in that
+    category uses the same 10 active prompts), so the Response page can
+    show this as a filter independent of which specific refresh is
+    being viewed.
+    """
+    with get_cursor(commit=False) as cur:
+        cur.execute("""
+            SELECT p.layer, p.position, p.dimension, p.type
+            FROM prompts p
+            JOIN categories c ON c.id = p.category_id
+            WHERE c.slug = %s AND p.active = TRUE
+            ORDER BY (CASE WHEN p.layer = 'named' THEN 0 ELSE 1 END), p.position
+        """, (category_slug,))
+        return [
+            {"layer": r[0], "position": r[1], "dimension": r[2], "type": r[3]}
+            for r in cur.fetchall()
+        ]
+
+
 # ─── refresh detail + responses ────────────────────────────────────────
 
 
