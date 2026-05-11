@@ -306,6 +306,23 @@ dashboard/                   # Streamlit internal dashboard (read-only)
 ├── pages/02_response.py     #   one model_response, all extractors inline
 └── lib/queries.py           #   shared read-only query layer
                              # Run: `streamlit run dashboard/Home.py`
+
+app/api/                     # FastAPI public API for the customer-facing web app
+├── main.py                  #   FastAPI app + CORS middleware
+├── auth.py                  #   auth dep (placeholder; Clerk JWT TODO)
+└── routes/
+    ├── subjects.py          #   /api/subjects, /api/subjects/{id}
+    ├── refreshes.py         #   /api/refreshes/{id}/responses + findings
+    ├── responses.py         #   /api/responses/{id}
+    └── categories.py        #   /api/categories/{slug}/slots
+                             # Run: `BYLINE_AUTH=disabled uvicorn app.api.main:app --reload --port 8000`
+
+web/                         # Customer-facing Next.js app (App Router, TS, Tailwind)
+├── app/page.tsx             #   subject list — calls FastAPI server-side
+├── app/subjects/[id]/page.tsx  #   subject profile + refresh history
+├── lib/api.ts               #   typed fetch client for the FastAPI
+└── .env.example             #   BYLINE_API_URL + BYLINE_API_TOKEN
+                             # Run: `cd web && npm run dev` (after API is up)
 ```
 
 ### Conceptual layers
@@ -738,9 +755,32 @@ direction.
   latest-non-null-per-column aggregation as cross_analyzer
   (post-Issue-1). Run: `streamlit run dashboard/Home.py`. v0 scope:
   no auth, no write paths, no charts — just tables/tabs/metrics over
-  the local data. See `dashboard/README.md` for details. Future
-  productization (auth, comparison views, charts, scheduled-refresh
-  display, hosted deploy) is intentionally deferred.
+  the local data. See `dashboard/README.md` for details.
+
+- **Customer-facing web app (Next.js + FastAPI) — v0 scaffold shipped.**
+  The internal Streamlit dashboard is for the operator; customer-facing
+  UI is a separate stack. v0 scaffold lives in `app/api/` (FastAPI
+  backend, 7 read endpoints mirroring `dashboard/lib/queries.py`) +
+  `web/` (Next.js App Router + TS + Tailwind, two pages: subject list
+  and subject detail). Auth is placeholder bearer-token in mock-user
+  mode (`BYLINE_AUTH=disabled`); Clerk JWT validation is the TODO in
+  `app/api/auth.py`. Run locally:
+  ```
+  BYLINE_AUTH=disabled uvicorn app.api.main:app --reload --port 8000
+  cd web && npm run dev
+  ```
+  End-to-end flow validated: browser → Next.js SSR → fetch FastAPI →
+  Postgres → render. Production deploy plan: Next.js → Vercel,
+  FastAPI → Render/Fly/Railway, Postgres → Neon/Supabase. See
+  `web/README.md` for the Next.js details.
+
+  **Not yet built (frontend backlog):** write paths (subject creation
+  form, refresh trigger), per-refresh findings drill-down, response
+  detail view, recommendation engine (the "what should you do about
+  it" layer per the product spec — biggest gap before customer-ready),
+  scheduled refreshes (cron / APScheduler so narrative_drift
+  accumulates without manual triggers), Clerk auth integration, real
+  multi-tenancy via `subjects.org_id`.
 - The recommendation engine (sources to engage, framings to test, etc.).
 - Auth / users / orgs / billing.
 - Alert configurations for narrative shifts.

@@ -17,6 +17,11 @@ dashboard = [
     "streamlit>=1.30",
     "pandas>=2.0",
 ]
+api = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-jose[cryptography]>=3.3",  # JWT validation (Clerk integration later)
+]
 
 [build-system]
 requires = ["setuptools>=68"]
