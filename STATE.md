@@ -196,6 +196,90 @@ concerns; 011 is next free for analysis-layer concerns. Phase B's
 - Backfilled subject 13 (Barack Obama) with full person setup_inputs
   so the next refresh can hit 20/20.
 
+**Historical retrospective methodology — shipped this session (2026-05-12):**
+- The customer wants weekly trajectory data for each prompt. Real
+  trajectories take weeks to accumulate via scheduled forward
+  refreshes (Phase B-2, still pending). To cold-start the trajectory
+  views, we now also support **retrospective historical refreshes**
+  — a parametric+date-filtered alternate methodology.
+- **Methodology** (validated via 3 rounds of Phase 0 testing):
+  - Grounding stays **ON**. Pure parametric had a cutoff-drift problem
+    — for target dates past the model's training cutoff, the
+    "retrospective" answer is really "cutoff knowledge with a date
+    sticker." So grounding is on, and the model is instructed to
+    constrain its search queries with the `before:{as_of_date}`
+    operator. Phase 0 round 3 confirmed both gpt-5-mini and
+    gemini-2.5-flash emit `before:YYYY-MM-DD` on **every** search
+    query they issue when this prefix is in place.
+  - **Generated prompts skipped** (`type='generated'`). They depend
+    on `recent_news` which is live-fetched at refresh time; there's
+    no honest retrospective analog. Historical refreshes run only
+    the 6 fixed prompts per category (per person × 2 models = 12
+    queries vs the live 20).
+  - **Same templates, same models, same setup_inputs** — only the
+    rendered prompt is wrapped with the retrospective prefix.
+    Downstream methodology comparisons stay valid because the
+    prompt_id and prompt_version are unchanged.
+- Migration `007_refresh_runs_historical.sql` adds two columns to
+  `refresh_runs`: `is_historical_estimate BOOLEAN NOT NULL DEFAULT
+  FALSE` and `historical_as_of DATE`. A CHECK constraint enforces
+  `(is_historical → as_of NOT NULL)`. Partial index on
+  `(subject_id, historical_as_of DESC) WHERE is_historical = TRUE`
+  for trajectory queries.
+- `app/query_engine.py` exposes `historical_as_of` param on
+  `run_refresh`. New helper `_retrospective_prefix(date)` produces the
+  v1 prefix verbatim from Phase 0 round 3. Constant
+  `HISTORICAL_PROMPT_PREFIX_VERSION = "v1"` is stamped on each
+  `response_metadata.historical_prompt_prefix_version` for audit.
+- `app/refresh.py` CLI: `--historical-as-of YYYY-MM-DD`. Refuses to
+  create new subjects in historical mode (subject must exist).
+  Skips the `_ensure_setup_inputs_complete` interactive prompt and
+  `_ensure_recent_news_fresh` (recent_news is unused — generated
+  prompts are skipped).
+- **Live data state:** 12 weekly historical refreshes seeded for
+  Barack Obama (subject 13) — refresh_runs **24–35** spanning
+  **2026-02-17 → 2026-05-05** at 7-day intervals. All 12/12
+  successful. Per-response analysis run on all 12 (analysis_run
+  103–114, full 6-extractor stack). Total cost ~$1.04 ($0.54
+  refreshes + $0.50 analysis).
+- **Audit guarantees:**
+  - `refresh_runs.is_historical_estimate = TRUE` + `historical_as_of`
+    set on every historical refresh row.
+  - `model_responses.response_metadata` carries `historical_as_of` +
+    `historical_prompt_prefix_version` on every historical row.
+  - `model_responses.response_metadata.search_queries` shows the
+    actual `before:YYYY-MM-DD` operators the model emitted (verified
+    100% compliance on the validation refresh).
+  - `model_responses.rendered_prompt` stores the full prefixed
+    prompt the model received — complete reproducibility.
+- **Data quality (Obama trajectory):**
+  - Sentiment shows real model difference: Gemini avg 0.27, ChatGPT
+    avg 0.07 across the 12 weeks. Both models mildly positive on
+    Obama with criticism severity ~0.18.
+  - Citation rate (obama.org appearance in responses) ramps from 0%
+    at the oldest week to 17-25% at recent weeks — plausible
+    trajectory.
+  - No collapse to noise; week-over-week variation is real and
+    coherent.
+- **Deferred to Phase D:**
+  - Cross-analyzer NOT run on historical refreshes —
+    `NarrativeDriftAnalyzer` would pick a live refresh as the "prior"
+    and produce a methodology-change comparison rather than a
+    narrative-change comparison. The fix (filter
+    `_find_prior_refresh` by `is_historical_estimate` matching) is
+    small but properly belongs with the dashboard work.
+  - UI labels and visual differentiation for historical vs live in
+    trajectory views.
+  - 7 seed-subject backfills — Obama is the customer-visible subject
+    and is enough to validate Phase D. Seed subjects can be backfilled
+    later (~$8 for the lot).
+- **Worker support not yet wired** — historical refreshes today are
+  triggered only via the CLI. The `jobs` table's `kind` column still
+  only accepts `'refresh'`. Adding `'historical_refresh'` (or
+  extending refresh with an `as_of_date` payload field) is a follow-
+  up for when scheduled retrospective refreshes are wanted from the
+  worker.
+
 **Phase B hardening — shipped this session (2026-05-12):**
 - Migration `006_subjects_unique_org_name.sql` adds a partial unique
   index `(org_id, name) WHERE org_id IS NOT NULL` on `subjects`. The

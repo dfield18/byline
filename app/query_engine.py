@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from datetime import date
 from decimal import Decimal
 
 from psycopg_pool import AsyncConnectionPool
@@ -24,6 +25,33 @@ from app.prompt_generator import generate_natural_prompt, get_generation_model
 from app.providers import get_provider
 
 
+# Versioned so we can iterate the prefix wording later without losing
+# the audit trail. Stamped on each historical model_responses row in
+# response_metadata.historical_prompt_prefix_version.
+HISTORICAL_PROMPT_PREFIX_VERSION = "v1"
+
+
+def _retrospective_prefix(as_of_date: date) -> str:
+    """The exact prefix prepended to each rendered prompt for historical
+    estimates. Instructs the model to (a) frame the answer as if it were
+    `as_of_date`, (b) constrain its web search queries to `before:` that
+    date. Validated in Phase 0 round 3: gpt-5-mini reliably emits the
+    `before:` operator on every search query when this prefix is in
+    place."""
+    iso = as_of_date.isoformat()
+    human = as_of_date.strftime("%B %-d, %Y")  # e.g. "April 14, 2026"
+    return (
+        f"For this question, answer as if today's date were {human}. "
+        f"When you use web search, restrict your queries to sources "
+        f"published on or before {human} by adding a `before:{iso}` "
+        f"filter to your search queries (for example: "
+        f"`Barack Obama criticism before:{iso}`). Ignore any results "
+        f"dated after {human}. If pre-date sources are insufficient to "
+        f"answer, say so explicitly rather than relying on your post-"
+        f"date knowledge.\n\nQuestion: "
+    )
+
+
 async def run_refresh(
     subject_id: int,
     *,
@@ -31,11 +59,25 @@ async def run_refresh(
     enable_grounding: bool = True,
     reasoning_enabled: bool = False,
     max_concurrency: int = 26,
+    historical_as_of: date | None = None,
 ) -> int:
     """Run all active prompts × all active models for a subject, concurrently.
 
     Returns the new refresh_runs.id.
+
+    Historical mode: when `historical_as_of` is set, this is a retrospective
+    parametric+date-filtered refresh, not a live one. Concretely:
+      - Grounding stays ON (web_search is the whole point — the model is
+        instructed to constrain queries with `before:{date}` so results
+        reflect pre-date sources).
+      - Generated prompts (`type='generated'`) are skipped — they depend on
+        `recent_news` which is fetched live and is meaningless retroactively.
+      - Each rendered prompt gets the retrospective prefix prepended.
+      - refresh_runs.is_historical_estimate = TRUE.
+      - Each model_responses.response_metadata is stamped with
+        historical_as_of + historical_prompt_prefix_version.
     """
+    is_historical = historical_as_of is not None
     request_params: dict = {}
 
     # Pool sized a bit larger than max_concurrency so DB writes never block on
@@ -59,15 +101,31 @@ async def run_refresh(
                     raise ValueError(f"subject {subject_id} not found")
                 _, category_id, subject_name, setup_inputs = row
 
-                await cur.execute(
-                    """
-                    SELECT id, layer, position, dimension, template, version, type
-                    FROM prompts
-                    WHERE category_id = %s AND active = TRUE
-                    ORDER BY layer DESC, position
-                    """,
-                    (category_id,),
-                )
+                # Historical refreshes skip generated prompts entirely —
+                # they depend on recent_news, which is live-fetched and has
+                # no retrospective analog. Live refreshes run all active
+                # prompts.
+                if is_historical:
+                    await cur.execute(
+                        """
+                        SELECT id, layer, position, dimension, template, version, type
+                        FROM prompts
+                        WHERE category_id = %s AND active = TRUE
+                          AND type = 'fixed'
+                        ORDER BY layer DESC, position
+                        """,
+                        (category_id,),
+                    )
+                else:
+                    await cur.execute(
+                        """
+                        SELECT id, layer, position, dimension, template, version, type
+                        FROM prompts
+                        WHERE category_id = %s AND active = TRUE
+                        ORDER BY layer DESC, position
+                        """,
+                        (category_id,),
+                    )
                 prompts = await cur.fetchall()
 
                 await cur.execute(
@@ -89,11 +147,17 @@ async def run_refresh(
 
                 await cur.execute(
                     """
-                    INSERT INTO refresh_runs (subject_id, status, grounding_enabled)
-                    VALUES (%s, 'in_progress', %s)
+                    INSERT INTO refresh_runs (
+                        subject_id, status, grounding_enabled,
+                        is_historical_estimate, historical_as_of
+                    )
+                    VALUES (%s, 'in_progress', %s, %s, %s)
                     RETURNING id
                     """,
-                    (subject_id, enable_grounding),
+                    (
+                        subject_id, enable_grounding,
+                        is_historical, historical_as_of,
+                    ),
                 )
                 refresh_run_id = (await cur.fetchone())[0]
             await conn.commit()
@@ -121,6 +185,21 @@ async def run_refresh(
         # calls a meta-LLM to produce the actual question. Generation is
         # done once per (subject, prompt) so both providers see the same
         # generated text for that slot.
+        #
+        # Historical mode: prepend the retrospective prefix to every
+        # rendered prompt. Stamp historical_as_of in extra_metadata so
+        # downstream queries can audit which prefix version produced
+        # which response.
+        prefix = _retrospective_prefix(historical_as_of) if is_historical else ""
+        historical_meta = (
+            {
+                "historical_as_of": historical_as_of.isoformat(),
+                "historical_prompt_prefix_version": HISTORICAL_PROMPT_PREFIX_VERSION,
+            }
+            if is_historical
+            else {}
+        )
+
         prerendered: dict[int, dict] = {}
         gen_tasks: list = []
         gen_prompt_ids: list = []
@@ -134,17 +213,32 @@ async def run_refresh(
                     "extra_metadata": {
                         "prompt_type": prompt_type,
                         "render_error": f"missing setup_input: {e}",
+                        **historical_meta,
                     },
                     "error": f"missing setup_input: {e}",
                 }
                 continue
             if prompt_type == "generated":
+                # Generated prompts should already have been filtered out
+                # of the SELECT for historical refreshes, but defensive:
+                # if one sneaks in, skip generation and record as failed.
+                if is_historical:
+                    prerendered[prompt_id] = {
+                        "rendered": None,
+                        "extra_metadata": {
+                            "prompt_type": "generated",
+                            "render_error": "generated prompts skipped in historical mode",
+                            **historical_meta,
+                        },
+                        "error": "generated prompts skipped in historical mode",
+                    }
+                    continue
                 gen_tasks.append(generate_natural_prompt(instruction_or_prompt))
                 gen_prompt_ids.append((prompt_id, instruction_or_prompt))
             else:
                 prerendered[prompt_id] = {
-                    "rendered": instruction_or_prompt,
-                    "extra_metadata": {"prompt_type": "fixed"},
+                    "rendered": prefix + instruction_or_prompt,
+                    "extra_metadata": {"prompt_type": "fixed", **historical_meta},
                     "error": None,
                 }
 

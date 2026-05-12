@@ -301,9 +301,41 @@ def main(
         help="Max queries running in parallel (default 26 — every query in a "
         "26-query refresh fires at once; floor is the slowest single call).",
     ),
+    historical_as_of: str | None = typer.Option(
+        None,
+        "--historical-as-of",
+        help=(
+            "Run a retrospective historical-estimate refresh as-of the given "
+            "date (YYYY-MM-DD). Skips generated prompts (they need live "
+            "recent_news), keeps grounding ON, and prepends a "
+            "`before:{date}` instruction so search results are filtered to "
+            "pre-date sources. Subject must already exist."
+        ),
+    ),
 ) -> None:
+    from datetime import date as _date
+
+    historical_date: _date | None = None
+    if historical_as_of is not None:
+        try:
+            historical_date = _date.fromisoformat(historical_as_of)
+        except ValueError:
+            typer.echo(
+                f"error: --historical-as-of must be YYYY-MM-DD, got '{historical_as_of}'",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
     subject_id = _find_subject_by_name(name)
     if subject_id is None:
+        if historical_date is not None:
+            typer.echo(
+                f"error: subject '{name}' not found. Historical refreshes "
+                f"require an existing subject (create it first via a live "
+                f"refresh or the web UI).",
+                err=True,
+            )
+            raise typer.Exit(code=1)
         typer.echo(f"\nNo subject named '{name}' found. Let's create one.")
         category_id, slug = _pick_category()
         setup_inputs_def = _load_setup_inputs_def(slug)
@@ -312,14 +344,25 @@ def main(
         typer.echo(f"\nCreated subject id={subject_id}: {name}")
     else:
         typer.echo(f"\nFound existing subject id={subject_id}: {name}")
-        _ensure_setup_inputs_complete(subject_id, name)
+        if historical_date is None:
+            _ensure_setup_inputs_complete(subject_id, name)
 
-    # Re-fetch recent_news if cached value is older than 7 days (or missing).
-    # Non-fatal: a web-search failure doesn't block the refresh.
-    _ensure_recent_news_fresh(subject_id, name)
+    if historical_date is not None:
+        typer.echo(
+            f"\nRunning HISTORICAL refresh as-of {historical_date.isoformat()}. "
+            f"Generated prompts skipped; grounding ON with `before:` filter."
+        )
+    else:
+        # Re-fetch recent_news if cached value is older than 7 days (or missing).
+        # Non-fatal: a web-search failure doesn't block the refresh.
+        _ensure_recent_news_fresh(subject_id, name)
 
     refresh_run_id = asyncio.run(
-        run_refresh(subject_id, max_concurrency=max_concurrency)
+        run_refresh(
+            subject_id,
+            max_concurrency=max_concurrency,
+            historical_as_of=historical_date,
+        )
     )
     subject_name, status, successful, total, cost, seconds = _summarize(refresh_run_id)
 
