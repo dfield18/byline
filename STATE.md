@@ -35,30 +35,63 @@ and deleted (locally and on `origin`). To resume:
    layer. The biggest remaining gap between "viewer of findings" and
    "actionable tool." Several days.
 
-3. **Frontend drill-down pages (Phase D)** — per-refresh findings page
-   + response detail page in `web/`, mirroring what the internal
-   Streamlit dashboard already shows. This is the **customer-facing**
-   findings UI; today customers can trigger a refresh but have nowhere
-   in the product to see what was found.
+3. **Frontend drill-down pages (Phase D)** — the customer-facing
+   findings UI. Today customers can trigger a refresh but have
+   nowhere in the product to see what was found.
 
-   **Open structural questions to settle before building** (deferred
-   pending product input, 2026-05-11):
-   - **Top-level orientation on a subject's findings page.** Latest
-     snapshot? Drift vs prior? Per-model side-by-side? Action items
-     (depends on Phase C)?
-   - **URL shape.** `/subjects/13/refresh/23` (operator-style,
-     refresh-as-page) vs `/subjects/13/findings` (product-style,
-     refresh-as-filter with a timeline).
-   - **Density.** One big page (everything visible like Streamlit) vs
-     tabs per finding type (Asymmetry / Quotes / SoV / Drift) vs
-     narrative summary card on top + sections.
-   - **Per-response drill-down.** Streamlit has one; customer-facing
-     might keep it as-is, hide behind a "raw responses" toggle, or
-     cut. The data is there either way.
-   - **Reference points:** the operator Streamlit dashboard
-     (`streamlit run dashboard/Home.py`) renders all this data
-     operator-style — fire it up first to see what's there before
-     designing the customer-facing shape.
+   **Resolved IA decisions** (2026-05-12, product input received):
+   - **Hub-and-spokes**, not tabs. Each section is its own page with
+     its own URL, its own layout, and its own data shape.
+   - **Distinct URLs per spoke** (`/subjects/[id]/[section]`). The
+     shareable-link workflow ("comms director DMs the Competition
+     view to their CEO") is the deciding factor; tabs would force the
+     recipient to click into the right tab themselves.
+   - **Persistent shell** via Next.js App Router layout:
+     `web/app/subjects/[id]/layout.tsx` holds the sidebar (section
+     nav) and top bar (subject picker, date-range filter, Export,
+     Generate Report). Each spoke is a `page.tsx`. Switching
+     sections re-renders only the content area — feels tab-like to
+     the user even though the URL changes.
+   - **Refresh-as-filter, not refresh-as-page.** Top-bar date-range
+     filter scopes every section to a window. `/subjects/[id]/refresh/[id]`
+     can exist as a secondary view for power users who want to
+     compare specific historical snapshots, but it isn't primary nav.
+   - **Filter state in URL query strings** (e.g., `?range=30d`) so
+     filters survive section switches and are deep-linkable.
+
+   **Planned sidebar sections** (subject to refinement based on
+   "which sections actually have data"):
+   - Overview, Narrative, Visibility, Competition, Topics, Sources,
+     Prompts, Reports, Settings. **Asymmetry** placement is open —
+     could be its own section or folded into Narrative/Visibility.
+
+   **Approximate file layout for the build:**
+   ```
+   web/app/subjects/[id]/
+   ├── layout.tsx              ← persistent sidebar + top bar
+   ├── page.tsx                ← Overview (currently the subject page)
+   ├── narrative/page.tsx
+   ├── visibility/page.tsx
+   ├── competition/page.tsx
+   ├── topics/page.tsx
+   ├── sources/page.tsx
+   ├── prompts/page.tsx
+   ├── reports/page.tsx
+   └── settings/page.tsx
+   ```
+
+   **Still open / pending product input:**
+   - **Overview page content.** What goes in the headline summary,
+     KPI tiles, "Key insights" cards. Customer to follow up with
+     details. Mockup reviewed 2026-05-12 had a strong shape:
+     bottom-line callout + 3 KPI tiles + dominant-narrative
+     side card + "what stands out this period" cards.
+   - **Per-response drill-down.** Whether to keep, hide behind a
+     "raw responses" toggle, or cut. Defer to during-build decision.
+   - **Sub-tabs within a spoke** (e.g., Sources broken into "by
+     category" / "by domain") — defer to during-build per-section.
+   - **Streamlit dashboard.** Stays alive as the operator surface
+     (not migrated to `web/`). Two surfaces, two audiences.
 
 Migration ordering note: 005 is the next free number for prompt-side
 concerns; 011 is next free for analysis-layer concerns. Phase B's

@@ -119,6 +119,17 @@ setup_inputs:
       Recently introduced legislation on prescription drug pricing and held
       Senate HELP Committee hearings questioning pharmaceutical CEOs.
 
+  - key: canonical_url
+    label: Official website
+    description: >
+      The person's primary official site — e.g. their Senate.gov page,
+      campaign site, or House.gov page. Not used in any prompt; the
+      sources extractor reads it to compute citation rate (the percent
+      of AI responses that cite this person's own site). Leave blank if
+      they don't have a stable canonical site.
+    required: false
+    example: https://www.senate.gov/senators/sanders
+
 prompts:
   named:
     - position: 1

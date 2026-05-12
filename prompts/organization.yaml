@@ -87,6 +87,17 @@ setup_inputs:
       Recently released a major policy paper on judicial reform and held
       a closed-door briefing for Senate Republican aides.
 
+  - key: canonical_url
+    label: Official website
+    description: >
+      The organization's primary official site — e.g. heritage.org,
+      brookings.edu, the campaign or movement homepage. Not used in any
+      prompt; the sources extractor reads it to compute citation rate
+      (the percent of AI responses that cite this organization's own
+      site). Leave blank if there's no stable canonical site.
+    required: false
+    example: https://www.heritage.org
+
 prompts:
   named:
     - position: 1
