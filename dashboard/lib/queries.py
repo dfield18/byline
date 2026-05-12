@@ -160,38 +160,53 @@ def create_subject(
     created_at) so the caller can immediately redirect to its detail page.
 
     Raises ValueError if the category slug is invalid or a subject with
-    the same (org_id, name) pair already exists.
+    the same (org_id, name) pair already exists. The duplicate check is
+    enforced both at the application level (SELECT-then-INSERT below) and
+    at the DB level via the partial unique index added in migration 006 —
+    the application check gives a clean error message in the common case,
+    the DB index catches the SELECT-then-INSERT race.
     """
+    import psycopg.errors
+
     # Make sure 'name' is in setup_inputs (mirrors the existing CLI flow
     # in app/refresh.py which seeds it there from the CLI argument).
     if "name" not in setup_inputs:
         setup_inputs = {**setup_inputs, "name": name}
 
-    with get_cursor() as cur:
-        cur.execute("SELECT id FROM categories WHERE slug = %s", (category_slug,))
-        row = cur.fetchone()
-        if not row:
-            raise ValueError(f"category '{category_slug}' not found")
-        cat_id = row[0]
+    try:
+        with get_cursor() as cur:
+            cur.execute("SELECT id FROM categories WHERE slug = %s", (category_slug,))
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"category '{category_slug}' not found")
+            cat_id = row[0]
 
-        cur.execute(
-            "SELECT id FROM subjects WHERE org_id = %s AND name = %s",
-            (org_id, name),
-        )
-        if cur.fetchone():
-            raise ValueError(
-                f"a subject named '{name}' already exists for this org"
+            cur.execute(
+                "SELECT id FROM subjects WHERE org_id = %s AND name = %s",
+                (org_id, name),
             )
+            if cur.fetchone():
+                raise ValueError(
+                    f"a subject named '{name}' already exists for this org"
+                )
 
-        cur.execute(
-            """
-            INSERT INTO subjects (category_id, name, setup_inputs, org_id)
-            VALUES (%s, %s, %s::jsonb, %s)
-            RETURNING id, name, created_at
-            """,
-            (cat_id, name, json.dumps(setup_inputs), org_id),
+            cur.execute(
+                """
+                INSERT INTO subjects (category_id, name, setup_inputs, org_id)
+                VALUES (%s, %s, %s::jsonb, %s)
+                RETURNING id, name, created_at
+                """,
+                (cat_id, name, json.dumps(setup_inputs), org_id),
+            )
+            sid, sname, created = cur.fetchone()
+    except psycopg.errors.UniqueViolation:
+        # The partial unique index on (org_id, name) fired — concurrent
+        # request beat us to the INSERT after both passed the SELECT.
+        # Convert to ValueError so callers see the same message they'd
+        # get from the application-level duplicate check.
+        raise ValueError(
+            f"a subject named '{name}' already exists for this org"
         )
-        sid, sname, created = cur.fetchone()
 
     return {
         "id": sid,

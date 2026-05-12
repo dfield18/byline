@@ -23,6 +23,15 @@ router = APIRouter(prefix="/api/subjects", tags=["subjects"])
 _VALID_CATEGORIES = {"person", "organization", "issue", "policy", "event"}
 
 
+# Rate limits on POST /{subject_id}/refresh — a real refresh costs ~$0.11
+# and takes ~60s, so we need both a per-subject cooldown (no spam-clicks
+# on one subject) and a per-org cap (no spam across all subjects).
+#
+# Numbers are deliberately generous; tune later as we see real usage.
+_REFRESH_PER_SUBJECT_COOLDOWN_MINUTES = 5
+_REFRESH_PER_ORG_HOURLY_LIMIT = 20
+
+
 class CreateSubjectRequest(BaseModel):
     """Subject creation payload. `setup_inputs` is the category-specific
     dict that drives prompt rendering (see prompts/*.yaml setup_inputs
@@ -103,7 +112,17 @@ async def trigger_refresh(subject_id: int, user: User = Depends(current_user)):
     """Enqueue a refresh job for the subject. Returns the new job_id
     immediately — the worker process picks the job up and runs the
     refresh + analyzer + cross_analyzer chain. The frontend polls
-    GET /api/jobs/{job_id} for status."""
+    GET /api/jobs/{job_id} for status.
+
+    Rate-limited to protect provider budgets:
+      - per subject: 1 enqueue per _REFRESH_PER_SUBJECT_COOLDOWN_MINUTES
+      - per org: _REFRESH_PER_ORG_HOURLY_LIMIT enqueues per rolling hour
+
+    Both limits look at non-failed enqueues only (queued / running /
+    succeeded). Failed jobs don't count toward the quota — a customer
+    whose first attempt errors out shouldn't have to wait 5 minutes to
+    retry.
+    """
     org_id = _require_org(user)
 
     s = get_subject(subject_id, org_id=org_id)
@@ -111,6 +130,63 @@ async def trigger_refresh(subject_id: int, user: User = Depends(current_user)):
         raise HTTPException(status_code=404, detail=f"subject {subject_id} not found")
 
     with get_cursor(commit=True) as cur:
+        # Per-subject cooldown
+        cur.execute(
+            """
+            SELECT EXTRACT(EPOCH FROM (
+                NOW() - MAX(enqueued_at)
+            ))::int AS seconds_since
+            FROM jobs
+            WHERE subject_id = %s
+              AND kind = 'refresh'
+              AND status IN ('queued', 'running', 'succeeded')
+              AND enqueued_at > NOW() - make_interval(mins => %s)
+            """,
+            (subject_id, _REFRESH_PER_SUBJECT_COOLDOWN_MINUTES),
+        )
+        row = cur.fetchone()
+        seconds_since = row[0] if row else None
+        if seconds_since is not None:
+            wait_s = max(
+                1,
+                _REFRESH_PER_SUBJECT_COOLDOWN_MINUTES * 60 - seconds_since,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"This subject was refreshed recently. Try again in "
+                    f"~{wait_s} seconds "
+                    f"(per-subject cooldown is "
+                    f"{_REFRESH_PER_SUBJECT_COOLDOWN_MINUTES} minutes)."
+                ),
+                headers={"Retry-After": str(wait_s)},
+            )
+
+        # Per-org rolling-hour cap
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM jobs
+            WHERE org_id = %s
+              AND kind = 'refresh'
+              AND status IN ('queued', 'running', 'succeeded')
+              AND enqueued_at > NOW() - INTERVAL '1 hour'
+            """,
+            (org_id,),
+        )
+        recent_count = cur.fetchone()[0]
+        if recent_count >= _REFRESH_PER_ORG_HOURLY_LIMIT:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Your organization has triggered "
+                    f"{_REFRESH_PER_ORG_HOURLY_LIMIT} refreshes in the past "
+                    f"hour. Wait for that window to roll over before "
+                    f"triggering more."
+                ),
+                headers={"Retry-After": "3600"},
+            )
+
+        # Limits OK — enqueue.
         cur.execute(
             """
             INSERT INTO jobs (subject_id, org_id, kind, status)

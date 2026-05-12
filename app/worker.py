@@ -70,34 +70,41 @@ logger = logging.getLogger("app.worker")
 
 
 # ─── job claim / status helpers ──────────────────────────────────────
+#
+# Each helper opens a fresh psycopg connection. Earlier versions held
+# one connection across the whole polling iteration including the
+# multi-minute chain — managed Postgres providers (Neon, RDS, etc.)
+# silently close idle connections after ~5 min, so by the time we got
+# to _mark_succeeded the connection was dead. Status updates failed
+# silently and jobs stayed `running` forever.
+#
+# clock_timestamp() (vs NOW()) is still important: NOW() returns the
+# transaction start time, and even short-lived connections will report
+# the same value across rapid successive commits.
 
 
-def _claim_next_job(conn: psycopg.Connection) -> dict[str, Any] | None:
+def _claim_next_job() -> dict[str, Any] | None:
     """Atomically claim the oldest queued job and flip it to running.
-    Uses FOR UPDATE SKIP LOCKED so multiple workers don't fight.
-
-    Uses clock_timestamp() (real wall clock) rather than NOW() —
-    NOW() returns the transaction start time, which on this worker's
-    long-lived connection makes start/complete timestamps coincide
-    and `completed_at - started_at` durations meaningless."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE jobs
-            SET status = 'running', started_at = clock_timestamp()
-            WHERE id = (
-                SELECT id
-                FROM jobs
-                WHERE status = 'queued'
-                ORDER BY enqueued_at
-                FOR UPDATE SKIP LOCKED
-                LIMIT 1
+    Uses FOR UPDATE SKIP LOCKED so multiple workers don't fight."""
+    with psycopg.connect(get_database_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE jobs
+                SET status = 'running', started_at = clock_timestamp()
+                WHERE id = (
+                    SELECT id
+                    FROM jobs
+                    WHERE status = 'queued'
+                    ORDER BY enqueued_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                )
+                RETURNING id, subject_id, org_id, kind
+                """
             )
-            RETURNING id, subject_id, org_id, kind
-            """
-        )
-        row = cur.fetchone()
-    conn.commit()
+            row = cur.fetchone()
+        conn.commit()
     if not row:
         return None
     return {
@@ -109,46 +116,56 @@ def _claim_next_job(conn: psycopg.Connection) -> dict[str, Any] | None:
 
 
 def _mark_succeeded(
-    conn: psycopg.Connection,
     job_id: int,
     refresh_run_id: int | None,
     result: dict[str, Any],
 ) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE jobs
-            SET status = 'succeeded',
-                completed_at = clock_timestamp(),
-                refresh_run_id = %s,
-                result = %s
-            WHERE id = %s
-            """,
-            (refresh_run_id, Json(result), job_id),
-        )
-    conn.commit()
+    with psycopg.connect(get_database_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE jobs
+                SET status = 'succeeded',
+                    completed_at = clock_timestamp(),
+                    refresh_run_id = %s,
+                    result = %s
+                WHERE id = %s
+                """,
+                (refresh_run_id, Json(result), job_id),
+            )
+        conn.commit()
 
 
-def _mark_failed(conn: psycopg.Connection, job_id: int, err: str) -> None:
+def _mark_failed(job_id: int, err: str) -> None:
     # Truncate error text; psycopg handles long text fine, but the UI
     # doesn't need 10KB stack traces.
     err = err[:2000]
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE jobs
-            SET status = 'failed', completed_at = clock_timestamp(), error = %s
-            WHERE id = %s
-            """,
-            (err, job_id),
+    try:
+        with psycopg.connect(get_database_url()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'failed', completed_at = clock_timestamp(), error = %s
+                    WHERE id = %s
+                    """,
+                    (err, job_id),
+                )
+            conn.commit()
+    except psycopg.Error:
+        # The mark-failed itself can't fail silently — log loudly so an
+        # operator notices a stuck `running` row.
+        logger.exception(
+            "Failed to mark job %s as failed; row will be left as `running` "
+            "until a stuck-job reaper fixes it.", job_id,
         )
-    conn.commit()
 
 
-def _lookup_subject_name(conn: psycopg.Connection, subject_id: int) -> str | None:
-    with conn.cursor() as cur:
-        cur.execute("SELECT name FROM subjects WHERE id = %s", (subject_id,))
-        row = cur.fetchone()
+def _lookup_subject_name(subject_id: int) -> str | None:
+    with psycopg.connect(get_database_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT name FROM subjects WHERE id = %s", (subject_id,))
+            row = cur.fetchone()
     return row[0] if row else None
 
 
@@ -243,38 +260,40 @@ async def _main(poll_seconds: float) -> None:
 
     while not _should_stop:
         try:
-            with psycopg.connect(get_database_url()) as conn:
-                job = _claim_next_job(conn)
-
-                if job is None:
-                    await asyncio.sleep(poll_seconds)
-                    continue
-
-                logger.info(
-                    "Claimed job %s (kind=%s, subject_id=%s, org_id=%s)",
-                    job["id"], job["kind"], job["subject_id"], job["org_id"],
-                )
-
-                try:
-                    if job["kind"] == "refresh":
-                        name = _lookup_subject_name(conn, job["subject_id"])
-                        if not name:
-                            raise RuntimeError(
-                                f"subject {job['subject_id']} not found"
-                            )
-                        result = await _execute_refresh_job(job["subject_id"], name)
-                        _mark_succeeded(
-                            conn, job["id"], result["refresh_run_id"], result
-                        )
-                        logger.info("Job %s succeeded: %s", job["id"], result)
-                    else:
-                        raise RuntimeError(f"unknown job kind: {job['kind']}")
-                except Exception as exc:  # noqa: BLE001
-                    logger.exception("Job %s failed", job["id"])
-                    _mark_failed(conn, job["id"], f"{type(exc).__name__}: {exc}")
+            job = _claim_next_job()
         except psycopg.Error as exc:
-            logger.error("DB error in polling loop: %s; sleeping then retrying", exc)
+            logger.error(
+                "DB error claiming next job: %s; sleeping then retrying", exc,
+            )
             await asyncio.sleep(poll_seconds * 5)
+            continue
+
+        if job is None:
+            await asyncio.sleep(poll_seconds)
+            continue
+
+        logger.info(
+            "Claimed job %s (kind=%s, subject_id=%s, org_id=%s)",
+            job["id"], job["kind"], job["subject_id"], job["org_id"],
+        )
+
+        try:
+            if job["kind"] == "refresh":
+                name = _lookup_subject_name(job["subject_id"])
+                if not name:
+                    raise RuntimeError(
+                        f"subject {job['subject_id']} not found"
+                    )
+                result = await _execute_refresh_job(job["subject_id"], name)
+                _mark_succeeded(
+                    job["id"], result["refresh_run_id"], result
+                )
+                logger.info("Job %s succeeded: %s", job["id"], result)
+            else:
+                raise RuntimeError(f"unknown job kind: {job['kind']}")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Job %s failed", job["id"])
+            _mark_failed(job["id"], f"{type(exc).__name__}: {exc}")
 
 
 def main() -> None:

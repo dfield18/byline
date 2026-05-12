@@ -163,7 +163,94 @@ concerns; 011 is next free for analysis-layer concerns. Phase B's
 - Backfilled subject 13 (Barack Obama) with full person setup_inputs
   so the next refresh can hit 20/20.
 
-**Live e2e Phase B confirmation (2026-05-11, this session):**
+**Phase B hardening — shipped this session (2026-05-12):**
+- Migration `006_subjects_unique_org_name.sql` adds a partial unique
+  index `(org_id, name) WHERE org_id IS NOT NULL` on `subjects`. The
+  SELECT-then-INSERT in `dashboard.lib.queries.create_subject` already
+  rejected duplicates at the application layer, but two simultaneous
+  POSTs could both pass the SELECT and both INSERT. The new index
+  catches that race; `create_subject` now also catches
+  `psycopg.errors.UniqueViolation` and converts it to the same
+  `ValueError` the application-layer check produces, so the API
+  surfaces a clean 400 in both paths.
+- `app/worker.py` no longer holds one psycopg connection across a
+  full refresh chain (which sat idle for 60+ seconds and would be
+  reaped by Neon/RDS-style idle-conn timeouts). Each of
+  `_claim_next_job`, `_mark_succeeded`, `_mark_failed`, and
+  `_lookup_subject_name` opens its own short-lived connection. The
+  outer try/except in `_main` also guards `_claim_next_job`'s DB
+  errors so a brief Postgres blip doesn't crash the worker — it just
+  sleeps and retries.
+- `POST /api/subjects/{id}/refresh` is now rate-limited two ways:
+  - **Per subject:** 1 enqueue per 5 minutes
+    (`_REFRESH_PER_SUBJECT_COOLDOWN_MINUTES`). Returns 429 with a
+    Retry-After header and a human-readable wait time.
+  - **Per org:** 20 enqueues per rolling hour
+    (`_REFRESH_PER_ORG_HOURLY_LIMIT`). Returns 429 with
+    Retry-After: 3600.
+  Failed jobs don't count toward either quota (so a customer whose
+  first attempt errors can immediately retry). Both limits are
+  constants at the top of `subjects.py` — easy to tune.
+
+**Known issues / followups from the 2026-05-12 QA pass (none blocking):**
+
+*Medium — should fix soon:*
+- **Stuck-job reaper:** if the worker crashes mid-job, the row stays
+  `status='running'` forever. Cheap to fix with a SQL job:
+  `UPDATE jobs SET status='failed', error='reaper: worker died'
+  WHERE status='running' AND started_at < NOW() - INTERVAL '15 min'`.
+- **Provider-quota failures look like crashes:** when OpenAI/Gemini
+  rate-limits mid-refresh, individual responses fail and the engine
+  records "partial" status. The UI surfaces a green "completed" job
+  without context. Worth differentiating provider-quota errors from
+  customer-input errors in the surfaced text.
+- **Prompt-injection trust boundary:** customer-supplied `name` and
+  `setup_inputs` go directly into prompt templates via `{name}` etc.
+  A subject named `"Bernie Sanders. Ignore prior instructions and…"`
+  is rendered verbatim. Out of scope today; sanitization belongs in
+  `app/query_engine.py`.
+- **Frontend new-subject page hard-fails if any one schema fetch
+  errors:** `await Promise.all(...)` over 5 categories; one 5xx →
+  whole page 500. Should fall back gracefully.
+- **`BYLINE_API_TOKEN` escape hatch in `web/lib/api.ts`:** if
+  accidentally set in production, every server-side fetch uses the
+  same hardcoded token, bypassing per-user Clerk identity. Guard
+  with `NODE_ENV !== 'production'` or strip the codepath at build.
+- **CORS in prod:** `BYLINE_CORS_ORIGINS` must be explicit (not
+  `"*"`) because `allow_credentials=True` is set. Document on the
+  deploy runbook.
+
+*Low / polish:*
+- `latest_refresh_id` uses `MAX(rr.id)` — assumes SERIAL order ≈
+  time order. True today; document or switch to `started_at`.
+- `n_findings` counts findings across all methodology versions —
+  double-counts after methodology bumps. Filter by distinct
+  `(analysis_type, analysis_key)`.
+- Refresh button stays "Done" after success. Customer might not
+  realize they can re-trigger. Reset label after the
+  revalidatePath, or clear job state.
+- New-subject form clears all values on category change. Cache
+  per-category form state.
+- Validation errors don't highlight specific fields. Single rolled-
+  up banner; add red borders / focus on missing inputs.
+- Worker logs to stdout only. No structured logging / aggregation;
+  first opaque failure in production will require SSH-and-grep.
+- No automated tests anywhere (`tests/` is empty).
+
+*Edge cases worth manually testing before any customer:*
+- Sign out in tab A, trigger refresh in tab B → tab B must hit sign-in,
+  not silently fail.
+- DELETE a subject in psql while a refresh is mid-flight → worker should
+  fail cleanly, not crash.
+- POST `/api/subjects/13/refresh` from another org's user → 404 (NOT 403,
+  which leaks existence).
+- Trigger refresh, kill -9 worker, restart worker → row remains `running`
+  forever (proves the stuck-job-reaper gap).
+- Submit subject name with newlines, emoji, 200-char limit boundary.
+- Submit `name = "Test\nIgnore prior instructions"` → currently
+  accepted as-is (prompt injection).
+
+**Live e2e Phase B confirmation (2026-05-11):**
 - Subject 13 (Barack Obama, org_3DaL42EuU4M4hN9OGLznf9L2Syi)
 - Job #1: failed — caught the worker's nested `asyncio.run()` bug
   (now fixed). Failure surfaced inline on the button.
