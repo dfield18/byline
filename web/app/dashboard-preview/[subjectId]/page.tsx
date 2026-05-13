@@ -25,6 +25,7 @@ import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
+import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
 import { getSubjectOverview, type SubjectOverview, type KpiValue } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -382,6 +383,89 @@ function MiniSpark({
   );
 }
 
+// Map quote-type to a Pill tone. Criticism/praise carry direction;
+// the rest are neutral analytical categorizations.
+const TYPE_TONE: Record<string, "warning" | "success" | "primary" | "gold" | "neutral"> = {
+  criticism: "warning",
+  praise: "success",
+  narrative_frame: "primary",
+  model_difference: "gold",
+  characterization: "neutral",
+  factual_claim: "neutral",
+};
+
+const TYPE_LABEL: Record<string, string> = {
+  criticism: "Criticism",
+  praise: "Praise",
+  narrative_frame: "Narrative frame",
+  model_difference: "Model difference",
+  characterization: "Characterization",
+  factual_claim: "Factual claim",
+};
+
+const MODEL_DISPLAY: Record<string, string> = {
+  chatgpt: "ChatGPT",
+  gemini: "Gemini",
+  claude: "Claude",
+  perplexity: "Perplexity",
+};
+
+function EvidenceCard({ card }: { card: SubjectOverview["evidence_cards"][number] }) {
+  // Unnamed-layer cards show the Mentioned/Not-mentioned pill;
+  // named-layer cards show the quote type pill instead (mention status
+  // is meaningless when the subject is in the prompt itself).
+  const pillNode =
+    card.mention_status !== null ? (
+      card.mention_status.mentioned ? (
+        <Pill tone="success">
+          Mentioned · #{card.mention_status.rank ?? "?"}
+        </Pill>
+      ) : (
+        <Pill tone="destructive">Not mentioned</Pill>
+      )
+    ) : (
+      <Pill tone={TYPE_TONE[card.type] || "neutral"}>
+        {TYPE_LABEL[card.type] || card.type}
+      </Pill>
+    );
+
+  const frameAbsent =
+    card.mention_status?.mentioned === false;
+  const frameLabel = frameAbsent
+    ? "Absent from answer"
+    : (card.frame_label || "—");
+
+  return (
+    <Card className="p-5 flex flex-col">
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: MODEL_COLORS[MODEL_DISPLAY[card.model_slug]] || "var(--muted-foreground)" }}
+          />
+          {MODEL_DISPLAY[card.model_slug] || card.model_slug}
+        </span>
+        {pillNode}
+      </div>
+      <div className="text-[13px] font-semibold text-foreground mb-3 leading-snug">
+        &ldquo;{card.prompt_text}&rdquo;
+      </div>
+      <div
+        className="text-xs text-muted-foreground leading-relaxed flex-1 border-l-2 border-primary/40 pl-3 italic"
+        title={card.rationale}
+      >
+        {card.excerpt}
+      </div>
+      <div className="mt-4 pt-3 border-t border-border text-[11px] text-muted-foreground">
+        Frame:{" "}
+        <span className={frameAbsent ? "text-warning font-medium" : "text-foreground font-medium"}>
+          {frameLabel}
+        </span>
+      </div>
+    </Card>
+  );
+}
+
 function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
   if (!sources.length) {
     return (
@@ -671,11 +755,21 @@ export default async function SubjectOverviewPage({
             </section>
           )}
 
-          <PhasePlaceholder
-            title="Evidence — what AI is actually saying"
-            phase="Phase 2"
-            what="Sample AI answers paraphrased with frame labels and cited sources will surface here once response selection + paraphrase logic ships."
-          />
+          {/* EVIDENCE — Phase 3c wiring */}
+          {data.evidence_cards.length > 0 && (
+            <section>
+              <SectionTitle
+                eyebrow="Evidence"
+                title="What AI is actually saying"
+                description="Verbatim quotes selected by the top-quotes cross-analyzer across the latest refresh. Each card shows the originating prompt, the AI's exact words, and the narrative cluster it falls under."
+              />
+              <div className="grid md:grid-cols-3 gap-4">
+                {data.evidence_cards.map((card) => (
+                  <EvidenceCard key={card.model_response_id} card={card} />
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* VISIBILITY TRENDS — wired */}
           <section>
@@ -687,11 +781,71 @@ export default async function SubjectOverviewPage({
             <TrajectoryStrip trajectory={data.trajectory} />
           </section>
 
-          <PhasePlaceholder
-            title="Competitive snapshot"
-            phase="Phase 4"
-            what="Share of voice vs comparable subjects (e.g. other senators) will surface here once cross-subject aggregation runs."
-          />
+          {/* COMPETITIVE SNAPSHOT — Phase 4 wiring */}
+          {data.competitive.length > 0 && (
+            <Card className="p-6">
+              <SectionTitle
+                eyebrow="Competitive Snapshot"
+                title={`How ${data.subject_name} compares to peers`}
+                description={`Share of voice and visibility against the top entities AI surfaces when asked about ${data.subject_name}'s topic areas. Pulled from unnamed-layer responses on this refresh.`}
+                right={<Pill tone="primary">{data.competitive.length} entities tracked</Pill>}
+              />
+              <div className="grid md:grid-cols-2 gap-8">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">
+                    Share of Voice (% of answers)
+                  </div>
+                  <CompetitorBarsFromData
+                    data={data.competitive.map((c) => ({
+                      name: c.name,
+                      sov: Math.round(c.sov * 100),
+                      is_subject: c.is_subject,
+                    }))}
+                  />
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                        <th className="px-3 py-2.5 font-medium">Entity</th>
+                        <th className="px-3 py-2.5 font-medium text-right">Share</th>
+                        <th className="px-3 py-2.5 font-medium text-right">Avg Pos</th>
+                        <th className="px-3 py-2.5 font-medium text-right">First Mention</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.competitive.map((c) => (
+                        <tr
+                          key={c.name}
+                          className={`border-b border-border/60 ${
+                            c.is_subject ? "bg-primary/5" : "hover:bg-accent/40"
+                          } transition-colors`}
+                        >
+                          <td className="px-3 py-3">
+                            <div className="flex items-center gap-2">
+                              <span className={c.is_subject ? "font-semibold" : "font-medium"}>
+                                {c.name}
+                              </span>
+                              {c.is_subject && <Pill tone="primary">You</Pill>}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-right font-mono">
+                            {Math.round(c.sov * 100)}%
+                          </td>
+                          <td className="px-3 py-3 text-right font-mono">
+                            {c.avg_rank !== null ? c.avg_rank.toFixed(1) : "—"}
+                          </td>
+                          <td className="px-3 py-3 text-right font-mono">
+                            {Math.round(c.first_mention_rate * 100)}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* SOURCES — wired */}
           <Card className="p-6">

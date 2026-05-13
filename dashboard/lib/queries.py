@@ -754,6 +754,234 @@ def _compute_bottom_line(
     return None
 
 
+def _read_competitive_snapshot(
+    cur, refresh_run_id: int, subject_name: str,
+) -> list[dict[str, Any]]:
+    """Build the Competitive Snapshot table: the focal subject + the
+    top 4 competitor entities aggregated across all unnamed-layer
+    responses for this refresh. Returns up to 5 rows sorted by share-
+    of-voice desc, with `is_subject` flag on the focal subject's row
+    so the UI can highlight it.
+
+    SOV = share of unnamed-layer responses where the entity appears.
+    Avg pos = mean rank when the entity is mentioned.
+    First mention = share of unnamed-layer responses where the entity
+                    appears at rank 1.
+
+    All three metrics computed from raw mention_detection data
+    (subject_mentioned/mention_rank for the focal subject;
+    competitors_mentioned JSONB for everyone else). No new refreshes
+    needed — the data has been there since mention_detection v1.0
+    landed.
+    """
+    cur.execute(
+        """
+        SELECT
+          sm.subject_mentioned,
+          sm.mention_rank,
+          sm.competitors_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank, competitors_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND (
+                subject_mentioned IS NOT NULL
+                OR competitors_mentioned IS NOT NULL
+              )
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    rows = cur.fetchall()
+    total = len(rows)
+    if total == 0:
+        return []
+
+    # Focal subject aggregation
+    subject_mentions = sum(1 for r in rows if r[0])
+    subject_ranks = [r[1] for r in rows if r[0] and r[1] is not None]
+    subject_first = sum(1 for r in rows if r[0] and r[1] == 1)
+
+    # Competitors: count appearances and collect ranks per name
+    competitors: dict[str, dict[str, Any]] = {}
+    for _, _, comps in rows:
+        if not comps:
+            continue
+        comp_list = _maybe_json(comps) or []
+        if not isinstance(comp_list, list):
+            continue
+        # A competitor entity might appear in the same response's list
+        # more than once (the extractor's structured output sometimes
+        # repeats). Dedupe within a response so a single response can't
+        # double-count the same competitor's appearance.
+        seen_in_response: set[str] = set()
+        for c in comp_list:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("name")
+            if not name or not isinstance(name, str):
+                continue
+            if name in seen_in_response:
+                continue
+            seen_in_response.add(name)
+            if name not in competitors:
+                competitors[name] = {"appearances": 0, "ranks": []}
+            competitors[name]["appearances"] += 1
+            r = c.get("rank")
+            if isinstance(r, (int, float)):
+                competitors[name]["ranks"].append(float(r))
+
+    competitor_rows: list[dict[str, Any]] = []
+    for name, d in competitors.items():
+        ranks = d["ranks"]
+        appearances = d["appearances"]
+        avg_rank = sum(ranks) / len(ranks) if ranks else None
+        first_count = sum(1 for r in ranks if r == 1)
+        competitor_rows.append({
+            "name": name,
+            "sov": appearances / total,
+            "avg_rank": avg_rank,
+            "first_mention_rate": first_count / total,
+            "is_subject": False,
+        })
+
+    competitor_rows.sort(key=lambda c: -c["sov"])
+    top_competitors = competitor_rows[:4]
+
+    # Build final table: focal subject + top 4 competitors, sorted by
+    # SOV descending so the chart renders in rank order.
+    table: list[dict[str, Any]] = [{
+        "name": subject_name,
+        "sov": subject_mentions / total,
+        "avg_rank": (
+            sum(subject_ranks) / len(subject_ranks)
+            if subject_ranks else None
+        ),
+        "first_mention_rate": subject_first / total,
+        "is_subject": True,
+    }]
+    table.extend(top_competitors)
+    table.sort(key=lambda c: -c["sov"])
+    return table
+
+
+def _read_evidence_cards(
+    cur, refresh_run_id: int, narrative_clusters: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Compose the Evidence section's cards from TopQuotesAnalyzer's
+    output. Each card pulls together: the AI's verbatim quote, the
+    prompt that elicited it, the mention status (for unnamed-layer
+    prompts only), and the narrative cluster the response was assigned
+    to (the "Frame:" label).
+
+    Returns up to 5 cards in the order TopQuotesAnalyzer ranked them.
+    Returns [] when top_quotes hasn't run on this refresh yet — handled
+    as an empty state in the UI.
+    """
+    cur.execute(
+        """
+        SELECT ra.findings->'quotes'
+        FROM refresh_analyses ra
+        JOIN analysis_runs ar ON ar.id = ra.analysis_run_id
+        WHERE ar.refresh_run_id = %s
+          AND ra.analysis_type = 'top_quotes'
+          AND ar.methodology_version LIKE 'cross-analysis-%%'
+          AND ar.status IN ('completed', 'partial')
+        ORDER BY ar.id DESC
+        LIMIT 1
+        """,
+        (refresh_run_id,),
+    )
+    row = cur.fetchone()
+    if not row or not row[0]:
+        return []
+    quotes_raw = _maybe_json(row[0]) or []
+    if not isinstance(quotes_raw, list) or not quotes_raw:
+        return []
+
+    # Build response_id → cluster_name lookup so each card gets its
+    # "Frame:" label without an extra DB roundtrip per quote.
+    response_to_cluster: dict[int, str] = {}
+    for cluster in narrative_clusters:
+        for rid in cluster.get("response_ids", []) or []:
+            if isinstance(rid, int):
+                response_to_cluster[rid] = cluster["name"]
+
+    response_ids = [
+        q.get("model_response_id") for q in quotes_raw
+        if isinstance(q, dict) and isinstance(q.get("model_response_id"), int)
+    ]
+    if not response_ids:
+        return []
+
+    # Bulk-fetch the source-response context for all the quoted
+    # responses in one query: rendered prompt + layer + mention status.
+    cur.execute(
+        """
+        SELECT
+          mr.id,
+          mr.rendered_prompt,
+          p.layer,
+          sm.subject_mentioned,
+          sm.mention_rank
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.id = ANY(%s)
+        """,
+        (response_ids,),
+    )
+    by_id: dict[int, tuple] = {r[0]: r for r in cur.fetchall()}
+
+    cards: list[dict[str, Any]] = []
+    for q in quotes_raw:
+        if not isinstance(q, dict):
+            continue
+        mr_id = q.get("model_response_id")
+        if not isinstance(mr_id, int) or mr_id not in by_id:
+            continue
+        _, rendered_prompt, layer, mentioned, rank = by_id[mr_id]
+
+        # Mention status only meaningful on unnamed-layer responses.
+        # Named-layer responses include the subject in the prompt
+        # itself, so a "mentioned" pill is redundant and confusing.
+        if layer == "unnamed" and mentioned is not None:
+            mention_status: dict[str, Any] | None = {
+                "mentioned": bool(mentioned),
+                "rank": int(rank) if rank is not None else None,
+            }
+        else:
+            mention_status = None
+
+        cards.append({
+            "model_response_id": mr_id,
+            "model_slug": q.get("model_slug", "?"),
+            "slot": q.get("slot", ""),
+            "dimension": q.get("dimension", ""),
+            "prompt_text": rendered_prompt or "",
+            "excerpt": q.get("text", ""),
+            "rationale": q.get("rationale", ""),
+            "type": q.get("type", ""),  # characterization / criticism / etc
+            "mention_status": mention_status,
+            "frame_label": response_to_cluster.get(mr_id),
+            "layer": layer,
+        })
+
+    return cards
+
+
 def _read_narrative_clusters(
     cur, refresh_run_id: int,
 ) -> list[dict[str, Any]]:
@@ -1015,6 +1243,16 @@ def get_subject_overview(
         # ── Narrative clusters (Phase 3b — read pre-computed) ───
         narrative_clusters = _read_narrative_clusters(cur, latest_refresh_id)
 
+        # ── Evidence cards (Phase 3c — TopQuotes + cluster mapping) ─
+        evidence_cards = _read_evidence_cards(
+            cur, latest_refresh_id, narrative_clusters,
+        )
+
+        # ── Competitive snapshot (Phase 4 — single-subject path) ────
+        competitive = _read_competitive_snapshot(
+            cur, latest_refresh_id, sname,
+        )
+
         # ── Meta counts ─────────────────────────────────────────
         cur.execute(
             """
@@ -1039,6 +1277,8 @@ def get_subject_overview(
         "bottom_line": bottom_line,
         "recommended_focus": recommended_focus,
         "narrative_clusters": narrative_clusters,
+        "evidence_cards": evidence_cards,
+        "competitive": competitive,
         "meta": {
             "latest_refresh_id": latest_refresh_id,
             "last_refresh_at": latest_completed.isoformat() if latest_completed else None,
@@ -1070,6 +1310,8 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "bottom_line": None,
         "recommended_focus": None,
         "narrative_clusters": [],
+        "evidence_cards": [],
+        "competitive": [],
         "meta": {"latest_refresh_id": None, "last_refresh_at": None, "n_responses": 0, "n_platforms": 0},
     }
 

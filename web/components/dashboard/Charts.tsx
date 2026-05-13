@@ -162,9 +162,25 @@ export function SourcesDonut({
 }
 
 export function CompetitorBars() {
+  // Static-mockup variant — uses the hardcoded Warren-equivalent data
+  // above. Used by /dashboard-preview (the design reference).
+  return <CompetitorBarsFromData data={competitors} />;
+}
+
+/**
+ * Dynamic variant of the competitive horizontal bar chart. Used by the
+ * wired dashboard at /dashboard-preview/[subjectId] with real data.
+ * Subject's row gets the primary blue; everyone else gets a muted
+ * blue-gray.
+ */
+export function CompetitorBarsFromData({
+  data,
+}: {
+  data: { name: string; sov: number; is_subject?: boolean }[];
+}) {
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={competitors} layout="vertical" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+      <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid stroke="oklch(0.91 0.008 250)" strokeDasharray="2 4" horizontal={false} />
         <XAxis type="number" stroke="oklch(0.55 0.015 250)" fontSize={10} tickLine={false} axisLine={false} unit="%" />
         <YAxis
@@ -174,12 +190,15 @@ export function CompetitorBars() {
           fontSize={11}
           tickLine={false}
           axisLine={false}
-          width={150}
+          width={170}
         />
         <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "oklch(0.95 0.008 250)" }} />
         <Bar dataKey="sov" radius={[0, 4, 4, 0]} barSize={18}>
-          {competitors.map((c, i) => (
-            <Cell key={i} fill={c.you ? "oklch(0.5 0.13 245)" : "oklch(0.78 0.04 245)"} />
+          {data.map((c, i) => (
+            <Cell
+              key={i}
+              fill={c.is_subject ? "oklch(0.5 0.13 245)" : "oklch(0.78 0.04 245)"}
+            />
           ))}
         </Bar>
       </BarChart>

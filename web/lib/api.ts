@@ -224,6 +224,26 @@ export type SubjectOverview = {
     n_responses: number;
     share: number;
   }[];
+  competitive: {
+    name: string;
+    sov: number;            // 0..1
+    avg_rank: number | null;
+    first_mention_rate: number;  // 0..1
+    is_subject: boolean;
+  }[];
+  evidence_cards: {
+    model_response_id: number;
+    model_slug: string;
+    slot: string;
+    dimension: string;
+    prompt_text: string;
+    excerpt: string;
+    rationale: string;
+    type: string;  // characterization | criticism | praise | factual_claim | narrative_frame | model_difference
+    mention_status: { mentioned: boolean; rank: number | null } | null;
+    frame_label: string | null;
+    layer: string;
+  }[];
   meta: {
     latest_refresh_id: number | null;
     last_refresh_at: string | null;
