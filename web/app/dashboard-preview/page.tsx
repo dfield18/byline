@@ -17,6 +17,7 @@ import {
   Megaphone,
   Info,
   ArrowRight,
+  ChevronDown,
 } from "lucide-react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
@@ -28,6 +29,19 @@ import {
   CompetitorBars,
   SourcesDonut,
 } from "@/components/dashboard/Charts";
+
+/**
+ * Prompt coverage breakdown — surfaced inside the methodology
+ * disclosure in the footer rather than as a separate card on the
+ * page, to keep the executive view calm. Add/remove rows as the
+ * tested prompt mix changes.
+ */
+const promptCoverage = [
+  { category: "Banking regulation", shareOfTestSet: 25, aiRecall: 91 },
+  { category: "Consumer protection", shareOfTestSet: 20, aiRecall: 84 },
+  { category: "Housing affordability", shareOfTestSet: 18, aiRecall: 8 },
+  { category: "Corporate power", shareOfTestSet: 15, aiRecall: 76 },
+];
 
 /**
  * Per-platform AI Recall used by the strip below the headline KPIs.
@@ -229,7 +243,11 @@ export default function DashboardPreviewPage() {
                     public-affairs prompts.
                   </p>
 
-                  {/* Bottom line — analyst briefing note */}
+                  {/* Bottom Line + Action — one analyst note in two parts.
+                      Diagnostic on top (what is AI saying); prescriptive
+                      below (what to do about it). Sharing a single tinted
+                      block keeps the page calm and makes them read as one
+                      thought rather than two restatements. */}
                   <div
                     className="mt-6 relative pl-5 pr-4 py-4 rounded-md"
                     style={{
@@ -238,6 +256,7 @@ export default function DashboardPreviewPage() {
                     }}
                   >
                     <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
+
                     <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
                       Bottom line
                     </div>
@@ -246,6 +265,17 @@ export default function DashboardPreviewPage() {
                       and banking regulation. Her newer cost-of-living and housing message
                       is not yet breaking through.
                     </p>
+
+                    <div className="mt-3.5 pt-3.5 border-t border-primary/15">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-1.5">
+                        Recommended action
+                      </div>
+                      <p className="text-[14px] leading-relaxed text-foreground/85">
+                        Connect affordability messaging to existing regulatory credibility —
+                        lead with banking and consumer-protection authority when introducing
+                        cost-of-living themes.
+                      </p>
+                    </div>
                   </div>
 
                   <div className="mt-7 grid grid-cols-3 gap-8 pt-6 border-t border-border/50">
@@ -651,17 +681,62 @@ export default function DashboardPreviewPage() {
           </Card>
 
           <footer className="pt-6 pb-8 border-t border-border/40">
-            <p className="text-center text-[11.5px] text-foreground/60 leading-relaxed">
-              Based on{" "}
-              <span className="font-semibold text-foreground/80 tabular-nums">1,284</span>{" "}
-              AI responses across{" "}
-              <span className="font-semibold text-foreground/80">4 platforms</span>{" "}
-              over the last 30 days.{" "}
-              <a href="#" className="text-primary hover:underline">
-                Methodology →
-              </a>
-            </p>
-            <p className="mt-2 text-center text-[11px] text-muted-foreground">
+            {/* Methodology disclosure. Closed by default — shows the
+                summary line. Expand to reveal the prompt-coverage
+                breakdown. Keeps the executive page clean while letting
+                analysts inspect what's behind the numbers. */}
+            <details className="group text-center">
+              <summary className="text-[11.5px] text-foreground/60 leading-relaxed cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                Based on{" "}
+                <span className="font-semibold text-foreground/80 tabular-nums">1,284</span>{" "}
+                AI responses across{" "}
+                <span className="font-semibold text-foreground/80">4 platforms</span>{" "}
+                over the last 30 days.{" "}
+                <span className="text-primary inline-flex items-center gap-0.5 group-hover:underline">
+                  Methodology
+                  <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                </span>
+              </summary>
+
+              {/* Expanded: prompt coverage */}
+              <div className="mt-5 mx-auto max-w-xl text-left">
+                <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+                  Prompt coverage
+                </div>
+                <div className="mt-1 text-[11.5px] text-foreground/55 mb-3">
+                  What types of questions were included in this analysis.
+                </div>
+                <div>
+                  <div className="grid grid-cols-[1fr_auto_auto] gap-6 text-[10px] uppercase tracking-wider text-foreground/45 py-1.5 border-b border-border/40">
+                    <span>Prompt category</span>
+                    <span className="text-right">Share of set</span>
+                    <span className="text-right">AI recall</span>
+                  </div>
+                  {promptCoverage.map((p) => (
+                    <div
+                      key={p.category}
+                      className="grid grid-cols-[1fr_auto_auto] gap-6 items-baseline text-[12.5px] py-2 border-b border-border/30 last:border-b-0"
+                    >
+                      <span className="text-foreground/85">{p.category}</span>
+                      <span className="text-foreground/55 tabular-nums text-right">
+                        {p.shareOfTestSet}%
+                      </span>
+                      <span className="font-mono tabular-nums text-foreground/75 text-right">
+                        {p.aiRecall}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-3 text-[11px] text-foreground/45 leading-relaxed">
+                  Top categories shown; remaining {100 -
+                    promptCoverage.reduce((s, p) => s + p.shareOfTestSet, 0)}%
+                  of the test set is split across smaller categories not
+                  listed.
+                </p>
+              </div>
+            </details>
+
+            <p className="mt-4 text-center text-[11px] text-muted-foreground">
               Brand Visibility · AI Narrative Intelligence for Public Affairs ·{" "}
               <span className="text-foreground/70">Demo data shown</span>
             </p>
