@@ -214,6 +214,8 @@ export type SubjectOverview = {
     title: string;
     body: string;
   }[];
+  bottom_line: string | null;
+  recommended_focus: string | null;
   meta: {
     latest_refresh_id: number | null;
     last_refresh_at: string | null;

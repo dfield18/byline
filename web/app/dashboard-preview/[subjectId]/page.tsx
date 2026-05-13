@@ -428,17 +428,50 @@ export default async function SubjectOverviewPage({
                   voter-facing and public-affairs prompts.
                 </p>
 
-                {/* Placeholder for Bottom Line + Recommended Focus (Phase 3) */}
-                <div className="mt-6 rounded-md border border-dashed border-border/70 bg-muted/30 px-5 py-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/45">
-                    Bottom Line · Recommended Focus
+                {/* Bottom Line — diagnostic callout, primary visual weight */}
+                {data.bottom_line && (
+                  <div
+                    className="mt-6 relative pl-5 pr-4 py-4 rounded-md"
+                    style={{
+                      background:
+                        "color-mix(in oklab, var(--primary) 6%, transparent)",
+                    }}
+                  >
+                    <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
+                      Bottom line
+                    </div>
+                    <p className="text-[17px] leading-relaxed font-semibold tracking-[-0.005em] text-foreground">
+                      {data.bottom_line}
+                    </p>
                   </div>
-                  <p className="mt-1.5 text-[13px] text-foreground/55 leading-relaxed max-w-xl">
-                    Analyst-synthesized executive summary and strategic
-                    recommendation will appear here in Phase 3 (narrative
-                    clustering + LLM-synthesis cross-analyzers).
-                  </p>
-                </div>
+                )}
+
+                {/* Recommended Focus — prescriptive follow-on, quieter */}
+                {data.recommended_focus && (
+                  <div className="mt-3 relative pl-5 pr-4 py-3.5 rounded-md border border-border/60 bg-card">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-1.5">
+                      Recommended focus
+                    </div>
+                    <p className="text-[14.5px] leading-relaxed text-foreground/90">
+                      {data.recommended_focus}
+                    </p>
+                  </div>
+                )}
+
+                {/* Fallback when neither piece could be synthesized */}
+                {!data.bottom_line && !data.recommended_focus && (
+                  <div className="mt-6 rounded-md border border-dashed border-border/70 bg-muted/30 px-5 py-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/45">
+                      Executive summary
+                    </div>
+                    <p className="mt-1.5 text-[13px] text-foreground/55 leading-relaxed max-w-xl">
+                      Not enough signal in this refresh to synthesize an
+                      executive briefing yet. Trigger another refresh or wait
+                      for more data to accumulate.
+                    </p>
+                  </div>
+                )}
 
                 <HeroKpis kpis={data.kpis} />
                 <PlatformRecallStrip platforms={data.platform_recall} />

@@ -670,6 +670,112 @@ def _cap_first(s: str) -> str:
     return s[:1].upper() + s[1:] if s else s
 
 
+# ─── executive synthesis (Phase 3 wiring) ──────────────────────────────
+
+
+def _find_takeaway(
+    takeaways: list[dict[str, Any]], kind: str,
+) -> dict[str, Any] | None:
+    """Return the first takeaway of the given kind, or None."""
+    for t in takeaways:
+        if t["kind"] == kind:
+            return t
+    return None
+
+
+def _extract_topic_from_takeaway(takeaway: dict[str, Any]) -> str | None:
+    """Pull the topic label out of a takeaway's title. The strategic
+    takeaway titles embed the topic, so we re-extract here rather than
+    passing it through as a separate field."""
+    # Title patterns from _compute_strategic_takeaways:
+    #   "AI underweights {topic}"
+    #   "{Topic} prompts trigger heavier criticism"  (capitalized first letter)
+    #   "Strongest association: {topic}"
+    title = takeaway["title"]
+    if title.startswith("AI underweights "):
+        return title[len("AI underweights "):]
+    if title.startswith("Strongest association: "):
+        return title[len("Strongest association: "):]
+    if " prompts trigger heavier criticism" in title:
+        return title.split(" prompts trigger heavier criticism")[0]
+    return None
+
+
+def _compute_bottom_line(
+    subject_name: str,
+    kpis: dict[str, dict[str, Any]],
+    takeaways: list[dict[str, Any]],
+) -> str | None:
+    """One-sentence declarative summary of the refresh. Built from the
+    strategic_takeaways output + the headline KPI values. Rule-based
+    rather than LLM-generated so output is deterministic, free, and
+    auditable. An LLM-polish pass could come later if needed.
+
+    Cases (in order of richness):
+      strong + gap → "AI strongly associates X with [asset] but
+                      underweights [gap]."
+      strong only  → "AI strongly associates X with [asset], with
+                      [recall]% mention rate and [sentiment label] sentiment."
+      gap only     → "AI underweights X on [gap topic] — only [recall]%
+                      of [topic] prompts mention X."
+      neither      → None (no actionable summary to synthesize)
+    """
+    strong = _find_takeaway(takeaways, "strongest_asset")
+    gap = _find_takeaway(takeaways, "message_gap")
+    strong_topic = _extract_topic_from_takeaway(strong) if strong else None
+    gap_topic = _extract_topic_from_takeaway(gap) if gap else None
+
+    if strong_topic and gap_topic:
+        return (
+            f"AI strongly associates {subject_name} with {strong_topic}, "
+            f"but underweights {gap_topic}."
+        )
+    if strong_topic:
+        recall = kpis.get("ai_recall", {}).get("value")
+        sent = kpis.get("avg_sentiment", {}).get("value")
+        sent_label = (
+            "favorable" if (sent or 0) > 0.1
+            else "critical" if (sent or 0) < -0.1
+            else "neutral"
+        )
+        recall_str = (
+            f"{round(recall * 100)}% mention rate"
+            if recall is not None else "consistent visibility"
+        )
+        return (
+            f"AI strongly associates {subject_name} with {strong_topic} "
+            f"({recall_str}, {sent_label} sentiment)."
+        )
+    if gap_topic:
+        return (
+            f"AI underweights {subject_name} on {gap_topic} — coverage "
+            f"is materially lower there than on the other tested topic areas."
+        )
+    return None
+
+
+def _compute_recommended_focus(
+    subject_name: str,
+    takeaways: list[dict[str, Any]],
+) -> str | None:
+    """One-sentence prescriptive recommendation. Fires only when both a
+    Message Gap and a Strongest Asset exist — otherwise there isn't a
+    "connect Y to X" story to tell. Subject-name-aware copy, no LLM.
+    """
+    strong = _find_takeaway(takeaways, "strongest_asset")
+    gap = _find_takeaway(takeaways, "message_gap")
+    if not strong or not gap:
+        return None
+    strong_topic = _extract_topic_from_takeaway(strong)
+    gap_topic = _extract_topic_from_takeaway(gap)
+    if not strong_topic or not gap_topic:
+        return None
+    return (
+        f"Connect {gap_topic} messaging to {subject_name}'s established "
+        f"association with {strong_topic}."
+    )
+
+
 # ─── dashboard overview (Phase 1 wiring) ───────────────────────────────
 
 
@@ -865,6 +971,10 @@ def get_subject_overview(
             cur, latest_refresh_id, setup_inputs, sname,
         )
 
+        # ── Executive synthesis (Phase 3 — rule-based) ──────────
+        bottom_line = _compute_bottom_line(sname, kpis, strategic_takeaways)
+        recommended_focus = _compute_recommended_focus(sname, strategic_takeaways)
+
         # ── Meta counts ─────────────────────────────────────────
         cur.execute(
             """
@@ -886,6 +996,8 @@ def get_subject_overview(
         "sources": sources,
         "topic_coverage": topic_coverage,
         "strategic_takeaways": strategic_takeaways,
+        "bottom_line": bottom_line,
+        "recommended_focus": recommended_focus,
         "meta": {
             "latest_refresh_id": latest_refresh_id,
             "last_refresh_at": latest_completed.isoformat() if latest_completed else None,
@@ -914,6 +1026,8 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "sources": [],
         "topic_coverage": [],
         "strategic_takeaways": [],
+        "bottom_line": None,
+        "recommended_focus": None,
         "meta": {"latest_refresh_id": None, "last_refresh_at": None, "n_responses": 0, "n_platforms": 0},
     }
 
