@@ -670,6 +670,132 @@ def _cap_first(s: str) -> str:
     return s[:1].upper() + s[1:] if s else s
 
 
+# ─── LLM polish for executive summary (Phase 3a refinement) ────────────
+
+
+_POLISH_PROMPT = """You are a public-affairs analyst polishing two sentences \
+for an executive dashboard about {subject_name}.
+
+Rule-based rough draft (these capture the underlying findings):
+- Bottom line: {raw_bottom_line}
+- Recommended focus: {raw_recommended_focus}
+
+Context (do not restate as numbers; use only for grounding):
+- AI Recall: {recall_str}
+- Avg Sentiment: {sentiment_str}
+- Risk Frame Rate: {risk_str}
+
+Task: Rewrite each sentence in a natural, declarative analyst voice.
+
+Rules:
+- Preserve the underlying claim from the rough draft EXACTLY. Don't \
+invent new facts or shift the meaning. Polish phrasing only.
+- Each output must be ONE sentence, ≤30 words.
+- Avoid marketing speak ("powerful", "stunning", "incredible", \
+"strong association", "established association").
+- Avoid restating raw KPI numbers.
+- The subject's name should appear at most once total across both \
+sentences.
+- If the rough draft for a field is "(none)", return an empty string \
+for that field.
+"""
+
+_POLISH_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "bottom_line": {"type": "STRING"},
+        "recommended_focus": {"type": "STRING"},
+    },
+    "required": ["bottom_line", "recommended_focus"],
+}
+
+
+def _polish_executive_summary(
+    subject_name: str,
+    kpis: dict[str, dict[str, Any]],
+    raw_bottom_line: str | None,
+    raw_recommended_focus: str | None,
+) -> dict[str, str | None]:
+    """LLM polish pass. Returns {bottom_line, recommended_focus} dict.
+    On any failure (no API key, network error, malformed response)
+    returns the rule-based inputs unchanged so the page never breaks.
+
+    Why this lives in dashboard/lib/queries.py rather than as a cross-
+    analyzer: it polishes content already-derived for the dashboard,
+    has no other consumer, and runs on the read path (acceptable
+    ~1-2s latency per overview call; trivial cost). Promoting to a
+    cross-analyzer with persistence is a clean follow-up if latency
+    or cost becomes a concern at scale.
+    """
+    if not raw_bottom_line and not raw_recommended_focus:
+        return {
+            "bottom_line": raw_bottom_line,
+            "recommended_focus": raw_recommended_focus,
+        }
+
+    try:
+        import json as _json
+        import os
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        return {
+            "bottom_line": raw_bottom_line,
+            "recommended_focus": raw_recommended_focus,
+        }
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return {
+            "bottom_line": raw_bottom_line,
+            "recommended_focus": raw_recommended_focus,
+        }
+
+    def fmt_pct(v: float | None) -> str:
+        return f"{round(v * 100)}%" if v is not None else "n/a"
+
+    def fmt_sent(v: float | None) -> str:
+        return (f"+{v:.2f}" if v >= 0 else f"{v:.2f}") if v is not None else "n/a"
+
+    prompt = _POLISH_PROMPT.format(
+        subject_name=subject_name,
+        raw_bottom_line=raw_bottom_line or "(none)",
+        raw_recommended_focus=raw_recommended_focus or "(none)",
+        recall_str=fmt_pct(kpis.get("ai_recall", {}).get("value")),
+        sentiment_str=fmt_sent(kpis.get("avg_sentiment", {}).get("value")),
+        risk_str=fmt_pct(kpis.get("risk_frame_rate", {}).get("value")),
+    )
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=_POLISH_SCHEMA,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        parsed = _json.loads(response.text or "{}")
+        if not isinstance(parsed, dict):
+            raise ValueError("non-object response")
+    except Exception:
+        return {
+            "bottom_line": raw_bottom_line,
+            "recommended_focus": raw_recommended_focus,
+        }
+
+    polished_bl = (parsed.get("bottom_line") or "").strip() or None
+    polished_rf = (parsed.get("recommended_focus") or "").strip() or None
+
+    # If LLM returned nothing usable, fall back to rule-based
+    return {
+        "bottom_line": polished_bl or raw_bottom_line,
+        "recommended_focus": polished_rf or raw_recommended_focus,
+    }
+
+
 # ─── executive synthesis (Phase 3 wiring) ──────────────────────────────
 
 
@@ -1236,9 +1362,14 @@ def get_subject_overview(
             cur, latest_refresh_id, setup_inputs, sname,
         )
 
-        # ── Executive synthesis (Phase 3 — rule-based) ──────────
-        bottom_line = _compute_bottom_line(sname, kpis, strategic_takeaways)
-        recommended_focus = _compute_recommended_focus(sname, strategic_takeaways)
+        # ── Executive synthesis (Phase 3 — rule-based + LLM polish) ─
+        rule_bottom_line = _compute_bottom_line(sname, kpis, strategic_takeaways)
+        rule_recommended_focus = _compute_recommended_focus(sname, strategic_takeaways)
+        polished = _polish_executive_summary(
+            sname, kpis, rule_bottom_line, rule_recommended_focus,
+        )
+        bottom_line = polished["bottom_line"]
+        recommended_focus = polished["recommended_focus"]
 
         # ── Narrative clusters (Phase 3b — read pre-computed) ───
         narrative_clusters = _read_narrative_clusters(cur, latest_refresh_id)
