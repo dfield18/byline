@@ -38,12 +38,12 @@ const headlineKpis = [
     spark: [61, 63, 62, 66, 68, 67, 70, 72],
   },
   {
-    label: "First Mention Rate",
-    value: "31%",
-    sub: "Appears first when mentioned",
-    delta: "+2.3",
+    label: "Avg Sentiment",
+    value: "+0.27",
+    sub: "Mean across all AI answers",
+    delta: "+0.04",
     trend: "up" as const,
-    spark: [22, 24, 23, 26, 28, 27, 30, 31],
+    spark: [18, 20, 21, 22, 23, 24, 26, 27],
   },
   {
     label: "Risk Frame Rate",
