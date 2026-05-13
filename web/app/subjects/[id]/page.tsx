@@ -565,10 +565,11 @@ export default async function SubjectOverviewPage({
   }
 
   const updated = data.meta.last_refresh_at
-    ? new Date(data.meta.last_refresh_at).toLocaleDateString(undefined, {
+    ? new Date(data.meta.last_refresh_at).toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
+        timeZone: "UTC",
       })
     : "—";
 
@@ -790,8 +791,11 @@ export default async function SubjectOverviewPage({
                 description="Verbatim quotes selected by the top-quotes cross-analyzer across the latest refresh. Each card shows the originating prompt, the AI's exact words, and the narrative cluster it falls under."
               />
               <div className="grid md:grid-cols-3 gap-4">
-                {data.evidence_cards.map((card) => (
-                  <EvidenceCard key={card.model_response_id} card={card} />
+                {data.evidence_cards.map((card, i) => (
+                  <EvidenceCard
+                    key={`${card.model_response_id}-${i}`}
+                    card={card}
+                  />
                 ))}
               </div>
             </section>
@@ -921,7 +925,14 @@ export default async function SubjectOverviewPage({
                             {r.id}
                           </td>
                           <td className="px-3 py-2 text-foreground/80">
-                            {new Date(r.started_at).toLocaleString()}
+                            {new Date(r.started_at).toLocaleString("en-US", {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              timeZone: "UTC",
+                            })}
                           </td>
                           <td className="px-3 py-2">
                             <span

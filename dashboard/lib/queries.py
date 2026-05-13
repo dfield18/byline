@@ -45,17 +45,38 @@ def _latest_per_column_sql(col: str) -> str:
 # ─── subject + refresh queries ─────────────────────────────────────────
 
 
+def _is_operator_org(org_id: str | None) -> bool:
+    """True when the caller's Clerk org_id matches BYLINE_OPERATOR_ORG_ID
+    in the environment. Operator orgs get a relaxed scope on the read
+    paths: they can see NULL-org subjects (seed/operator-owned content)
+    in addition to their own org's subjects. Single-tenant for now —
+    one operator org per deployment, configured via env."""
+    import os
+    if not org_id:
+        return False
+    configured = os.environ.get("BYLINE_OPERATOR_ORG_ID", "").strip()
+    return bool(configured) and org_id == configured
+
+
 def list_subjects(org_id: str | None = None) -> list[dict[str, Any]]:
     """All subjects with category, refresh count, latest refresh metadata,
     and a couple of cross-analyzer signals for the index view.
 
-    Multi-tenancy: when `org_id` is passed, returns only that org's
-    subjects (the customer-facing API path). When None, returns every
-    subject including NULL-org seed rows (the operator path used by the
-    Streamlit dashboard).
+    Multi-tenancy:
+      - org_id=None: no scoping. Operator path used by Streamlit.
+      - org_id is the operator's: relaxed scope — own org + NULL-org
+        seed subjects all visible (Option A: operator-bypass).
+      - org_id is any other customer's: strict scope to that org only.
     """
-    where_clause = "WHERE s.org_id = %s" if org_id is not None else ""
-    params: tuple = (org_id,) if org_id is not None else ()
+    if org_id is None:
+        where_clause = ""
+        params: tuple = ()
+    elif _is_operator_org(org_id):
+        where_clause = "WHERE (s.org_id = %s OR s.org_id IS NULL)"
+        params = (org_id,)
+    else:
+        where_clause = "WHERE s.org_id = %s"
+        params = (org_id,)
     with get_cursor(commit=False) as cur:
         cur.execute(f"""
             WITH per_subject AS (
@@ -97,24 +118,33 @@ def get_subject(
 ) -> dict[str, Any] | None:
     """Subject + setup_inputs + all refreshes for it.
 
-    Multi-tenancy: when `org_id` is passed, returns None if the subject
-    doesn't belong to that org. When None, no scoping (operator path).
+    Multi-tenancy (same three cases as list_subjects):
+      - org_id=None: no scoping (operator/Streamlit path).
+      - org_id is the operator's: own org + NULL-org seed subjects.
+      - any other org: strict scope, returns None for foreign subjects.
     """
     with get_cursor(commit=False) as cur:
-        if org_id is not None:
-            cur.execute("""
-                SELECT s.id, s.name, c.slug, s.setup_inputs, s.created_at
-                FROM subjects s
-                JOIN categories c ON c.id = s.category_id
-                WHERE s.id = %s AND s.org_id = %s
-            """, (subject_id, org_id))
-        else:
+        if org_id is None:
             cur.execute("""
                 SELECT s.id, s.name, c.slug, s.setup_inputs, s.created_at
                 FROM subjects s
                 JOIN categories c ON c.id = s.category_id
                 WHERE s.id = %s
             """, (subject_id,))
+        elif _is_operator_org(org_id):
+            cur.execute("""
+                SELECT s.id, s.name, c.slug, s.setup_inputs, s.created_at
+                FROM subjects s
+                JOIN categories c ON c.id = s.category_id
+                WHERE s.id = %s AND (s.org_id = %s OR s.org_id IS NULL)
+            """, (subject_id, org_id))
+        else:
+            cur.execute("""
+                SELECT s.id, s.name, c.slug, s.setup_inputs, s.created_at
+                FROM subjects s
+                JOIN categories c ON c.id = s.category_id
+                WHERE s.id = %s AND s.org_id = %s
+            """, (subject_id, org_id))
         row = cur.fetchone()
         if not row:
             return None
@@ -630,9 +660,18 @@ def _compute_strategic_takeaways(
             })
 
     # ── Strongest Asset ─────────────────────────────────────
+    # Exclude the "Current events" bucket (source: recent_news) from
+    # Strongest Asset eligibility. It collects responses to volatile
+    # recent-news-driven prompts; celebrating it as a strength is
+    # tautological ("AI surfaces you when asked about recent news
+    # about you"). Other rules (Message Gap, Topic Coverage panel)
+    # still include it — under-coverage on current events IS a real
+    # signal, so it stays eligible for the gap rule.
     candidates = [
         t for t in topic_metrics
-        if t["recall"] is not None and t["recall"] >= strong_asset_min_recall
+        if t["recall"] is not None
+        and t["recall"] >= strong_asset_min_recall
+        and t["source"] != "recent_news"
     ]
     if candidates:
         strong = max(
@@ -694,8 +733,9 @@ invent new facts or shift the meaning. Polish phrasing only.
 - Avoid marketing speak ("powerful", "stunning", "incredible", \
 "strong association", "established association").
 - Avoid restating raw KPI numbers.
-- The subject's name should appear at most once total across both \
-sentences.
+- The subject's full name MUST appear at least once across the two \
+sentences (so pronouns like "he"/"his" have a clear antecedent). \
+Once is ideal; twice is acceptable; pronouns-only is NOT acceptable.
 - If the rough draft for a field is "(none)", return an empty string \
 for that field.
 """
@@ -1243,12 +1283,19 @@ def get_subject_overview(
     org_id filter: if set, returns None when the subject doesn't belong
     to that org. If None, no scoping (operator mode).
     """
-    where_subject_org = (
-        "WHERE s.id = %s AND s.org_id = %s"
-        if org_id is not None
-        else "WHERE s.id = %s"
-    )
-    subject_params = (subject_id, org_id) if org_id is not None else (subject_id,)
+    # Three-case scoping, mirroring get_subject:
+    #   org_id None      → no filter (Streamlit path)
+    #   operator org     → own org + NULL-org seed subjects
+    #   any other org    → strict to that org
+    if org_id is None:
+        where_subject_org = "WHERE s.id = %s"
+        subject_params: tuple = (subject_id,)
+    elif _is_operator_org(org_id):
+        where_subject_org = "WHERE s.id = %s AND (s.org_id = %s OR s.org_id IS NULL)"
+        subject_params = (subject_id, org_id)
+    else:
+        where_subject_org = "WHERE s.id = %s AND s.org_id = %s"
+        subject_params = (subject_id, org_id)
 
     with get_cursor(commit=False) as cur:
         # ── Subject metadata ─────────────────────────────────────
