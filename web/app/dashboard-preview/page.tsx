@@ -63,9 +63,9 @@ const headlineKpis = [
     spark: [13, 14, 13, 15, 16, 15, 16, 17],
   },
   {
-    label: "Model Variance",
+    label: "Platform Split",
     value: "34%",
-    sub: "Disagreement across AI platforms",
+    sub: "How differently major AI platforms describe this entity",
     delta: "−2.1",
     trend: "down" as const,
     spark: [38, 37, 36, 37, 35, 34, 35, 34],
@@ -207,11 +207,11 @@ export default function DashboardPreviewPage() {
                 {/* LEFT: title + bottom line + 3 stats */}
                 <div className="lg:col-span-3 flex flex-col">
                   <h1 className="font-display text-[24px] md:text-[27px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground">
-                    Elizabeth Warren — AI Visibility Overview
+                    AI Narrative Brief: Elizabeth Warren
                   </h1>
                   <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/70 max-w-xl">
-                    Snapshot of how major AI platforms describe, rank, and source this entity across
-                    voter-facing and public-affairs queries.
+                    How major AI platforms describe Warren across voter-facing and
+                    public-affairs prompts.
                   </p>
 
                   {/* Bottom line — analyst briefing note */}
@@ -226,9 +226,10 @@ export default function DashboardPreviewPage() {
                     <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
                       Bottom line
                     </div>
-                    <p className="text-[16.5px] leading-relaxed font-medium text-foreground">
-                      AI strongly associates Warren with consumer protection and banking
-                      regulation, but underweights her newer cost-of-living and housing message.
+                    <p className="text-[17px] leading-relaxed font-semibold tracking-[-0.005em] text-foreground">
+                      AI platforms still define Warren primarily through consumer protection
+                      and banking regulation. Her newer cost-of-living and housing message
+                      is not yet breaking through.
                     </p>
                   </div>
 
@@ -297,19 +298,19 @@ export default function DashboardPreviewPage() {
             </Card>
           </section>
 
-          {/* KEY INSIGHTS — one primary, two secondary */}
+          {/* STRATEGIC TAKEAWAYS — one primary, two secondary */}
           <section>
             <SectionTitle
-              eyebrow="Key insights"
+              eyebrow="Strategic Takeaways"
               title="What stands out this period"
-              description="The most important takeaways from how AI platforms currently describe Elizabeth Warren."
+              description="The most important shifts in how AI platforms currently describe Elizabeth Warren."
             />
             <Card className="p-2 md:p-3">
               <ul className="divide-y divide-border/60">
                 {[
                   {
                     icon: AlertOctagon,
-                    eyebrow: "Main concern",
+                    eyebrow: "Message gap",
                     eyebrowClass: "text-warning",
                     dotClass: "bg-warning",
                     title: "AI underweights Warren's cost-of-living message",
@@ -325,7 +326,7 @@ export default function DashboardPreviewPage() {
                   },
                   {
                     icon: Compass,
-                    eyebrow: "Narrative risk",
+                    eyebrow: "Opposition frame",
                     eyebrowClass: "text-foreground/55",
                     dotClass: "bg-foreground/30",
                     title: "Business prompts trigger opposition framing",
@@ -333,7 +334,7 @@ export default function DashboardPreviewPage() {
                   },
                   {
                     icon: Megaphone,
-                    eyebrow: "Strongest association",
+                    eyebrow: "Strongest asset",
                     eyebrowClass: "text-primary/80",
                     dotClass: "bg-primary",
                     title: "Consumer protection remains the strongest association",
