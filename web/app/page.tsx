@@ -118,7 +118,14 @@ export default async function Home() {
                     </td>
                     <td className="px-4 py-3 text-zinc-500 dark:text-zinc-500">
                       {s.latest_refresh_at
-                        ? new Date(s.latest_refresh_at).toLocaleString()
+                        ? new Date(s.latest_refresh_at).toLocaleString("en-US", {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            timeZone: "UTC",
+                          })
                         : "—"}
                     </td>
                   </tr>
@@ -128,10 +135,6 @@ export default async function Home() {
           </div>
         </section>
 
-        <footer className="mt-12 text-xs text-zinc-500 dark:text-zinc-600">
-          v0 scaffold · data via FastAPI at{" "}
-          <code>{process.env.BYLINE_API_URL ?? "http://localhost:8000"}</code>
-        </footer>
       </main>
     </div>
   );
@@ -144,7 +147,7 @@ function Metric({ label, value }: { label: string; value: number }) {
         {label}
       </div>
       <div className="mt-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-        {value.toLocaleString()}
+        {value.toLocaleString("en-US")}
       </div>
     </div>
   );

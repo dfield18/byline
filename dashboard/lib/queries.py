@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from psycopg.types.json import Json
+
 from app.db import get_cursor
 
 
@@ -624,21 +626,37 @@ def _compute_strategic_takeaways(
     with_recall = [t for t in topic_metrics if t["recall"] is not None]
     if len(with_recall) >= 2:
         lowest = min(with_recall, key=lambda t: t["recall"])
-        others = [t["recall"] for t in with_recall if t["label"] != lowest["label"]]
-        other_mean = sum(others) / len(others)
+        others = [t for t in with_recall if t["label"] != lowest["label"]]
+        other_recalls = [t["recall"] for t in others]
+        other_mean = sum(other_recalls) / len(other_recalls)
         gap_pp = (other_mean - lowest["recall"]) * 100
         if gap_pp >= min_recall_gap_pp:
+            lowest_pct = round(lowest["recall"] * 100)
+            # When there's a single other topic, compare directly to it
+            # by name (avoids the awkward "average across other topic
+            # areas" phrasing for 2-topic subjects). With 2+ others,
+            # keep the average phrasing but fix the pluralization.
+            if len(others) == 1:
+                other = others[0]
+                body = (
+                    f"AI surfaces {subject_name} in {lowest_pct}% of "
+                    f"{lowest['label']} prompts, vs "
+                    f"{round(other['recall'] * 100)}% on "
+                    f"{other['label']} prompts."
+                )
+            else:
+                body = (
+                    f"AI surfaces {subject_name} in {lowest_pct}% of "
+                    f"{lowest['label']} prompts. Recall averages "
+                    f"{round(other_mean * 100)}% across the other "
+                    f"{len(others)} tracked topic areas."
+                )
             takeaways.append({
                 "kind": "message_gap",
                 "tone": "warning",
                 "eyebrow": "Message gap",
                 "title": f"AI underweights {lowest['label']}",
-                "body": (
-                    f"{subject_name} appears in only "
-                    f"{round(lowest['recall'] * 100)}% of {lowest['label']} "
-                    f"prompts, vs {round(other_mean * 100)}% on average across "
-                    f"other topic areas."
-                ),
+                "body": body,
             })
 
     # ── Opposition Frame ────────────────────────────────────
@@ -726,13 +744,36 @@ Context (do not restate as numbers; use only for grounding):
 
 Task: Rewrite each sentence in a natural, declarative analyst voice.
 
+Overriding principle: the final sentence MUST read like a senior comms \
+director wrote it, not like a model trying to satisfy a rubric. If a \
+rule below would force unnatural phrasing, prefer naturalness — the \
+goal is text that gets quoted in client emails, not text that passes \
+an audit.
+
 Rules:
-- Preserve the underlying claim from the rough draft EXACTLY. Don't \
-invent new facts or shift the meaning. Polish phrasing only.
+- Preserve the underlying CLAIM faithfully (the gap, the asset, the \
+direction of the recommendation). You may rephrase the supporting \
+concepts so they read naturally — e.g., "progressive politicians in \
+the US Senate" can become "his progressive Senate identity" or "the \
+Senate progressive bloc." Don't invent new facts or shift the claim's \
+direction.
 - Each output must be ONE sentence, ≤30 words.
-- Avoid marketing speak ("powerful", "stunning", "incredible", \
+- Bottom line should cite ONE specific value drawn from the rough \
+draft or context (a percentage, a topic with a value, a cluster \
+share) — woven in naturally, often parenthetically. If no value flows \
+naturally, omit it rather than bolting it on. Don't restate the full \
+KPI panel.
+- Recommended Focus should lead with an actionable imperative verb a \
+comms director could put in a plan (e.g., Connect, Draft, Pitch, \
+Publish, Brief, Reframe, Lead, Target, Schedule, Prepare, Surface, \
+Counter). The clearer the action, the better.
+- BANNED: stacked compound noun phrases (e.g., "US Senate politician \
+association", "policy expertise narrative pattern", "corporate \
+influence messaging strategy"). If you find yourself stringing 3+ \
+nouns together with no preposition between them, rewrite using "of", \
+"on", "around", "in", or recast as a verb phrase.
+- BANNED: marketing speak ("powerful", "stunning", "incredible", \
 "strong association", "established association").
-- Avoid restating raw KPI numbers.
 - The subject's full name MUST appear at least once across the two \
 sentences (so pronouns like "he"/"his" have a clear antecedent). \
 Once is ideal; twice is acceptable; pronouns-only is NOT acceptable.
@@ -750,28 +791,154 @@ _POLISH_SCHEMA = {
 }
 
 
+# Bump this string to invalidate every cached polish row at once
+# (e.g., after a meaningful prompt change). Format keeps it sortable.
+_POLISH_CACHE_TYPE = "executive_polish_v1"
+
+
+def _polish_cache_read(
+    refresh_run_id: int,
+    raw_bottom_line: str | None,
+    raw_recommended_focus: str | None,
+) -> dict[str, str | None] | None:
+    """Look for a cached polish on this refresh. Cache hit only if the
+    stored raw inputs match the current ones — if the rule-based draft
+    changed (e.g., takeaway generator updated), we must re-polish.
+    Returns None on miss or any error so the caller falls through to
+    a fresh LLM call."""
+    try:
+        with get_cursor(commit=False) as cur:
+            cur.execute(
+                """
+                SELECT findings
+                FROM refresh_analyses
+                WHERE refresh_run_id = %s
+                  AND analysis_type = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (refresh_run_id, _POLISH_CACHE_TYPE),
+            )
+            row = cur.fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    findings = _maybe_json(row[0]) or {}
+    if (
+        findings.get("raw_bottom_line") != raw_bottom_line
+        or findings.get("raw_recommended_focus") != raw_recommended_focus
+    ):
+        return None
+    return {
+        "bottom_line": findings.get("polished_bottom_line"),
+        "recommended_focus": findings.get("polished_recommended_focus"),
+    }
+
+
+def _polish_cache_write(
+    refresh_run_id: int,
+    subject_id: int,
+    raw_bottom_line: str | None,
+    raw_recommended_focus: str | None,
+    polished_bottom_line: str | None,
+    polished_recommended_focus: str | None,
+) -> None:
+    """Persist polish output keyed by refresh. Attaches to the most
+    recent analysis_run for the refresh; if none exists yet (refresh
+    without a cross-analysis pass), skip silently — polish still runs
+    on each read, just isn't cached. All errors swallowed so a write
+    failure can't break page render."""
+    try:
+        with get_cursor(commit=True) as cur:
+            cur.execute(
+                """
+                SELECT id FROM analysis_runs
+                WHERE refresh_run_id = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (refresh_run_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return
+            analysis_run_id = row[0]
+            # Delete any prior polish rows for this refresh before
+            # inserting the new one. Keeps the table at most one row
+            # per (refresh_run_id, analysis_type) — prevents unbounded
+            # growth when raw inputs change repeatedly, and lets the
+            # read path safely use ORDER BY id DESC LIMIT 1 without
+            # worrying about stale duplicates.
+            cur.execute(
+                """
+                DELETE FROM refresh_analyses
+                WHERE refresh_run_id = %s
+                  AND analysis_type = %s
+                """,
+                (refresh_run_id, _POLISH_CACHE_TYPE),
+            )
+            cur.execute(
+                """
+                INSERT INTO refresh_analyses (
+                    analysis_run_id, refresh_run_id, subject_id,
+                    analysis_type, findings, methodology_version
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    analysis_run_id,
+                    refresh_run_id,
+                    subject_id,
+                    _POLISH_CACHE_TYPE,
+                    Json({
+                        "raw_bottom_line": raw_bottom_line,
+                        "raw_recommended_focus": raw_recommended_focus,
+                        "polished_bottom_line": polished_bottom_line,
+                        "polished_recommended_focus": polished_recommended_focus,
+                    }),
+                    _POLISH_CACHE_TYPE,
+                ),
+            )
+    except Exception:
+        pass
+
+
 def _polish_executive_summary(
     subject_name: str,
     kpis: dict[str, dict[str, Any]],
     raw_bottom_line: str | None,
     raw_recommended_focus: str | None,
+    *,
+    refresh_run_id: int | None = None,
+    subject_id: int | None = None,
 ) -> dict[str, str | None]:
     """LLM polish pass. Returns {bottom_line, recommended_focus} dict.
     On any failure (no API key, network error, malformed response)
     returns the rule-based inputs unchanged so the page never breaks.
 
-    Why this lives in dashboard/lib/queries.py rather than as a cross-
-    analyzer: it polishes content already-derived for the dashboard,
-    has no other consumer, and runs on the read path (acceptable
-    ~1-2s latency per overview call; trivial cost). Promoting to a
-    cross-analyzer with persistence is a clean follow-up if latency
-    or cost becomes a concern at scale.
+    Caching: when refresh_run_id + subject_id are passed, the result
+    is cached in refresh_analyses keyed by `executive_polish_v1`. A
+    subsequent call with the same raw inputs hits cache and skips the
+    LLM call entirely. The raw inputs are stored alongside the
+    polished output so changes to the rule-based draft (from a code
+    update) bust the cache automatically.
     """
     if not raw_bottom_line and not raw_recommended_focus:
         return {
             "bottom_line": raw_bottom_line,
             "recommended_focus": raw_recommended_focus,
         }
+
+    # Cache check
+    if refresh_run_id is not None:
+        cached = _polish_cache_read(
+            refresh_run_id, raw_bottom_line, raw_recommended_focus,
+        )
+        if cached is not None:
+            return {
+                "bottom_line": cached["bottom_line"] or raw_bottom_line,
+                "recommended_focus": cached["recommended_focus"] or raw_recommended_focus,
+            }
 
     try:
         import json as _json
@@ -828,6 +995,16 @@ def _polish_executive_summary(
 
     polished_bl = (parsed.get("bottom_line") or "").strip() or None
     polished_rf = (parsed.get("recommended_focus") or "").strip() or None
+
+    # Cache the successful LLM output so we never make this call again
+    # for the same (refresh, raw inputs) pair. Cache write is fire-and-
+    # forget — failure here doesn't affect the response.
+    if refresh_run_id is not None and subject_id is not None:
+        _polish_cache_write(
+            refresh_run_id, subject_id,
+            raw_bottom_line, raw_recommended_focus,
+            polished_bl, polished_rf,
+        )
 
     # If LLM returned nothing usable, fall back to rule-based
     return {
@@ -1112,6 +1289,13 @@ def _read_evidence_cards(
     by_id: dict[int, tuple] = {r[0]: r for r in cur.fetchall()}
 
     cards: list[dict[str, Any]] = []
+    # One card per prompt. TopQuotesAnalyzer can emit multiple quotes
+    # against the same prompt (e.g., a criticism + a praise frame on
+    # the same "controversies" question); rendering both as separate
+    # cards visually duplicates the prompt and reads like a layout
+    # bug. Quotes are already ranked by importance, so keep the first
+    # quote per prompt and drop the rest.
+    seen_prompts: set[str] = set()
     for q in quotes_raw:
         if not isinstance(q, dict):
             continue
@@ -1119,6 +1303,11 @@ def _read_evidence_cards(
         if not isinstance(mr_id, int) or mr_id not in by_id:
             continue
         _, rendered_prompt, layer, mentioned, rank = by_id[mr_id]
+
+        prompt_key = (rendered_prompt or "").strip().lower()
+        if prompt_key in seen_prompts:
+            continue
+        seen_prompts.add(prompt_key)
 
         # Mention status only meaningful on unnamed-layer responses.
         # Named-layer responses include the subject in the prompt
@@ -1374,7 +1563,10 @@ def get_subject_overview(
             "avg_sentiment": _kpi_with_trend(
                 current_kpis.get("avg_sentiment"),
                 prior_kpis.get("avg_sentiment"),
-                pp_scale=False,  # raw -1..+1 scale
+                # Multiply delta by 100 so the frontend can render the
+                # whole tone metric in percentage-point units. The raw
+                # value (which stays -1..+1) is multiplied at display
+                # time via formatPct.
             ),
             "risk_frame_rate": _kpi_with_trend(
                 current_kpis.get("risk_frame_rate"),
@@ -1414,6 +1606,8 @@ def get_subject_overview(
         rule_recommended_focus = _compute_recommended_focus(sname, strategic_takeaways)
         polished = _polish_executive_summary(
             sname, kpis, rule_bottom_line, rule_recommended_focus,
+            refresh_run_id=latest_refresh_id,
+            subject_id=sid,
         )
         bottom_line = polished["bottom_line"]
         recommended_focus = polished["recommended_focus"]
@@ -1469,7 +1663,11 @@ def get_subject_overview(
 
 
 def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
-    """Returned when the subject has no completed refreshes yet."""
+    """Returned when the subject has no completed refreshes yet. Shape
+    MUST match the populated overview exactly — the frontend reads
+    nested arrays/objects without null-guards (e.g.,
+    trajectory.is_historical[i]), so missing keys here translate to
+    runtime errors there."""
     return {
         "subject_id": sid,
         "subject_name": sname,
@@ -1481,7 +1679,14 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
             "citation_rate": {"value": None, "delta": None, "trend": "flat"},
         },
         "platform_recall": [],
-        "trajectory": {"weeks": [], "ai_recall": [], "avg_sentiment": [], "risk_frame_rate": []},
+        "trajectory": {
+            "weeks": [],
+            "refresh_ids": [],
+            "is_historical": [],
+            "ai_recall": [],
+            "avg_sentiment": [],
+            "risk_frame_rate": [],
+        },
         "sources": [],
         "topic_coverage": [],
         "strategic_takeaways": [],
@@ -1490,7 +1695,14 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "narrative_clusters": [],
         "evidence_cards": [],
         "competitive": [],
-        "meta": {"latest_refresh_id": None, "last_refresh_at": None, "n_responses": 0, "n_platforms": 0},
+        "meta": {
+            "latest_refresh_id": None,
+            "last_refresh_at": None,
+            "n_responses": 0,
+            "n_platforms": 0,
+            "risk_frame_threshold": 0.5,
+            "canonical_url": None,
+        },
     }
 
 
@@ -1520,8 +1732,14 @@ def _compute_kpis_for_refresh(
     row = cur.fetchone()
     ai_recall = float(row[0]) if row and row[0] is not None else None
 
-    # Avg Sentiment + Risk Frame Rate from scores (across ALL responses,
-    # named + unnamed)
+    # Avg Sentiment uses ALL responses (named + unnamed) — sentiment
+    # toward the subject is meaningful in both layers.
+    # Risk Frame Rate uses UNNAMED-LAYER ONLY because the named layer
+    # includes prompts that explicitly elicit criticism (e.g. "What
+    # are the main criticisms of {subject}?"). Including those would
+    # measure "did AI answer the criticism question?" rather than
+    # "did AI volunteer a critical framing?". The unnamed-layer-only
+    # version captures the latter, which is the comms-relevant signal.
     cur.execute(
         f"""
         SELECT
@@ -1529,8 +1747,9 @@ def _compute_kpis_for_refresh(
           AVG(
             CASE WHEN (s.scores->>'criticism_severity')::numeric > %s
                  THEN 1.0 ELSE 0.0 END
-          )
+          ) FILTER (WHERE p.layer = 'unnamed')
         FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
         JOIN LATERAL (
             SELECT scores
             FROM response_extractions
@@ -1646,6 +1865,84 @@ def _platform_recall_for_refresh(
     return out
 
 
+def _kpis_per_refresh_bulk(
+    cur, refresh_ids: list[int], risk_frame_threshold: float,
+) -> dict[int, dict[str, float | None]]:
+    """Compute AI Recall + Avg Sentiment + Risk Frame Rate for many
+    refreshes in two queries (one grouped GROUP BY per metric family).
+    Returns a {refresh_id: {ai_recall, avg_sentiment, risk_frame_rate}}
+    map; missing refreshes (no matching responses) get None values.
+
+    Replaces N×3 queries from looping `_compute_kpis_for_refresh` with
+    2 total queries. For Obama (13 refreshes) that's 39 → 2."""
+    if not refresh_ids:
+        return {}
+
+    out: dict[int, dict[str, float | None]] = {
+        rid: {"ai_recall": None, "avg_sentiment": None, "risk_frame_rate": None}
+        for rid in refresh_ids
+    }
+
+    # AI Recall — restricted to unnamed-layer prompts. INNER JOIN to
+    # the extractions lateral excludes responses without subject_mentioned.
+    cur.execute(
+        """
+        SELECT
+          mr.refresh_run_id,
+          AVG(CASE WHEN sm.subject_mentioned THEN 1.0 ELSE 0.0 END)
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s)
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        GROUP BY mr.refresh_run_id
+        """,
+        (refresh_ids,),
+    )
+    for rid, recall in cur.fetchall():
+        out[rid]["ai_recall"] = float(recall) if recall is not None else None
+
+    # Avg Sentiment uses ALL responses (named + unnamed).
+    # Risk Frame Rate uses UNNAMED-LAYER ONLY — see commentary in
+    # _compute_kpis_for_refresh for the full rationale. Short version:
+    # named-layer "criticisms-eliciting" prompts mechanically inflate
+    # the rate by asking AI to enumerate criticisms.
+    cur.execute(
+        """
+        SELECT
+          mr.refresh_run_id,
+          AVG((s.scores->>'sentiment')::numeric),
+          AVG(
+            CASE WHEN (s.scores->>'criticism_severity')::numeric > %s
+                 THEN 1.0 ELSE 0.0 END
+          ) FILTER (WHERE p.layer = 'unnamed')
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+            SELECT scores
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND scores IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) s ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s)
+          AND mr.success = TRUE
+        GROUP BY mr.refresh_run_id
+        """,
+        (risk_frame_threshold, refresh_ids),
+    )
+    for rid, sentiment, risk in cur.fetchall():
+        out[rid]["avg_sentiment"] = float(sentiment) if sentiment is not None else None
+        out[rid]["risk_frame_rate"] = float(risk) if risk is not None else None
+
+    return out
+
+
 def _trajectory_for_subject(
     cur, subject_id: int, *, weeks: int, risk_frame_threshold: float,
 ) -> dict[str, Any]:
@@ -1670,21 +1967,19 @@ def _trajectory_for_subject(
     refreshes = list(reversed(refreshes))
 
     weeks_labels: list[str] = []
-    ai_recall: list[float | None] = []
-    avg_sentiment: list[float | None] = []
-    risk_frame_rate: list[float | None] = []
     refresh_ids: list[int] = []
     is_historical: list[bool] = []
-
     for rid, hist, as_of, started in refreshes:
         date_val = as_of if hist else started.date()
         weeks_labels.append(date_val.isoformat())
         refresh_ids.append(rid)
         is_historical.append(hist)
-        k = _compute_kpis_for_refresh(cur, rid, risk_frame_threshold)
-        ai_recall.append(k["ai_recall"])
-        avg_sentiment.append(k["avg_sentiment"])
-        risk_frame_rate.append(k["risk_frame_rate"])
+
+    # Bulk-compute KPIs for all refreshes in 2 queries instead of N×3
+    kpi_map = _kpis_per_refresh_bulk(cur, refresh_ids, risk_frame_threshold)
+    ai_recall = [kpi_map.get(rid, {}).get("ai_recall") for rid in refresh_ids]
+    avg_sentiment = [kpi_map.get(rid, {}).get("avg_sentiment") for rid in refresh_ids]
+    risk_frame_rate = [kpi_map.get(rid, {}).get("risk_frame_rate") for rid in refresh_ids]
 
     return {
         "weeks": weeks_labels,

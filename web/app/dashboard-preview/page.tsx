@@ -74,7 +74,7 @@ const platformRecall: {
 
 const headlineKpis = [
   {
-    label: "AI Recall",
+    label: "AI Mention Rate",
     value: "72%",
     sub: "Mentioned in relevant AI answers",
     delta: "+4.1",
@@ -352,7 +352,7 @@ export default function DashboardPreviewPage() {
               >
                 <div className="flex items-center justify-between gap-3 mb-3 px-1">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55">
-                    AI Recall by platform
+                    AI Mention Rate by platform
                   </div>
                   <div className="text-[11.5px] text-primary inline-flex items-center gap-1 group-hover:underline">
                     View breakdown <ArrowRight className="h-3 w-3" />
@@ -566,12 +566,12 @@ export default function DashboardPreviewPage() {
             <div className="grid md:grid-cols-3 gap-4">
               {[
                 {
-                  title: "AI Recall",
+                  title: "AI Mention Rate",
                   value: "72%",
                   delta: "+11 pts",
                   chart: <RecallChart />,
                   meaning:
-                    "Recall climbed steadily as recent regulatory hearings drove a fresh wave of media citations.",
+                    "Mention rate climbed steadily as recent regulatory hearings drove a fresh wave of media citations.",
                 },
                 {
                   title: "Share of Voice",

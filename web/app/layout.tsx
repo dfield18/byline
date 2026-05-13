@@ -36,7 +36,16 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       >
         <body className="min-h-full flex flex-col">
-          <header className="flex justify-end items-center gap-4 px-6 py-3 border-b border-black/10">
+          {/* Clerk's UserButton is a portal-mounted client component:
+              the server emits an empty wrapper and the client adds the
+              portal <div> on mount. That's a known intentional SSR/CSR
+              difference, so we suppress hydration warnings for the
+              auth header — without this, every page logs a recoverable
+              hydration error during dev. */}
+          <header
+            suppressHydrationWarning
+            className="flex justify-end items-center gap-4 px-6 py-3 border-b border-black/10"
+          >
             <Show when="signed-out">
               <SignInButton />
               <SignUpButton />

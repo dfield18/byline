@@ -20,15 +20,19 @@ import {
   AlertOctagon,
   Compass,
   Megaphone,
+  ChevronRight,
+  Sparkles,
 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
-import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
+import { CompetitorBarsFromData, SourcesDonut } from "@/components/dashboard/Charts";
 import {
   getSubject,
   getSubjectOverview,
+  listSubjects,
+  type Subject,
   type SubjectOverview,
   type SubjectDetail,
   type KpiValue,
@@ -44,14 +48,47 @@ const MODEL_COLORS: Record<string, string> = {
   Perplexity: "var(--chart-5)",
 };
 
+// All platforms we want represented in the recall panel — even ones
+// without data for this refresh. Keeps the visual stable as we onboard
+// new providers (a platform that ran last month but not this week
+// shouldn't silently disappear from the panel).
+const CANONICAL_PLATFORMS: string[] = [
+  "ChatGPT",
+  "Gemini",
+  "Claude",
+  "Perplexity",
+];
+
+// Two-letter initials from the subject name, stripping leading articles
+// and short prepositions so event/policy subjects don't collapse to
+// "TN"/"TI". Examples: "Alexandria Ocasio-Cortez" → "AO";
+// "the Inflation Reduction Act" → "IR"; "AI regulation in the United
+// States" → "AR" (acceptable fallback).
+const INITIALS_STOPWORDS = new Set(["the", "a", "an", "of", "by", "in"]);
+function deriveInitials(name: string): string {
+  const words = name
+    .split(/\s+/)
+    .filter((w) => /^[A-Za-z]/.test(w) && !INITIALS_STOPWORDS.has(w.toLowerCase()));
+  if (words.length === 0) return name.slice(0, 2).toUpperCase();
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
 // Format helpers — keep all KPI formatting consistent across the page
 function formatPct(v: number | null, digits = 0): string {
   if (v === null) return "—";
   return `${(v * 100).toFixed(digits)}%`;
 }
-function formatSentiment(v: number | null): string {
+// Tone value formatter — appends "positive"/"negative"/"neutral" so a
+// reader doesn't have to interpret what the sign means.
+// 0.20 → "+20% positive", -0.30 → "−30% negative", 0 → "Neutral".
+function formatTonePct(v: number | null, digits = 0): string {
   if (v === null) return "—";
-  return v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2);
+  const pct = v * 100;
+  if (Math.abs(pct) < 0.5) return "Neutral";
+  const sign = pct > 0 ? "+" : "−";
+  const direction = pct > 0 ? "positive" : "negative";
+  return `${sign}${Math.abs(pct).toFixed(digits)}% ${direction}`;
 }
 function formatDelta(d: number | null, unit: string): string {
   if (d === null) return "—";
@@ -59,12 +96,34 @@ function formatDelta(d: number | null, unit: string): string {
   return `${sign}${Math.abs(d).toFixed(unit === "pts" ? 1 : 2)} ${unit}`;
 }
 
-function TrendBadge({ trend, delta, unit }: { trend: "up" | "down" | "flat"; delta: number | null; unit: string }) {
+function TrendBadge({
+  trend,
+  delta,
+  unit,
+  goodDirection,
+}: {
+  trend: "up" | "down" | "flat";
+  delta: number | null;
+  unit: string;
+  // Which direction of movement represents improvement for this
+  // metric. AI Mention Rate / Sentiment improve when up; Risk Frame
+  // Rate improves when down. Color reflects whether the delta is in
+  // the "good" direction for the underlying metric — green for good,
+  // warning for bad, muted for flat.
+  goodDirection: "up" | "down";
+}) {
   if (delta === null) {
     return <span className="text-[11px] text-foreground/40">no prior</span>;
   }
   const Icon = trend === "up" ? TrendingUp : trend === "down" ? TrendingDown : Minus;
-  const color = trend === "flat" ? "text-muted-foreground" : "text-success";
+  let color: string;
+  if (trend === "flat") {
+    color = "text-muted-foreground";
+  } else if (trend === goodDirection) {
+    color = "text-success";
+  } else {
+    color = "text-warning";
+  }
   return (
     <span className={`inline-flex items-center gap-1 text-xs font-medium ${color}`}>
       <Icon className="h-3 w-3" />
@@ -87,28 +146,39 @@ function KpiTooltipIcon({ text }: { text: string }) {
 // ── Wired sections ──────────────────────────────────────────────────
 
 function HeroKpis({ kpis }: { kpis: SubjectOverview["kpis"] }) {
-  const tiles: { label: string; tooltip: string; value: string; risk?: boolean; kpi: KpiValue; unit: string }[] = [
+  const tiles: {
+    label: string;
+    tooltip: string;
+    value: string;
+    risk?: boolean;
+    kpi: KpiValue;
+    unit: string;
+    goodDirection: "up" | "down";
+  }[] = [
     {
-      label: "AI Recall",
-      tooltip: "Share of relevant AI answers (unnamed-layer prompts about the topic area) that mention this subject.",
+      label: "AI Mention Rate",
+      tooltip: "Share of relevant AI answers that mention this subject. Measured on questions about the subject's topic areas — not questions that name the subject directly.",
       value: formatPct(kpis.ai_recall.value),
       kpi: kpis.ai_recall,
       unit: "pts",
+      goodDirection: "up",
     },
     {
-      label: "Avg Sentiment",
-      tooltip: "Mean tone across all AI answers about this subject, scaled −1 (most negative) to +1 (most positive).",
-      value: formatSentiment(kpis.avg_sentiment.value),
+      label: "Average Tone",
+      tooltip: "Average tone of AI answers about this subject, expressed as a percentage above or below neutral. Range −100% (most negative) to +100% (most positive). 0% means perfectly neutral.",
+      value: formatTonePct(kpis.avg_sentiment.value, 0),
       kpi: kpis.avg_sentiment,
-      unit: "",
+      unit: "pts",
+      goodDirection: "up",
     },
     {
       label: "Risk Frame Rate",
-      tooltip: "Share of AI answers where the model frames the subject through controversy, criticism, or opposition narratives (criticism severity > 0.5).",
+      tooltip: "Share of AI answers that volunteer a critical framing of the subject (criticism severity > 0.5). Measured only on questions about the subject's topic areas — not questions that ask about controversies or criticisms directly, since those would mechanically inflate the rate.",
       value: formatPct(kpis.risk_frame_rate.value),
       risk: true,
       kpi: kpis.risk_frame_rate,
       unit: "pts",
+      goodDirection: "down",
     },
   ];
 
@@ -128,7 +198,12 @@ function HeroKpis({ kpis }: { kpis: SubjectOverview["kpis"] }) {
             >
               {t.value}
             </div>
-            <TrendBadge trend={t.kpi.trend} delta={t.kpi.delta} unit={t.unit} />
+            <TrendBadge
+              trend={t.kpi.trend}
+              delta={t.kpi.delta}
+              unit={t.unit}
+              goodDirection={t.goodDirection}
+            />
           </div>
         </div>
       ))}
@@ -184,7 +259,11 @@ function DominantNarrativePanel({
 
       <ul className="mt-7 space-y-5">
         {clusters.map((c, i) => {
-          const barWidth = topShare > 0 ? (c.share / topShare) * 100 : 0;
+          // Bar width = absolute share (0..1 → 0..100%). The remaining
+          // track visually represents the share not covered by named
+          // clusters, which is intentional — clusters aren't required
+          // to sum to 100%.
+          const barWidth = c.share * 100;
           const negative = isNegative(c.name);
           // Position-based opacity for non-negative clusters; warning
           // color overrides for negative ones regardless of position
@@ -218,50 +297,161 @@ function DominantNarrativePanel({
   );
 }
 
+// Placeholder used for canonical platforms that didn't return data on
+// this refresh. Visually rendered as N/A in both tile and list layouts.
+type PlatformRow = SubjectOverview["platform_recall"][number];
+function emptyPlatformRow(name: string): PlatformRow {
+  return {
+    name,
+    value: null,
+    delta: null,
+    trend: "flat",
+    n_responses: 0,
+  };
+}
+
 function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platform_recall"] }) {
-  if (!platforms.length) return null;
+  // Merge the live data with the canonical list so missing platforms
+  // surface as N/A rather than vanishing. Preserve canonical order;
+  // append any non-canonical platforms the API returned at the end.
+  const byName = new Map(platforms.map((p) => [p.name, p]));
+  const merged: PlatformRow[] = [
+    ...CANONICAL_PLATFORMS.map((name) => byName.get(name) ?? emptyPlatformRow(name)),
+    ...platforms.filter((p) => !CANONICAL_PLATFORMS.includes(p.name)),
+  ];
+  if (!merged.length) return null;
+
+  // Above this count the tile grid wraps awkwardly inside the narrow
+  // right column, so we switch to a single-column list layout that
+  // scales linearly to any N.
+  const useList = merged.length >= 5;
+
   return (
     <div
       aria-label="Per-platform recall breakdown"
       className="relative block mt-8 pt-6 border-t border-border/50"
     >
-      <div className="flex items-center justify-between gap-3 mb-3 px-1">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55">
-          AI Recall by platform
+      <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55 mb-3">
+        AI Mention Rate by platform
+      </div>
+      {useList ? (
+        <ul className="divide-y divide-border/40 border border-border/60 rounded-md bg-card">
+          {merged.map((p) => {
+            const noData = p.value === null;
+            return (
+              <li
+                key={p.name}
+                title={
+                  noData
+                    ? `No data available for ${p.name} in this period.`
+                    : `${formatPct(p.value, 0)} of relevant prompts on ${p.name}. Based on ${p.n_responses} responses.`
+                }
+                className={`flex items-center justify-between gap-3 px-3 py-2 ${
+                  p.lowest ? "bg-warning/[0.04]" : ""
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full shrink-0"
+                    style={{
+                      backgroundColor: noData
+                        ? "var(--muted-foreground)"
+                        : MODEL_COLORS[p.name] || "var(--muted-foreground)",
+                      opacity: noData ? 0.4 : 1,
+                    }}
+                  />
+                  <span
+                    className={`text-[12px] font-medium truncate ${
+                      noData ? "text-foreground/45" : "text-foreground/85"
+                    }`}
+                  >
+                    {p.name}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-2 shrink-0">
+                  <span
+                    className={`font-display text-[14px] font-semibold tabular-nums tracking-[-0.01em] ${
+                      noData ? "text-foreground/40" : "text-foreground"
+                    }`}
+                  >
+                    {noData ? "N/A" : formatPct(p.value, 0)}
+                  </span>
+                  {!noData && (
+                    <TrendBadge
+                      trend={p.trend}
+                      delta={p.delta}
+                      unit="pts"
+                      goodDirection="up"
+                    />
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className="flex flex-wrap gap-2.5">
+          {merged.map((p) => {
+            const noData = p.value === null;
+            return (
+              <div
+                key={p.name}
+                title={
+                  noData
+                    ? `No data available for ${p.name} in this period.`
+                    : `${formatPct(p.value, 0)} of relevant prompts on ${p.name} where the subject is mentioned. Based on ${p.n_responses} responses.`
+                }
+                className={`relative rounded-md border px-3 py-2.5 grow basis-[180px] max-w-[260px] ${
+                  noData
+                    ? "border-border/50 bg-card/50"
+                    : p.lowest
+                    ? "border-warning/30 bg-warning/[0.04]"
+                    : "border-border bg-card"
+                }`}
+              >
+                {p.lowest && !noData && (
+                  <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-warning" />
+                )}
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{
+                      backgroundColor: noData
+                        ? "var(--muted-foreground)"
+                        : MODEL_COLORS[p.name] || "var(--muted-foreground)",
+                      opacity: noData ? 0.4 : 1,
+                    }}
+                  />
+                  <span
+                    className={`text-[11px] font-medium ${
+                      noData ? "text-foreground/45" : "text-foreground/70"
+                    }`}
+                  >
+                    {p.name}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className={`font-display text-[18px] font-semibold tabular-nums tracking-[-0.015em] ${
+                      noData ? "text-foreground/40" : "text-foreground"
+                    }`}
+                  >
+                    {noData ? "N/A" : formatPct(p.value, 0)}
+                  </span>
+                  {!noData && (
+                    <TrendBadge
+                      trend={p.trend}
+                      delta={p.delta}
+                      unit="pts"
+                      goodDirection="up"
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
-      </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        {platforms.map((p) => (
-          <div
-            key={p.name}
-            title={
-              p.value === null
-                ? `No data available for ${p.name} in this period.`
-                : `${formatPct(p.value, 0)} of relevant prompts on ${p.name} where the subject is mentioned. Based on ${p.n_responses} responses.`
-            }
-            className={`relative rounded-md border px-3 py-2.5 ${
-              p.lowest ? "border-warning/30 bg-warning/[0.04]" : "border-border bg-card"
-            }`}
-          >
-            {p.lowest && (
-              <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-warning" />
-            )}
-            <div className="flex items-center gap-1.5 mb-1">
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: MODEL_COLORS[p.name] || "var(--muted-foreground)" }}
-              />
-              <span className="text-[11px] font-medium text-foreground/70">{p.name}</span>
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="font-display text-[18px] font-semibold tabular-nums tracking-[-0.015em] text-foreground">
-                {formatPct(p.value, 0)}
-              </span>
-              <TrendBadge trend={p.trend} delta={p.delta} unit="pts" />
-            </div>
-          </div>
-        ))}
-      </div>
+      )}
     </div>
   );
 }
@@ -269,14 +459,14 @@ function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platfo
 function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajectory"] }) {
   const metrics: { title: string; values: (number | null)[]; format: (v: number | null) => string }[] = [
     {
-      title: "AI Recall",
+      title: "AI Mention Rate",
       values: trajectory.ai_recall,
       format: (v) => formatPct(v, 0),
     },
     {
-      title: "Avg Sentiment",
+      title: "Average Tone",
       values: trajectory.avg_sentiment,
-      format: (v) => formatSentiment(v),
+      format: (v) => formatTonePct(v),
     },
     {
       title: "Risk Frame Rate",
@@ -380,8 +570,9 @@ function MiniSpark({
             vectorEffect="non-scaling-stroke"
           >
             <title>
-              {labels[i]}: {v === null ? "—" : v.toFixed(3)}
-              {isHistorical[i] ? " (retrospective estimate)" : ""}
+              {`${labels[i]}: ${v === null ? "—" : v.toFixed(3)}${
+                isHistorical[i] ? " (retrospective estimate)" : ""
+              }`}
             </title>
           </circle>
         );
@@ -517,6 +708,61 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
   );
 }
 
+// Same monochromatic blue gradient used inside SourcesDonut, repeated
+// here so the inline legend dots match the wedges exactly.
+const SOURCE_TYPE_COLORS = [
+  "oklch(0.5 0.13 245)",
+  "oklch(0.55 0.13 245)",
+  "oklch(0.62 0.12 245)",
+  "oklch(0.68 0.10 245)",
+  "oklch(0.74 0.08 245)",
+  "oklch(0.79 0.06 245)",
+  "oklch(0.84 0.04 245)",
+];
+
+function SourcesTypeMix({ sources }: { sources: SubjectOverview["sources"] }) {
+  if (!sources.length) return null;
+
+  // Roll up by type, summing influence scores. Sort desc so heavier
+  // categories take the brighter wedges via SOURCE_DONUT_COLORS order.
+  const byType = new Map<string, number>();
+  for (const s of sources) {
+    byType.set(s.type, (byType.get(s.type) || 0) + s.score);
+  }
+  const aggregated = Array.from(byType.entries())
+    .map(([name, score]) => ({ name, score }))
+    .sort((a, b) => b.score - a.score);
+  const total = aggregated.reduce((acc, x) => acc + x.score, 0) || 1;
+
+  return (
+    <div className="lg:border-l lg:border-border/60 lg:pl-8 pt-1">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+        Source mix
+      </div>
+      <SourcesDonut data={aggregated} />
+      <ul className="mt-4 space-y-1.5">
+        {aggregated.map((t, i) => (
+          <li
+            key={t.name}
+            className="flex items-center justify-between gap-2 text-[12px]"
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <span
+                className="h-2 w-2 rounded-sm shrink-0"
+                style={{ backgroundColor: SOURCE_TYPE_COLORS[i % SOURCE_TYPE_COLORS.length] }}
+              />
+              <span className="truncate text-foreground/80">{t.name}</span>
+            </span>
+            <span className="tabular-nums text-foreground/55">
+              {Math.round((t.score / total) * 100)}%
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // ── Placeholder section for Phase 2/3 methodology gaps ──────────────
 
 function PhasePlaceholder({ title, phase, what }: { title: string; phase: string; what: string }) {
@@ -554,10 +800,15 @@ export default async function SubjectOverviewPage({
   // concurrently halves the wall-time vs sequential.
   let data: SubjectOverview;
   let subject: SubjectDetail;
+  let subjects: Subject[];
   try {
-    [data, subject] = await Promise.all([
+    // listSubjects is non-essential to the page (it only powers the
+    // header dropdown), so we let it fail soft to [] without crashing
+    // the whole page.
+    [data, subject, subjects] = await Promise.all([
       getSubjectOverview(subjectId),
       getSubject(subjectId),
+      listSubjects().catch(() => [] as Subject[]),
     ]);
   } catch (e) {
     if (e instanceof Error && e.message.includes("404")) notFound();
@@ -573,36 +824,96 @@ export default async function SubjectOverviewPage({
       })
     : "—";
 
+  const subjectInitials = deriveInitials(data.subject_name);
+  // Header meta packs everything that used to live on the now-removed
+  // action+meta bar below the Header. Header is sticky, so this info
+  // stays visible while scrolling.
+  const headerMeta =
+    data.meta.last_refresh_at !== null
+      ? `${data.subject_name} · AI Visibility · Latest refresh ${updated} · ${data.meta.n_responses} responses · ${data.meta.n_platforms} platforms`
+      : `${data.subject_name} · AI Visibility`;
+
+  // Empty state: subject exists but has no completed refresh yet. The
+  // normal page would render mostly empty cards and "—" values. Show
+  // a focused first-run state instead so the user understands they're
+  // looking at a not-yet-refreshed subject, not a broken page.
+  const isEmpty = data.meta.latest_refresh_id === null;
+  if (isEmpty) {
+    return (
+      <div className="flex min-h-screen bg-background text-foreground">
+        <Sidebar />
+        <div className="flex-1 min-w-0 flex flex-col">
+          <Header
+            subjectName={data.subject_name}
+            subjectInitials={subjectInitials}
+            metaLine={headerMeta}
+            subjects={subjects.map((s) => ({ id: s.id, name: s.name }))}
+            currentSubjectId={subjectId}
+            backHref="/"
+            backLabel="All subjects"
+            refreshSlot={<RefreshButton subjectId={subjectId} />}
+          />
+          <main className="flex-1 px-4 md:px-8 py-6 space-y-8 max-w-[1500px] w-full mx-auto">
+            <Card className="relative overflow-hidden p-10 md:p-14 border-border/60">
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  background:
+                    "linear-gradient(135deg, color-mix(in oklab, var(--primary) 5%, transparent) 0%, color-mix(in oklab, var(--primary) 1.5%, transparent) 35%, transparent 70%)",
+                }}
+              />
+              <div className="relative flex flex-col items-start gap-5 max-w-2xl">
+                <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/10 border border-primary/30">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h1 className="font-display text-[26px] md:text-[30px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground">
+                    AI Narrative Brief: {data.subject_name}
+                  </h1>
+                  <p className="mt-3 text-[15px] leading-relaxed text-foreground/70">
+                    No refreshes yet for this subject. Run the first one to
+                    generate an executive brief — KPIs, narrative clusters,
+                    evidence quotes, competitive snapshot, and source mix.
+                  </p>
+                  <p className="mt-2 text-[13px] text-foreground/55">
+                    A typical refresh takes 1–3 minutes and analyzes ~25
+                    responses across the major AI search platforms.
+                  </p>
+                </div>
+                <div className="mt-2 text-[12px] text-foreground/55 flex items-center gap-2">
+                  Use the
+                  <span className="inline-flex items-center px-2 py-0.5 rounded border border-border text-foreground/70 text-[11px]">
+                    Trigger refresh
+                  </span>
+                  button at the top right to get started.
+                </div>
+              </div>
+            </Card>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       <Sidebar />
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <Header />
+        <Header
+          subjectName={data.subject_name}
+          subjectInitials={subjectInitials}
+          metaLine={headerMeta}
+          subjects={subjects.map((s) => ({ id: s.id, name: s.name }))}
+          currentSubjectId={subjectId}
+          backHref="/"
+          backLabel="All subjects"
+          refreshSlot={<RefreshButton subjectId={subjectId} />}
+        />
 
-        <main className="flex-1 px-4 md:px-8 py-10 space-y-10 max-w-[1500px] w-full mx-auto">
-          {/* ACTION BAR — back nav + trigger refresh */}
-          <div className="flex items-center justify-between gap-4 -mb-6">
-            <Link
-              href="/"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              ← All subjects
-            </Link>
-            <RefreshButton subjectId={subjectId} />
-          </div>
-
+        <main className="flex-1 px-4 md:px-8 py-6 space-y-8 max-w-[1500px] w-full mx-auto">
           {/* HERO */}
           <section>
-            <div className="flex items-center justify-between gap-4 mb-4 px-1">
-              <div className="text-xs text-foreground/55">
-                AI Visibility Snapshot · Latest refresh {updated}
-              </div>
-              <div className="text-xs text-foreground/55 whitespace-nowrap">
-                {data.meta.n_responses} responses · {data.meta.n_platforms} platforms
-              </div>
-            </div>
-
             <Card className="relative overflow-hidden p-7 md:p-10 border-border/60">
               <div
                 className="absolute inset-0 pointer-events-none"
@@ -613,7 +924,9 @@ export default async function SubjectOverviewPage({
               />
 
               <div className="relative grid lg:grid-cols-5 gap-8 lg:gap-12">
-                {/* LEFT: title + callouts + KPIs */}
+                {/* LEFT: title + callouts. KPIs live below the grid
+                    as a full-width strip so the two columns can end
+                    at similar heights. */}
                 <div className="lg:col-span-3 flex flex-col">
                   <h1 className="font-display text-[24px] md:text-[27px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground">
                     AI Narrative Brief: {data.subject_name}
@@ -668,7 +981,6 @@ export default async function SubjectOverviewPage({
                     </div>
                   )}
 
-                  <HeroKpis kpis={data.kpis} />
                 </div>
 
                 {/* RIGHT: Dominant narrative — ranked clusters */}
@@ -677,6 +989,7 @@ export default async function SubjectOverviewPage({
                   subjectName={data.subject_name}
                 />
               </div>
+              <HeroKpis kpis={data.kpis} />
               <PlatformRecallStrip platforms={data.platform_recall} />
             </Card>
           </section>
@@ -686,8 +999,8 @@ export default async function SubjectOverviewPage({
             <section>
               <SectionTitle
                 eyebrow="Strategic Takeaways"
-                title="What stands out this period"
-                description={`The most important shifts in how AI platforms currently describe ${data.subject_name}.`}
+                title="What stands out right now"
+                description={`Standout patterns in how AI platforms currently describe ${data.subject_name} — strongest associations, biggest coverage gaps, and most critical framings on this refresh.`}
               />
               <Card className="p-2 md:p-3">
                 <ul className="divide-y divide-border/60">
@@ -801,14 +1114,36 @@ export default async function SubjectOverviewPage({
             </section>
           )}
 
-          {/* VISIBILITY TRENDS — wired */}
+          {/* VISIBILITY TRENDS — wired. Below 2 refreshes there's no
+              trend line to draw, so render a single-row banner instead
+              of three half-empty cards. */}
           <section>
-            <SectionTitle
-              eyebrow="Visibility Trends"
-              title="How visibility has shifted"
-              description={`Movement across the headline metrics over the last ${data.trajectory.weeks.length} weekly refreshes. Open circles are retrospective estimates; filled circles are live refreshes.`}
-            />
-            <TrajectoryStrip trajectory={data.trajectory} />
+            {data.trajectory.weeks.length >= 2 ? (
+              <>
+                <SectionTitle
+                  eyebrow="Visibility Trends"
+                  title="How visibility has shifted"
+                  description={`Movement across the headline metrics over the last ${data.trajectory.weeks.length} weekly refreshes. Open circles are retrospective estimates; filled circles are live refreshes.`}
+                />
+                <TrajectoryStrip trajectory={data.trajectory} />
+              </>
+            ) : (
+              <>
+                <SectionTitle
+                  eyebrow="Visibility Trends"
+                  title="How visibility has shifted"
+                  description="Trend lines compare visibility week-over-week. Available after the second refresh."
+                />
+                <Card className="flex items-center gap-3 px-5 py-4">
+                  <TrendingUp className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <p className="text-sm text-foreground/70 leading-relaxed">
+                    {data.trajectory.weeks.length === 0
+                      ? "No refreshes yet — trend charts will appear after the second refresh."
+                      : "1 snapshot in history so far. Trend charts will appear after the next refresh."}
+                  </p>
+                </Card>
+              </>
+            )}
           </section>
 
           {/* COMPETITIVE SNAPSHOT — Phase 4 wiring */}
@@ -884,7 +1219,10 @@ export default async function SubjectOverviewPage({
               title="Sources shaping AI answers"
               description={`The publications and pages most often cited or paraphrased in AI responses about ${data.subject_name}.`}
             />
-            <SourcesList sources={data.sources} />
+            <div className="grid lg:grid-cols-[1fr_280px] gap-8 items-start">
+              <SourcesList sources={data.sources} />
+              <SourcesTypeMix sources={data.sources} />
+            </div>
           </Card>
 
           {/* REFRESH HISTORY — operator/audit context, behind a disclosure
@@ -898,10 +1236,7 @@ export default async function SubjectOverviewPage({
                     ({subject.refreshes.length} run{subject.refreshes.length === 1 ? "" : "s"})
                   </span>
                 </span>
-                <span className="text-[11px] text-primary group-hover:underline">
-                  {/* arrow rotates on open via group-open: */}
-                  <span className="inline-block transition-transform group-open:rotate-90">›</span>
-                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-[color,transform] group-open:rotate-90" />
               </summary>
               <div className="px-5 pb-5">
                 <div className="overflow-x-auto">
