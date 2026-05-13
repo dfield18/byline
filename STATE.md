@@ -1,9 +1,9 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-11 (after Phase A2:
-> Clerk auth + Phase B: async job pattern shipped)**. Read this first if
-> you're a fresh Claude Code session picking up work. Update when state
-> shifts meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-13 (after
+> customer-facing dashboard polish pass: caching, layout, plain-English
+> labels, methodology fixes)**. Read this first if you're a fresh Claude
+> Code session picking up work. Update when state shifts meaningfully.
 
 ---
 
@@ -610,6 +610,52 @@ runner plus five Extractor subclasses, all under methodology_version
   fresh refresh is run. New refreshes pick up mention detection
   automatically since the extractor is in the default extractors
   list. Cost: ~$0.0015 per unnamed-layer response.
+
+**Customer-facing dashboard brief: production-ready (2026-05-13).**
+`/subjects/[id]` is the wired customer-facing AI Narrative Brief. It
+reads cross-analyzer + extractor output via
+`dashboard.lib.queries.get_subject_overview()` and renders: hero
+KPIs (AI Mention Rate / Average Tone / Risk Frame Rate), Bottom Line
++ Recommended Focus callouts (LLM-polished), Dominant Narrative
+panel (cluster bars), platform-recall breakdown (adaptive tile/list),
+Strategic Takeaways (Message Gap / Opposition Frame / Strongest
+Asset rules), Prompt Coverage, Evidence quotes (deduped per prompt),
+Visibility Trends (sparklines), Competitive Snapshot, Sources +
+type-mix donut. Empty-state hero for zero-refresh subjects;
+adaptive layout collapses thin sections gracefully. Header is
+sticky and consolidates back-nav, page meta, subject switcher,
+Export PNG, and Trigger refresh into one band.
+
+Methodology adjustments shipped in this pass that affect read
+semantics:
+
+- **AI Mention Rate** (was "AI Recall") computed on unnamed-layer
+  responses only — questions in the subject's topic areas that
+  don't name the subject directly. Backend identifier
+  `ai_recall` unchanged.
+- **Average Tone** (was "Avg Sentiment") rendered as percentage
+  (`+20% positive` / `-30% negative` / `Neutral`) rather than raw
+  -1..+1. Backend computes the same value; frontend formatter does
+  the ×100 + direction word.
+- **Risk Frame Rate** restricted to unnamed-layer responses to
+  avoid measuring "did AI answer the criticism prompt we asked?"
+  Named-layer "What are the criticisms of {subject}?" prompts
+  mechanically inflated the prior rate; unnamed-only captures
+  spontaneous critical framing. Same backend `risk_frame_rate`
+  field, FILTER applied at query time.
+- **Polish output cached** in `refresh_analyses` keyed by
+  `(refresh_run_id, analysis_type='executive_polish_v1')`. One row
+  per refresh; cache hit when raw_bottom_line + raw_recommended_focus
+  inputs match. DELETE-then-INSERT keeps the table flat. Bump the
+  version constant to invalidate all cached rows after a prompt
+  change.
+- **Trajectory KPIs** computed in 2 grouped queries (one for AI
+  Mention Rate, one for sentiment+risk) instead of N×3 per-refresh
+  queries. `_kpis_per_refresh_bulk` in `dashboard/lib/queries.py`.
+- **Operator-bypass** via `BYLINE_OPERATOR_ORG_ID` env: a configured
+  Clerk org_id can read NULL-org seed subjects in addition to its
+  own. Used for dogfooding the 11 seed subjects from a real Clerk
+  session; leave blank in customer-facing deployments.
 
 Next sub-phase: **add more extractors** to `app/analyzer.py` — natural
 candidates per the spec are sources, entities, scores, narrative_themes.
@@ -1228,9 +1274,28 @@ direction.
      days; the difference between "viewer of findings" and "actionable
      tool customers pay for."
 
-  5. **Frontend pages (Phase D)** — per-refresh findings drill-down,
-     response detail view, category-aware setup_inputs forms. After
-     Phase B's async jobs land, also wire a "Trigger refresh" button.
+  5. **Frontend pages (Phase D)** — partially shipped:
+     - **Overview page** (`/subjects/[id]/page.tsx`) — production-ready
+       customer-facing brief. Trigger refresh wired into the sticky
+       Header. See "Customer-facing dashboard brief" subsection above
+       for the full feature list.
+     - **Hub-and-spokes sub-pages** (Narrative, Visibility, Competition,
+       Topics, Sources, Prompts, Reports, Settings) — sidebar items
+       exist but every link except Overview goes nowhere. Per the IA
+       decisions in "Next-priority items," each spoke is its own
+       `page.tsx` under `web/app/subjects/[id]/`. None built yet.
+     - **Methodology section** — footer link `Methodology →` still
+       points at `#`. Adding an in-page `<section id="methodology">`
+       near the bottom of the Overview is the smallest blocker to
+       customer credibility. ~20 min.
+     - **Landing page (`/`)** — still the v0 scaffold (zinc tokens,
+       plain table, no Sidebar/Header chrome). Visually jarring vs
+       the polished Overview. Hydration risks fixed (locale-pinned
+       date formatting), v0-scaffold dev tell removed from footer,
+       but a real redesign is the biggest pre-demo cosmetic gap.
+     - **Per-refresh findings drill-down** + response detail view +
+       category-aware setup_inputs forms — original Phase D scope,
+       still not built.
 - The recommendation engine (sources to engage, framings to test, etc.).
 - Auth / users / orgs / billing.
 - Alert configurations for narrative shifts.
