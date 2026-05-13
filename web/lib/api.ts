@@ -199,6 +199,14 @@ export type SubjectOverview = {
     risk_frame_rate: (number | null)[];
   };
   sources: { name: string; score: number; type: string; n_citations: number }[];
+  topic_coverage: {
+    label: string;
+    source_field: string;
+    n_responses: number;
+    n_unique_slots: number;
+    share_of_set: number;
+    ai_recall: number | null;
+  }[];
   meta: {
     latest_refresh_id: number | null;
     last_refresh_at: string | null;

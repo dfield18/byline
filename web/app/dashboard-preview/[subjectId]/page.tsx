@@ -450,11 +450,55 @@ export default async function SubjectOverviewPage({
             what="Comparative insights like 'AI underweights X message on housing prompts' will surface here once prompts are tagged with customer-facing topic categories and a comparative cross-analyzer ships."
           />
 
-          <PhasePlaceholder
-            title="Prompt coverage"
-            phase="Phase 2"
-            what="Per-topic share of the test set and recall (e.g. Banking regulation 25% / 91%) will appear here once prompts are tagged with topic categories."
-          />
+          {/* PROMPT COVERAGE — Phase 2 wiring */}
+          {data.topic_coverage.length > 0 && (
+            <section>
+              <SectionTitle
+                eyebrow="Prompt coverage"
+                title="What types of questions were included in this analysis"
+                description="Topics derived from the subject's setup_inputs. Recall is the share of unnamed-layer prompts in that topic where AI surfaced the subject."
+              />
+              <Card className="p-5 md:p-6">
+                <div className="grid grid-cols-[1fr_auto_auto_72px] items-baseline gap-x-6 text-[10px] uppercase tracking-wider text-muted-foreground pb-2 border-b border-border/60">
+                  <span>Topic</span>
+                  <span className="text-right">Share of set</span>
+                  <span className="text-right">AI recall</span>
+                  <span></span>
+                </div>
+                {data.topic_coverage.map((t) => {
+                  const recallPct = t.ai_recall === null ? null : t.ai_recall * 100;
+                  return (
+                    <div
+                      key={t.label}
+                      className="grid grid-cols-[1fr_auto_auto_72px] items-baseline gap-x-6 py-2.5 border-b border-border/30 last:border-b-0 text-sm"
+                      title={`${t.n_unique_slots} prompt slot${t.n_unique_slots === 1 ? "" : "s"} × ${t.n_responses / t.n_unique_slots} model${t.n_unique_slots === 1 ? "" : "s"} = ${t.n_responses} responses · source: ${t.source_field}`}
+                    >
+                      <span className="font-medium text-foreground/85 truncate">
+                        {t.label}
+                      </span>
+                      <span className="text-foreground/55 tabular-nums text-right">
+                        {(t.share_of_set * 100).toFixed(0)}%
+                      </span>
+                      <span className="font-mono tabular-nums text-foreground/80 text-right">
+                        {recallPct === null ? "—" : `${recallPct.toFixed(0)}%`}
+                      </span>
+                      <div className="h-1 bg-border rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary/70"
+                          style={{ width: `${recallPct ?? 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="mt-3 text-[11.5px] text-foreground/50 leading-relaxed">
+                  Recall is computed on unnamed-layer prompts only (where the
+                  subject is not mentioned in the question). Named-layer recall
+                  is trivially 100%.
+                </p>
+              </Card>
+            </section>
+          )}
 
           <PhasePlaceholder
             title="Evidence — what AI is actually saying"

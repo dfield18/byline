@@ -352,6 +352,142 @@ def get_response(model_response_id: int) -> dict[str, Any] | None:
     return d
 
 
+# ─── topic coverage (Phase 2 wiring) ───────────────────────────────────
+
+# Order of preference when a prompt uses multiple topic-bearing
+# variables. The first one wins as that prompt's topic.
+_TOPIC_VAR_PRIORITY = [
+    "primary_domain",
+    "secondary_domain",
+    "tertiary_domain",
+    "contextual_domain",
+    "adjacent_position",
+]
+
+# Always-present-in-templates variables that aren't real topics
+# (identity, grammar, configuration, generation seed). Mapped to
+# special-case labels or skipped entirely.
+_RECENT_NEWS_LABEL = "Current events"
+
+
+def _extract_template_vars(template: str) -> set[str]:
+    """Pull the set of {variable_name} substitutions out of a prompt
+    template. Used to derive a prompt's topic from which setup_input
+    variable it invokes."""
+    import re
+
+    return set(re.findall(r"\{(\w+)\}", template or ""))
+
+
+def _topic_for_prompt(
+    template: str, setup_inputs: dict[str, Any]
+) -> tuple[str, str] | None:
+    """Determine the topic label for a (prompt, subject) pair.
+
+    Returns (label, source_field) where:
+      - label is the subject-specific topic string (e.g. "progressive
+        governance and healthcare reform")
+      - source_field is the setup_input key that supplied it (e.g.
+        "primary_domain") — useful for surfacing in the UI
+
+    Returns None for prompts whose template doesn't reference any
+    topic-bearing variable (e.g. named/1 "descriptive baseline" which
+    only uses {name}, {pronoun_be}, {pronoun_subject}).
+
+    Recent-news prompts (`{recent_news}` in the template) are bucketed
+    under a single "Current events" label since recent_news is volatile
+    and doesn't map to a stable topic across refreshes.
+    """
+    vars_in_template = _extract_template_vars(template)
+
+    if "recent_news" in vars_in_template:
+        return (_RECENT_NEWS_LABEL, "recent_news")
+
+    for var in _TOPIC_VAR_PRIORITY:
+        if var in vars_in_template:
+            value = setup_inputs.get(var)
+            if value:
+                return (str(value), var)
+
+    return None
+
+
+def _topic_coverage_for_refresh(
+    cur, refresh_run_id: int, setup_inputs: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Group prompts run in this refresh by topic, compute share of
+    unnamed-layer test set + AI recall per topic.
+
+    Why unnamed-layer only:
+      - Named-layer prompts include the subject's name in the prompt
+        text. AI recall is trivially 100% on them (the subject is in
+        the question). They tell us nothing about "does AI surface
+        this subject organically?"
+      - Unnamed-layer prompts probe the topic area without naming the
+        subject. AI recall measures whether the subject is surfaced.
+        This is the meaningful per-topic visibility metric.
+    """
+    cur.execute(
+        """
+        SELECT
+          p.id, p.template,
+          sm.subject_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    rows = cur.fetchall()
+
+    # Group by topic label
+    buckets: dict[str, dict[str, Any]] = {}
+    for prompt_id, template, mentioned in rows:
+        topic = _topic_for_prompt(template, setup_inputs)
+        if topic is None:
+            continue  # prompts without a topic variable are skipped
+        label, source_field = topic
+        if label not in buckets:
+            buckets[label] = {
+                "label": label,
+                "source_field": source_field,
+                "n_responses": 0,
+                "n_mentioned": 0,
+                "prompt_slots": set(),
+            }
+        buckets[label]["n_responses"] += 1
+        if mentioned:
+            buckets[label]["n_mentioned"] += 1
+        buckets[label]["prompt_slots"].add(prompt_id)
+
+    total = sum(b["n_responses"] for b in buckets.values())
+    if total == 0:
+        return []
+
+    return [
+        {
+            "label": b["label"],
+            "source_field": b["source_field"],
+            "n_responses": b["n_responses"],
+            "n_unique_slots": len(b["prompt_slots"]),
+            "share_of_set": b["n_responses"] / total,
+            "ai_recall": (
+                b["n_mentioned"] / b["n_responses"]
+                if b["n_responses"] else None
+            ),
+        }
+        for b in sorted(buckets.values(), key=lambda x: -x["n_responses"])
+    ]
+
+
 # ─── dashboard overview (Phase 1 wiring) ───────────────────────────────
 
 
@@ -537,6 +673,11 @@ def get_subject_overview(
         # ── Top cited sources ───────────────────────────────────
         sources = _top_sources_for_refresh(cur, latest_refresh_id, limit=7)
 
+        # ── Topic coverage (Phase 2) ────────────────────────────
+        topic_coverage = _topic_coverage_for_refresh(
+            cur, latest_refresh_id, setup_inputs,
+        )
+
         # ── Meta counts ─────────────────────────────────────────
         cur.execute(
             """
@@ -556,6 +697,7 @@ def get_subject_overview(
         "platform_recall": platform_recall,
         "trajectory": trajectory,
         "sources": sources,
+        "topic_coverage": topic_coverage,
         "meta": {
             "latest_refresh_id": latest_refresh_id,
             "last_refresh_at": latest_completed.isoformat() if latest_completed else None,
@@ -582,6 +724,7 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "platform_recall": [],
         "trajectory": {"weeks": [], "ai_recall": [], "avg_sentiment": [], "risk_frame_rate": []},
         "sources": [],
+        "topic_coverage": [],
         "meta": {"latest_refresh_id": None, "last_refresh_at": None, "n_responses": 0, "n_platforms": 0},
     }
 
