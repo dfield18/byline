@@ -16,6 +16,7 @@ import {
   AlertOctagon,
   Megaphone,
   Info,
+  ArrowRight,
 } from "lucide-react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
@@ -27,6 +28,36 @@ import {
   CompetitorBars,
   SourcesDonut,
 } from "@/components/dashboard/Charts";
+
+/**
+ * Per-platform AI Recall used by the strip below the headline KPIs.
+ * Pre-sorted descending so render order is stable across renders.
+ * Weighted average matches the hero's 72% aggregate (so the strip
+ * "explains" the headline number rather than contradicting it).
+ *
+ * `lowest: true` marks the weakest platform — that's the primary
+ * insight customers want surfaced. The chip renders with a faint
+ * warning rail to draw the eye.
+ *
+ * `n` = response count for the period; surfaced in the per-chip
+ * tooltip so analysts can judge the denominator's stability.
+ *
+ * `value: null` would render as "—" (missing data). All four
+ * platforms have data in this mock.
+ */
+const platformRecall: {
+  name: keyof typeof modelColors;
+  value: number | null;
+  delta: string;
+  trend: "up" | "down";
+  n: number;
+  lowest?: boolean;
+}[] = [
+  { name: "ChatGPT", value: 81, delta: "+5 pts", trend: "up", n: 320 },
+  { name: "Claude", value: 76, delta: "+3 pts", trend: "up", n: 310 },
+  { name: "Gemini", value: 68, delta: "+1 pt", trend: "up", n: 318 },
+  { name: "Perplexity", value: 63, delta: "−2 pts", trend: "down", n: 305, lowest: true },
+];
 
 const headlineKpis = [
   {
@@ -279,6 +310,77 @@ export default function DashboardPreviewPage() {
                   </ul>
                 </div>
               </div>
+
+              {/* AI Recall by platform — full-width strip inside the hero card,
+                  one row below the KPIs + Dominant narrative. Whole strip is a
+                  clickable link to the Visibility spoke; chips are non-
+                  interactive visuals within the click area. Lowest-recall
+                  platform gets a faint warning rail so it jumps out. */}
+              <a
+                href="/dashboard-preview/visibility?from=overview&focus=perplexity"
+                aria-label="View per-platform recall breakdown"
+                className="group relative block mt-8 pt-6 border-t border-border/50 rounded-md -mx-2 px-2 py-1 transition-colors hover:bg-accent/30"
+              >
+                <div className="flex items-center justify-between gap-3 mb-3 px-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55">
+                    AI Recall by platform
+                  </div>
+                  <div className="text-[11.5px] text-primary inline-flex items-center gap-1 group-hover:underline">
+                    View breakdown <ArrowRight className="h-3 w-3" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {platformRecall.map((p) => {
+                    const tooltip =
+                      p.value === null
+                        ? `No data available for ${p.name} in this period.`
+                        : `${p.value}% of relevant prompts on ${p.name} where the entity is mentioned. Based on ${p.n} responses.`;
+                    return (
+                      <div
+                        key={p.name}
+                        title={tooltip}
+                        className={`relative rounded-md border px-3 py-2.5 ${
+                          p.lowest
+                            ? "border-warning/30 bg-warning/[0.04]"
+                            : "border-border bg-card"
+                        }`}
+                      >
+                        {p.lowest && (
+                          <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-warning" />
+                        )}
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: modelColors[p.name] }}
+                          />
+                          <span className="text-[11px] font-medium text-foreground/70">
+                            {p.name}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-display text-[18px] font-semibold tabular-nums tracking-[-0.015em] text-foreground">
+                            {p.value !== null ? `${p.value}%` : "—"}
+                          </span>
+                          {p.value !== null && (
+                            <span
+                              className={`inline-flex items-center gap-0.5 text-[11px] font-medium ${
+                                p.trend === "up" ? "text-success" : "text-warning"
+                              }`}
+                            >
+                              {p.trend === "up" ? (
+                                <TrendingUp className="h-3 w-3" />
+                              ) : (
+                                <TrendingDown className="h-3 w-3" />
+                              )}
+                              {p.delta}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </a>
             </Card>
           </section>
 
