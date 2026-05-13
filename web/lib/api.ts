@@ -164,3 +164,52 @@ export const triggerRefresh = (subjectId: number) =>
   apiPost<Job>(`/api/subjects/${subjectId}/refresh`, {});
 
 export const getJob = (jobId: number) => apiGet<Job>(`/api/jobs/${jobId}`);
+
+// Dashboard overview (Phase 1 wiring)
+
+export type KpiValue = {
+  value: number | null;
+  delta: number | null;
+  trend: "up" | "down" | "flat";
+};
+
+export type PlatformRecall = KpiValue & {
+  name: string;
+  n_responses: number;
+  lowest?: boolean;
+};
+
+export type SubjectOverview = {
+  subject_id: number;
+  subject_name: string;
+  category: string;
+  kpis: {
+    ai_recall: KpiValue;
+    avg_sentiment: KpiValue;
+    risk_frame_rate: KpiValue;
+    citation_rate: KpiValue;
+  };
+  platform_recall: PlatformRecall[];
+  trajectory: {
+    weeks: string[];
+    refresh_ids: number[];
+    is_historical: boolean[];
+    ai_recall: (number | null)[];
+    avg_sentiment: (number | null)[];
+    risk_frame_rate: (number | null)[];
+  };
+  sources: { name: string; score: number; type: string; n_citations: number }[];
+  meta: {
+    latest_refresh_id: number | null;
+    last_refresh_at: string | null;
+    n_responses: number;
+    n_platforms: number;
+    risk_frame_threshold?: number;
+    canonical_url?: string;
+  };
+};
+
+export const getSubjectOverview = (subjectId: number, weeks = 12) =>
+  apiGet<SubjectOverview>(
+    `/api/subjects/${subjectId}/overview?weeks=${weeks}`,
+  );

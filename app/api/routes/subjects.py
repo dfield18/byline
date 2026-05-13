@@ -14,7 +14,12 @@ from pydantic import BaseModel, Field
 
 from app.api.auth import User, current_user
 from app.db import get_cursor
-from dashboard.lib.queries import create_subject, get_subject, list_subjects
+from dashboard.lib.queries import (
+    create_subject,
+    get_subject,
+    get_subject_overview,
+    list_subjects,
+)
 
 
 router = APIRouter(prefix="/api/subjects", tags=["subjects"])
@@ -73,6 +78,30 @@ async def get_subject_detail(subject_id: int, user: User = Depends(current_user)
     if not s:
         raise HTTPException(status_code=404, detail=f"subject {subject_id} not found")
     return s
+
+
+@router.get("/{subject_id}/overview")
+async def get_overview(
+    subject_id: int,
+    weeks: int = 12,
+    user: User = Depends(current_user),
+):
+    """All summary data the customer-facing Overview dashboard needs.
+
+    Returns the latest live refresh's KPIs (AI Recall, Avg Sentiment,
+    Risk Frame Rate, Citation Rate) with deltas vs the prior completed
+    refresh, per-platform recall split, a weekly trajectory of those
+    metrics across the most recent N refreshes (live + historical
+    estimates), the top cited sources, and methodology metadata.
+
+    See `dashboard/lib/queries.get_subject_overview` for the full data
+    shape and computation rules.
+    """
+    org_id = _require_org(user)
+    overview = get_subject_overview(subject_id, org_id=org_id, weeks=weeks)
+    if not overview:
+        raise HTTPException(status_code=404, detail=f"subject {subject_id} not found")
+    return overview
 
 
 @router.post("", status_code=201)
