@@ -54,22 +54,6 @@ const headlineKpis = [
     risk: true,
     spark: [22, 21, 23, 22, 20, 21, 19.5, 19],
   },
-  {
-    label: "Citation Rate",
-    value: "17%",
-    sub: "Own-site cited in AI answers",
-    delta: "+1.8",
-    trend: "up" as const,
-    spark: [13, 14, 13, 15, 16, 15, 16, 17],
-  },
-  {
-    label: "Platform Split",
-    value: "34%",
-    sub: "How differently major AI platforms describe this entity",
-    delta: "−2.1",
-    trend: "down" as const,
-    spark: [38, 37, 36, 37, 35, 34, 35, 34],
-  },
 ];
 
 const narrativeMix = [
@@ -233,16 +217,16 @@ export default function DashboardPreviewPage() {
                     </p>
                   </div>
 
-                  <div className="mt-7 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-5 lg:gap-6 pt-6 border-t border-border/50">
+                  <div className="mt-7 grid grid-cols-3 gap-8 pt-6 border-t border-border/50">
                     {headlineKpis.map((k) => (
                       <div key={k.label} className="min-w-0">
                         <div className="flex items-center gap-1.5 text-[12px] font-semibold text-foreground/75">
                           <span className="truncate">{k.label}</span>
                           <KpiTooltipIcon text={k.sub} />
                         </div>
-                        <div className="mt-2 flex items-baseline gap-2">
+                        <div className="mt-2 flex items-baseline gap-2.5">
                           <div
-                            className={`font-display text-[26px] leading-none font-semibold tracking-[-0.02em] ${
+                            className={`font-display text-[28px] leading-none font-semibold tracking-[-0.02em] ${
                               k.risk ? "text-warning" : "text-foreground"
                             }`}
                           >
