@@ -128,6 +128,88 @@ function HeroKpis({ kpis }: { kpis: SubjectOverview["kpis"] }) {
   );
 }
 
+function DominantNarrativePanel({
+  clusters,
+  subjectName,
+}: {
+  clusters: SubjectOverview["narrative_clusters"];
+  subjectName: string;
+}) {
+  if (clusters.length === 0) {
+    return (
+      <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12">
+        <div className="text-[12px] font-semibold text-foreground/70">
+          Dominant narrative
+        </div>
+        <p className="mt-3 text-[13px] text-foreground/55 leading-relaxed">
+          No narrative clustering available for this refresh yet. Run the
+          cross-analyzer pass to populate this panel.
+        </p>
+      </div>
+    );
+  }
+  const top = clusters[0];
+  const topShare = top.share || 0;
+  // Heuristic semantic coloring: negative-framing cluster names get the
+  // warning treatment so the panel reads as "this is a risk frame", not
+  // "this is just another bucket". Falls back to position-based opacity
+  // for clusters without obvious framing.
+  const isNegative = (name: string) =>
+    /polarizing|adversarial|criticism|controversy|risk|scandal/i.test(name);
+
+  return (
+    <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12">
+      <div className="text-[12px] font-semibold text-foreground/70">
+        Dominant narrative
+      </div>
+
+      <div className="mt-2 font-display text-[24px] leading-tight font-semibold tracking-[-0.02em] text-foreground">
+        {top.name}
+      </div>
+      <div className="mt-1.5 text-[13px] text-foreground/60">
+        Appears in{" "}
+        <span className="text-foreground font-semibold">
+          {Math.round(topShare * 100)}%
+        </span>{" "}
+        of AI answers about {subjectName}
+      </div>
+
+      <ul className="mt-7 space-y-5">
+        {clusters.map((c, i) => {
+          const barWidth = topShare > 0 ? (c.share / topShare) * 100 : 0;
+          const negative = isNegative(c.name);
+          // Position-based opacity for non-negative clusters; warning
+          // color overrides for negative ones regardless of position
+          const opacity =
+            i === 0 ? 1 : i === 1 ? 0.75 : i === 2 ? 0.55 : 0.45;
+          return (
+            <li key={c.name} title={c.description}>
+              <div className="flex items-center justify-between text-[13px] mb-1.5">
+                <span className="text-foreground/85 font-medium">
+                  {c.name}
+                </span>
+                <span className="text-foreground/55 tabular-nums text-[12px]">
+                  {Math.round(c.share * 100)}%
+                </span>
+              </div>
+              <div className="relative h-1.5 w-full rounded-full bg-muted/80 overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{
+                    width: `${barWidth}%`,
+                    background: negative ? "var(--warning)" : "var(--primary)",
+                    opacity: negative ? 0.85 : opacity,
+                  }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platform_recall"] }) {
   if (!platforms.length) return null;
   return (
@@ -419,63 +501,72 @@ export default async function SubjectOverviewPage({
                 }}
               />
 
-              <div className="relative">
-                <h1 className="font-display text-[24px] md:text-[27px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground">
-                  AI Narrative Brief: {data.subject_name}
-                </h1>
-                <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/70 max-w-2xl">
-                  How major AI platforms describe {data.subject_name} across
-                  voter-facing and public-affairs prompts.
-                </p>
+              <div className="relative grid lg:grid-cols-5 gap-8 lg:gap-12">
+                {/* LEFT: title + callouts + KPIs */}
+                <div className="lg:col-span-3 flex flex-col">
+                  <h1 className="font-display text-[24px] md:text-[27px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground">
+                    AI Narrative Brief: {data.subject_name}
+                  </h1>
+                  <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/70 max-w-xl">
+                    How major AI platforms describe {data.subject_name} across
+                    voter-facing and public-affairs prompts.
+                  </p>
 
-                {/* Bottom Line — diagnostic callout, primary visual weight */}
-                {data.bottom_line && (
-                  <div
-                    className="mt-6 relative pl-5 pr-4 py-4 rounded-md"
-                    style={{
-                      background:
-                        "color-mix(in oklab, var(--primary) 6%, transparent)",
-                    }}
-                  >
-                    <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
-                      Bottom line
+                  {/* Bottom Line — diagnostic callout, primary visual weight */}
+                  {data.bottom_line && (
+                    <div
+                      className="mt-6 relative pl-5 pr-4 py-4 rounded-md"
+                      style={{
+                        background:
+                          "color-mix(in oklab, var(--primary) 6%, transparent)",
+                      }}
+                    >
+                      <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
+                        Bottom line
+                      </div>
+                      <p className="text-[17px] leading-relaxed font-semibold tracking-[-0.005em] text-foreground">
+                        {data.bottom_line}
+                      </p>
                     </div>
-                    <p className="text-[17px] leading-relaxed font-semibold tracking-[-0.005em] text-foreground">
-                      {data.bottom_line}
-                    </p>
-                  </div>
-                )}
+                  )}
 
-                {/* Recommended Focus — prescriptive follow-on, quieter */}
-                {data.recommended_focus && (
-                  <div className="mt-3 relative pl-5 pr-4 py-3.5 rounded-md border border-border/60 bg-card">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-1.5">
-                      Recommended focus
+                  {/* Recommended Focus — prescriptive follow-on, quieter */}
+                  {data.recommended_focus && (
+                    <div className="mt-3 relative pl-5 pr-4 py-3.5 rounded-md border border-border/60 bg-card">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-1.5">
+                        Recommended focus
+                      </div>
+                      <p className="text-[14.5px] leading-relaxed text-foreground/90">
+                        {data.recommended_focus}
+                      </p>
                     </div>
-                    <p className="text-[14.5px] leading-relaxed text-foreground/90">
-                      {data.recommended_focus}
-                    </p>
-                  </div>
-                )}
+                  )}
 
-                {/* Fallback when neither piece could be synthesized */}
-                {!data.bottom_line && !data.recommended_focus && (
-                  <div className="mt-6 rounded-md border border-dashed border-border/70 bg-muted/30 px-5 py-4">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/45">
-                      Executive summary
+                  {/* Fallback when neither piece could be synthesized */}
+                  {!data.bottom_line && !data.recommended_focus && (
+                    <div className="mt-6 rounded-md border border-dashed border-border/70 bg-muted/30 px-5 py-4">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/45">
+                        Executive summary
+                      </div>
+                      <p className="mt-1.5 text-[13px] text-foreground/55 leading-relaxed max-w-xl">
+                        Not enough signal in this refresh to synthesize an
+                        executive briefing yet. Trigger another refresh or wait
+                        for more data to accumulate.
+                      </p>
                     </div>
-                    <p className="mt-1.5 text-[13px] text-foreground/55 leading-relaxed max-w-xl">
-                      Not enough signal in this refresh to synthesize an
-                      executive briefing yet. Trigger another refresh or wait
-                      for more data to accumulate.
-                    </p>
-                  </div>
-                )}
+                  )}
 
-                <HeroKpis kpis={data.kpis} />
-                <PlatformRecallStrip platforms={data.platform_recall} />
+                  <HeroKpis kpis={data.kpis} />
+                </div>
+
+                {/* RIGHT: Dominant narrative — ranked clusters */}
+                <DominantNarrativePanel
+                  clusters={data.narrative_clusters}
+                  subjectName={data.subject_name}
+                />
               </div>
+              <PlatformRecallStrip platforms={data.platform_recall} />
             </Card>
           </section>
 

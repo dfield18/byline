@@ -1500,6 +1500,279 @@ def run_cross_analysis(
 # ─── cli ───────────────────────────────────────────────────────────────
 
 
+# ─── narrative cluster analyzer (Phase 3b) ─────────────────────────────
+#
+# Aggregates per-response narrative_themes into 3-5 named narrative
+# buckets per refresh. Powers the "Dominant narrative" panel in the
+# customer-facing dashboard ("Progressive Reformer 42% / Consumer
+# Advocate 24% / Polarizing Figure 19% / Policy Expert 15%" for Warren).
+#
+# Why an LLM call rather than a closed taxonomy: subjects vary too much
+# for a single fixed taxonomy to fit ("Polarizing Figure" works for a
+# senator, not for an event subject like the Sam Altman firing). Per-
+# refresh LLM clustering produces subject-aware named buckets ad hoc.
+# Cost: ~$0.005/refresh via gemini-2.5-flash. Cluster names won't be
+# stable across refreshes — fine for the snapshot view; a future
+# stability pass can normalize across refreshes if trajectory views
+# need it.
+#
+# Inputs: each response's narrative_themes (1-3 free-form labels with
+# weights and excerpts) + dominant_theme. Outputs: one global
+# refresh_analyses row with findings={"clusters": [...]} where each
+# cluster has name / description / response_ids / sample_labels / share.
+
+_NARRATIVE_CLUSTERS_PROMPT = """\
+You are reviewing how AI assistants are characterizing {subject_name} (a \
+{subject_category}). Below are the narrative themes that AI extracted from \
+each response (1-3 free-form labels per response, with weights and \
+excerpts).
+
+Your task: cluster these per-response themes into 3 to 5 named narrative \
+buckets that capture how AI frames the subject across this refresh.
+
+For each cluster return:
+- name: a short, professional, 2-4 word label suitable for an executive \
+dashboard (e.g. "Progressive Reformer", "Elder Statesman", "Polarizing \
+Figure"). Title Case. Subject-aware (use language a public-affairs \
+analyst would use about THIS subject).
+- description: one sentence explaining what this narrative captures and \
+how it shows up in the responses.
+- response_ids: list of model_response_id values whose dominant theme \
+falls under this cluster. Each id should appear in exactly ONE cluster.
+- sample_labels: 3-5 original free-form theme labels from the input that \
+contributed to this cluster.
+
+Rules:
+- Each response_id from the input goes into exactly one cluster, based on \
+its dominant theme.
+- Pick 3 to 5 clusters total. Don't force 5 if 3 capture the structure \
+cleanly. Skip clusters with fewer than 2 responses.
+- Cluster names should differentiate cleanly — avoid two clusters that \
+mean nearly the same thing.
+
+INPUT — each block is one response with its themes:
+
+{themes_block}
+"""
+
+_NARRATIVE_CLUSTERS_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "clusters": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "name":          {"type": "STRING"},
+                    "description":   {"type": "STRING"},
+                    "response_ids":  {"type": "ARRAY", "items": {"type": "INTEGER"}},
+                    "sample_labels": {"type": "ARRAY", "items": {"type": "STRING"}},
+                },
+                "required": ["name", "description", "response_ids", "sample_labels"],
+            },
+        },
+    },
+    "required": ["clusters"],
+}
+
+
+def _format_themes_block(responses: list[ResponseRow]) -> str:
+    """Build the prompt input — one block per response with its theme
+    list, dominant_theme, and a short context line so the LLM can
+    cluster meaningfully."""
+    parts = []
+    for r in responses:
+        if not r.narrative_themes:
+            continue
+        themes_lines = []
+        for t in r.narrative_themes:
+            if not isinstance(t, dict):
+                continue
+            label = t.get("label", "?")
+            weight = t.get("weight", "?")
+            excerpt = (t.get("excerpt") or "").strip()
+            if excerpt and len(excerpt) > 180:
+                excerpt = excerpt[:177] + "..."
+            themes_lines.append(
+                f"  - {label} (weight {weight}): {excerpt}"
+                if excerpt else f"  - {label} (weight {weight})"
+            )
+        header = (
+            f"[mr_id={r.model_response_id} | model={r.model_slug} | "
+            f"slot={r.layer}/{r.position} ({r.dimension})]"
+        )
+        dom = (
+            f"  dominant theme: {r.dominant_theme}"
+            if r.dominant_theme else "  dominant theme: (none)"
+        )
+        parts.append(header + "\n" + dom + "\n" + "\n".join(themes_lines))
+    return "\n\n".join(parts)
+
+
+class NarrativeClusterAnalyzer(CrossAnalyzer):
+    """Cluster the refresh's per-response narrative_themes into 3-5
+    named narrative buckets. Outputs a single global (model_id=NULL)
+    row keyed by analysis_type='narrative_clusters'.
+    """
+
+    name = "narrative_clusters"
+    version = "1.0.0"
+    model_identifier = "gemini-2.5-flash"
+
+    def __init__(self) -> None:
+        self._client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    def analyze(self, ctx: RefreshContext) -> list[CrossAnalysisResult]:
+        start = time.perf_counter()
+
+        # Only cluster responses with narrative_themes data
+        clusterable = [
+            r for r in ctx.responses
+            if r.narrative_themes
+        ]
+        if len(clusterable) < 3:
+            return [CrossAnalysisResult(
+                analysis_type="narrative_clusters",
+                analysis_key=None,
+                model_id=None,
+                findings={"clusters": [], "skipped": True},
+                source_response_ids=[],
+                summary=(
+                    f"Skipped — only {len(clusterable)} response(s) have "
+                    f"narrative_themes data (need ≥3 to cluster)."
+                ),
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )]
+
+        themes_block = _format_themes_block(clusterable)
+        prompt = _NARRATIVE_CLUSTERS_PROMPT.format(
+            subject_name=ctx.subject_name,
+            subject_category=ctx.subject_category_slug,
+            themes_block=themes_block,
+        )
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_NARRATIVE_CLUSTERS_SCHEMA,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
+
+        try:
+            api_response = self._client.models.generate_content(
+                model=self.model_identifier,
+                contents=prompt,
+                config=config,
+            )
+        except Exception as e:
+            return [CrossAnalysisResult(
+                analysis_type="narrative_clusters",
+                analysis_key=None,
+                model_id=None,
+                findings={},
+                source_response_ids=[],
+                error=f"{type(e).__name__}: {e}",
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )]
+
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+        usage = getattr(api_response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        prices = _PRICING.get(
+            self.model_identifier,
+            {"input": Decimal("0.30"), "output": Decimal("2.50")},
+        )
+        cost = (
+            Decimal(input_tokens) * prices["input"] / _PER_TOKEN
+            + Decimal(output_tokens) * prices["output"] / _PER_TOKEN
+        )
+
+        try:
+            parsed = json.loads(api_response.text or "{}")
+        except Exception as e:
+            return [CrossAnalysisResult(
+                analysis_type="narrative_clusters",
+                analysis_key=None,
+                model_id=None,
+                findings={},
+                source_response_ids=[],
+                cost_usd=cost,
+                error=f"JSON parse failed: {e}",
+                latency_ms=elapsed_ms,
+            )]
+
+        clusters_raw = parsed.get("clusters", []) if isinstance(parsed, dict) else []
+        valid_ids = {r.model_response_id for r in clusterable}
+
+        # Validate + enrich clusters: filter response_ids to those that
+        # actually exist in this refresh; drop empty clusters.
+        clean_clusters: list[dict[str, Any]] = []
+        seen_response_ids: set[int] = set()
+        for c in clusters_raw:
+            if not isinstance(c, dict):
+                continue
+            name = (c.get("name") or "").strip()
+            if not name:
+                continue
+            valid_for_cluster = [
+                int(rid) for rid in c.get("response_ids", [])
+                if isinstance(rid, (int, float)) and int(rid) in valid_ids
+            ]
+            # Deduplicate against responses already claimed by a prior
+            # cluster — keep first-seen assignment, drop duplicates
+            valid_for_cluster = [
+                rid for rid in valid_for_cluster if rid not in seen_response_ids
+            ]
+            if not valid_for_cluster:
+                continue
+            seen_response_ids.update(valid_for_cluster)
+            clean_clusters.append({
+                "name": name,
+                "description": (c.get("description") or "").strip(),
+                "response_ids": valid_for_cluster,
+                "sample_labels": [
+                    str(s) for s in c.get("sample_labels", [])
+                    if isinstance(s, str)
+                ][:5],
+                "n_responses": len(valid_for_cluster),
+                # share computed against clusterable responses, not the
+                # raw refresh size — that's the meaningful denominator
+                # ("of responses where AI surfaced a theme, X% landed in
+                # cluster Y")
+                "share": len(valid_for_cluster) / len(clusterable),
+            })
+
+        # Sort by share desc so the UI can render in rank order
+        clean_clusters.sort(key=lambda c: -c["share"])
+
+        summary = (
+            f"{len(clean_clusters)} narrative cluster(s) across "
+            f"{len(clusterable)} response(s) with themes: "
+            + ", ".join(
+                f"{c['name']} {round(c['share'] * 100)}%"
+                for c in clean_clusters
+            )
+        )
+
+        return [CrossAnalysisResult(
+            analysis_type="narrative_clusters",
+            analysis_key=None,
+            model_id=None,
+            findings={
+                "clusters": clean_clusters,
+                "n_clusterable_responses": len(clusterable),
+                "n_assigned": len(seen_response_ids),
+            },
+            source_response_ids=sorted(seen_response_ids),
+            summary=summary,
+            cost_usd=cost,
+            latency_ms=elapsed_ms,
+        )]
+
+
+# ─── cli ───────────────────────────────────────────────────────────────
+
+
 def _cli_main() -> None:
     p = argparse.ArgumentParser(
         description="Run cross-response analysis over a refresh_run."
@@ -1517,6 +1790,7 @@ def _cli_main() -> None:
         TopQuotesAnalyzer(),
         ShareOfVoiceAnalyzer(),
         NarrativeDriftAnalyzer(),
+        NarrativeClusterAnalyzer(),
     ]
     print(
         f"Running {len(analyzers)} cross-analyzer(s) "

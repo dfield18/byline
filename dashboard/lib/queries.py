@@ -754,6 +754,43 @@ def _compute_bottom_line(
     return None
 
 
+def _read_narrative_clusters(
+    cur, refresh_run_id: int,
+) -> list[dict[str, Any]]:
+    """Read the latest narrative_clusters cross-analyzer output for this
+    refresh. Returns the cluster list ranked by share desc, or [] if
+    the analyzer hasn't run yet.
+
+    Computed by `NarrativeClusterAnalyzer` in `app/cross_analyzer.py` —
+    one LLM call per refresh, persisted in refresh_analyses keyed by
+    analysis_type='narrative_clusters'. The dashboard just reads here;
+    it does not trigger the LLM call.
+    """
+    cur.execute(
+        """
+        SELECT ra.findings
+        FROM refresh_analyses ra
+        JOIN analysis_runs ar ON ar.id = ra.analysis_run_id
+        WHERE ar.refresh_run_id = %s
+          AND ra.analysis_type = 'narrative_clusters'
+          AND ar.methodology_version LIKE 'cross-analysis-%%'
+          AND ar.status IN ('completed', 'partial')
+        ORDER BY ar.id DESC
+        LIMIT 1
+        """,
+        (refresh_run_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return []
+    findings = _maybe_json(row[0]) or {}
+    clusters = findings.get("clusters", [])
+    # Cluster list is already ranked share-desc by the analyzer, but
+    # defensively re-sort here so the dashboard can rely on order.
+    clusters.sort(key=lambda c: -(c.get("share") or 0))
+    return clusters
+
+
 def _compute_recommended_focus(
     subject_name: str,
     takeaways: list[dict[str, Any]],
@@ -975,6 +1012,9 @@ def get_subject_overview(
         bottom_line = _compute_bottom_line(sname, kpis, strategic_takeaways)
         recommended_focus = _compute_recommended_focus(sname, strategic_takeaways)
 
+        # ── Narrative clusters (Phase 3b — read pre-computed) ───
+        narrative_clusters = _read_narrative_clusters(cur, latest_refresh_id)
+
         # ── Meta counts ─────────────────────────────────────────
         cur.execute(
             """
@@ -998,6 +1038,7 @@ def get_subject_overview(
         "strategic_takeaways": strategic_takeaways,
         "bottom_line": bottom_line,
         "recommended_focus": recommended_focus,
+        "narrative_clusters": narrative_clusters,
         "meta": {
             "latest_refresh_id": latest_refresh_id,
             "last_refresh_at": latest_completed.isoformat() if latest_completed else None,
@@ -1028,6 +1069,7 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "strategic_takeaways": [],
         "bottom_line": None,
         "recommended_focus": None,
+        "narrative_clusters": [],
         "meta": {"latest_refresh_id": None, "last_refresh_at": None, "n_responses": 0, "n_platforms": 0},
     }
 

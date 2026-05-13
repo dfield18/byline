@@ -50,6 +50,7 @@ from app.analyzer import (  # noqa: E402
 )
 from app.cross_analyzer import (  # noqa: E402
     AsymmetryAnalyzer,
+    NarrativeClusterAnalyzer,
     NarrativeDriftAnalyzer,
     ShareOfVoiceAnalyzer,
     TopQuotesAnalyzer,
@@ -216,6 +217,7 @@ async def _execute_refresh_job(
         TopQuotesAnalyzer(),
         ShareOfVoiceAnalyzer(),
         NarrativeDriftAnalyzer(),
+        NarrativeClusterAnalyzer(),
     ]
     logger.info(
         "[refresh %s] running %d cross-analyzer(s)",

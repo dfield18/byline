@@ -216,6 +216,14 @@ export type SubjectOverview = {
   }[];
   bottom_line: string | null;
   recommended_focus: string | null;
+  narrative_clusters: {
+    name: string;
+    description: string;
+    response_ids: number[];
+    sample_labels: string[];
+    n_responses: number;
+    share: number;
+  }[];
   meta: {
     latest_refresh_id: number | null;
     last_refresh_at: string | null;
