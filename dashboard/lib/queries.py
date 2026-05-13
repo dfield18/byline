@@ -488,6 +488,188 @@ def _topic_coverage_for_refresh(
     ]
 
 
+# ─── strategic takeaways (Phase 2 wiring) ──────────────────────────────
+
+
+def _compute_strategic_takeaways(
+    cur,
+    refresh_run_id: int,
+    setup_inputs: dict[str, Any],
+    subject_name: str,
+    *,
+    min_recall_gap_pp: float = 15.0,
+    high_criticism_threshold: float = 0.30,
+    strong_asset_min_recall: float = 0.50,
+) -> list[dict[str, Any]]:
+    """Produce up to three executive takeaways from per-topic metrics
+    for a single refresh. Each takeaway type is emitted only when a
+    real signal exists — no manufactured insights when the data is
+    flat. Returns 0-3 items in display order (gap, frame, asset).
+
+    Rules:
+      Message Gap     — lowest-recall topic at least `min_recall_gap_pp`
+                        below the mean of the other topics' recall
+      Opposition Frame — topic with mean criticism_severity at or above
+                        `high_criticism_threshold`
+      Strongest Asset  — topic with the highest recall (tiebreak by
+                        sentiment) at or above `strong_asset_min_recall`
+
+    Rules tuned so an Obama-like subject (high recall everywhere, low
+    criticism) gets a single Message Gap takeaway; a Warren-like subject
+    with stronger topic differentiation gets all three.
+    """
+    cur.execute(
+        """
+        SELECT
+          p.template,
+          p.layer,
+          sm.subject_mentioned,
+          (sc.scores->>'sentiment')::numeric AS sentiment,
+          (sc.scores->>'criticism_severity')::numeric AS criticism
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT scores
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND scores IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sc ON TRUE
+        WHERE mr.refresh_run_id = %s AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+
+    buckets: dict[str, dict[str, Any]] = {}
+    for template, layer, mentioned, sentiment, criticism in cur.fetchall():
+        topic = _topic_for_prompt(template, setup_inputs)
+        if topic is None:
+            continue
+        label, source = topic
+        if label not in buckets:
+            buckets[label] = {
+                "label": label,
+                "source": source,
+                "recall_responses": [],
+                "sentiments": [],
+                "criticisms": [],
+            }
+        if layer == "unnamed" and mentioned is not None:
+            buckets[label]["recall_responses"].append(bool(mentioned))
+        if sentiment is not None:
+            buckets[label]["sentiments"].append(float(sentiment))
+        if criticism is not None:
+            buckets[label]["criticisms"].append(float(criticism))
+
+    topic_metrics = []
+    for b in buckets.values():
+        recall = (
+            sum(b["recall_responses"]) / len(b["recall_responses"])
+            if b["recall_responses"] else None
+        )
+        mean_sent = (
+            sum(b["sentiments"]) / len(b["sentiments"])
+            if b["sentiments"] else None
+        )
+        mean_crit = (
+            sum(b["criticisms"]) / len(b["criticisms"])
+            if b["criticisms"] else None
+        )
+        topic_metrics.append({
+            "label": b["label"],
+            "source": b["source"],
+            "recall": recall,
+            "mean_sentiment": mean_sent,
+            "mean_criticism": mean_crit,
+        })
+
+    takeaways: list[dict[str, Any]] = []
+
+    # ── Message Gap ─────────────────────────────────────────
+    with_recall = [t for t in topic_metrics if t["recall"] is not None]
+    if len(with_recall) >= 2:
+        lowest = min(with_recall, key=lambda t: t["recall"])
+        others = [t["recall"] for t in with_recall if t["label"] != lowest["label"]]
+        other_mean = sum(others) / len(others)
+        gap_pp = (other_mean - lowest["recall"]) * 100
+        if gap_pp >= min_recall_gap_pp:
+            takeaways.append({
+                "kind": "message_gap",
+                "tone": "warning",
+                "eyebrow": "Message gap",
+                "title": f"AI underweights {lowest['label']}",
+                "body": (
+                    f"{subject_name} appears in only "
+                    f"{round(lowest['recall'] * 100)}% of {lowest['label']} "
+                    f"prompts, vs {round(other_mean * 100)}% on average across "
+                    f"other topic areas."
+                ),
+            })
+
+    # ── Opposition Frame ────────────────────────────────────
+    with_crit = [t for t in topic_metrics if t["mean_criticism"] is not None]
+    if with_crit:
+        highest_crit = max(with_crit, key=lambda t: t["mean_criticism"])
+        if highest_crit["mean_criticism"] >= high_criticism_threshold:
+            label_cap = _cap_first(highest_crit["label"])
+            takeaways.append({
+                "kind": "opposition_frame",
+                "tone": "muted",
+                "eyebrow": "Opposition frame",
+                "title": f"{label_cap} prompts trigger heavier criticism",
+                "body": (
+                    f"Average criticism severity is "
+                    f"{highest_crit['mean_criticism']:.2f} on these prompts, "
+                    f"the highest among tracked topic areas for {subject_name}."
+                ),
+            })
+
+    # ── Strongest Asset ─────────────────────────────────────
+    candidates = [
+        t for t in topic_metrics
+        if t["recall"] is not None and t["recall"] >= strong_asset_min_recall
+    ]
+    if candidates:
+        strong = max(
+            candidates,
+            key=lambda t: (t["recall"], t["mean_sentiment"] or 0),
+        )
+        sent = strong["mean_sentiment"] or 0
+        sent_label = (
+            "favorable" if sent > 0.1
+            else "critical" if sent < -0.1
+            else "neutral"
+        )
+        # Use "Strongest association: [topic]" rather than
+        # "[Topic] is the strongest association" — avoids subject-verb
+        # agreement issues when the topic label is a plural noun phrase
+        # (e.g. "former US presidents and Democratic Party leaders").
+        takeaways.append({
+            "kind": "strongest_asset",
+            "tone": "primary",
+            "eyebrow": "Strongest asset",
+            "title": f"Strongest association: {strong['label']}",
+            "body": (
+                f"{subject_name} appears in {round(strong['recall'] * 100)}% "
+                f"of {strong['label']} prompts with {sent_label} overall "
+                f"sentiment."
+            ),
+        })
+
+    return takeaways
+
+
+def _cap_first(s: str) -> str:
+    """Capitalize the first character without lowercasing the rest. Used
+    for topic labels that need to start a sentence."""
+    return s[:1].upper() + s[1:] if s else s
+
+
 # ─── dashboard overview (Phase 1 wiring) ───────────────────────────────
 
 
@@ -678,6 +860,11 @@ def get_subject_overview(
             cur, latest_refresh_id, setup_inputs,
         )
 
+        # ── Strategic takeaways (Phase 2) ───────────────────────
+        strategic_takeaways = _compute_strategic_takeaways(
+            cur, latest_refresh_id, setup_inputs, sname,
+        )
+
         # ── Meta counts ─────────────────────────────────────────
         cur.execute(
             """
@@ -698,6 +885,7 @@ def get_subject_overview(
         "trajectory": trajectory,
         "sources": sources,
         "topic_coverage": topic_coverage,
+        "strategic_takeaways": strategic_takeaways,
         "meta": {
             "latest_refresh_id": latest_refresh_id,
             "last_refresh_at": latest_completed.isoformat() if latest_completed else None,
@@ -725,6 +913,7 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "trajectory": {"weeks": [], "ai_recall": [], "avg_sentiment": [], "risk_frame_rate": []},
         "sources": [],
         "topic_coverage": [],
+        "strategic_takeaways": [],
         "meta": {"latest_refresh_id": None, "last_refresh_at": None, "n_responses": 0, "n_platforms": 0},
     }
 

@@ -17,6 +17,9 @@ import {
   ExternalLink,
   Info,
   ArrowRight,
+  AlertOctagon,
+  Compass,
+  Megaphone,
 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
@@ -443,12 +446,56 @@ export default async function SubjectOverviewPage({
             </Card>
           </section>
 
-          {/* PHASE 2/3 PLACEHOLDERS */}
-          <PhasePlaceholder
-            title="Strategic takeaways"
-            phase="Phase 2"
-            what="Comparative insights like 'AI underweights X message on housing prompts' will surface here once prompts are tagged with customer-facing topic categories and a comparative cross-analyzer ships."
-          />
+          {/* STRATEGIC TAKEAWAYS — Phase 2 wiring */}
+          {data.strategic_takeaways.length > 0 && (
+            <section>
+              <SectionTitle
+                eyebrow="Strategic Takeaways"
+                title="What stands out this period"
+                description={`The most important shifts in how AI platforms currently describe ${data.subject_name}.`}
+              />
+              <Card className="p-2 md:p-3">
+                <ul className="divide-y divide-border/60">
+                  {data.strategic_takeaways.map((item) => {
+                    const Icon =
+                      item.kind === "message_gap" ? AlertOctagon
+                      : item.kind === "opposition_frame" ? Compass
+                      : Megaphone;
+                    const eyebrowClass =
+                      item.tone === "warning" ? "text-warning"
+                      : item.tone === "muted" ? "text-foreground/55"
+                      : "text-primary/80";
+                    const dotClass =
+                      item.tone === "warning" ? "bg-warning"
+                      : item.tone === "muted" ? "bg-foreground/30"
+                      : "bg-primary";
+                    return (
+                      <li
+                        key={item.kind}
+                        className="relative grid grid-cols-[auto_1fr] gap-5 px-5 md:px-6 py-5"
+                      >
+                        <span className={`absolute left-0 top-5 bottom-5 w-[2px] rounded-full ${dotClass}`} />
+                        <div className="pt-0.5">
+                          <Icon className={`h-4 w-4 ${eyebrowClass}`} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className={`text-[11.5px] font-semibold uppercase tracking-[0.06em] ${eyebrowClass}`}>
+                            {item.eyebrow}
+                          </div>
+                          <div className="mt-1 text-[16px] font-semibold tracking-[-0.01em] text-foreground leading-snug">
+                            {item.title}
+                          </div>
+                          <p className="mt-1.5 text-[13.5px] text-foreground/70 leading-relaxed max-w-3xl">
+                            {item.body}
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+            </section>
+          )}
 
           {/* PROMPT COVERAGE — Phase 2 wiring */}
           {data.topic_coverage.length > 0 && (
