@@ -11,7 +11,6 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  ArrowUpRight,
   ExternalLink,
   Compass,
   AlertOctagon,
@@ -26,6 +25,7 @@ import {
   SovChart,
   TopResultChart,
   CompetitorBars,
+  SourcesDonut,
 } from "@/components/dashboard/Charts";
 
 const headlineKpis = [
@@ -359,11 +359,6 @@ export default function DashboardPreviewPage() {
               eyebrow="Evidence"
               title="What AI is actually saying"
               description="Sample answers from recent voter-facing and public-affairs prompts."
-              right={
-                <button className="text-xs text-primary hover:underline inline-flex items-center gap-1">
-                  View all 1,284 prompts <ArrowUpRight className="h-3 w-3" />
-                </button>
-              }
             />
             <div className="grid md:grid-cols-3 gap-4">
               {prompts.map((p, i) => (
@@ -505,43 +500,69 @@ export default function DashboardPreviewPage() {
               title="Sources shaping AI answers"
               description="The publications and pages most often cited or paraphrased in AI responses about Warren."
             />
-            <div className="space-y-1">
-              <div className="grid grid-cols-12 text-[10px] uppercase tracking-wider text-muted-foreground px-3 pb-2 border-b border-border">
-                <div className="col-span-6">Source</div>
-                <div className="col-span-3 text-right">Influence</div>
-                <div className="col-span-3 text-right">Type</div>
-              </div>
-              {sources.map((s, idx) => (
-                <div
-                  key={s.name}
-                  className="grid grid-cols-12 items-center gap-2 px-3 py-2.5 rounded-md hover:bg-accent/60 transition-colors text-sm"
-                >
-                  <div className="col-span-6 flex items-center gap-2 min-w-0">
-                    <span className="text-[10px] text-muted-foreground tabular-nums w-4">
-                      {String(idx + 1).padStart(2, "0")}
-                    </span>
-                    <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="truncate font-medium">{s.name}</span>
-                  </div>
-                  <div className="col-span-3 text-right">
-                    <div className="inline-flex items-center gap-1.5">
-                      <div className="w-16 h-1 bg-border rounded-full overflow-hidden">
-                        <div className="h-full bg-primary" style={{ width: `${s.score}%` }} />
+            <div className="grid md:grid-cols-2 gap-8 items-start">
+              {/* Ranked list */}
+              <div className="space-y-1">
+                <div className="grid grid-cols-12 text-[10px] uppercase tracking-wider text-muted-foreground px-3 pb-2 border-b border-border">
+                  <div className="col-span-6">Source</div>
+                  <div className="col-span-3 text-right">Influence</div>
+                  <div className="col-span-3 text-right">Type</div>
+                </div>
+                {sources.map((s, idx) => (
+                  <div
+                    key={s.name}
+                    className="grid grid-cols-12 items-center gap-2 px-3 py-2.5 rounded-md hover:bg-accent/60 transition-colors text-sm"
+                  >
+                    <div className="col-span-6 flex items-center gap-2 min-w-0">
+                      <span className="text-[10px] text-muted-foreground tabular-nums w-4">
+                        {String(idx + 1).padStart(2, "0")}
+                      </span>
+                      <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="truncate font-medium">{s.name}</span>
+                    </div>
+                    <div className="col-span-3 text-right">
+                      <div className="inline-flex items-center gap-1.5">
+                        <div className="w-16 h-1 bg-border rounded-full overflow-hidden">
+                          <div className="h-full bg-primary" style={{ width: `${s.score}%` }} />
+                        </div>
+                        <span className="text-xs font-mono text-muted-foreground">{s.score}</span>
                       </div>
-                      <span className="text-xs font-mono text-muted-foreground">{s.score}</span>
+                    </div>
+                    <div className="col-span-3 text-right">
+                      <Pill tone="neutral">{s.type}</Pill>
                     </div>
                   </div>
-                  <div className="col-span-3 text-right">
-                    <Pill tone="neutral">{s.type}</Pill>
-                  </div>
+                ))}
+              </div>
+
+              {/* Donut — same sources, visualized as proportional influence */}
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">
+                  Influence share
                 </div>
-              ))}
+                <SourcesDonut data={sources} />
+                <div className="mt-2 text-center text-[11px] text-muted-foreground">
+                  {sources.length} sources tracked
+                </div>
+              </div>
             </div>
           </Card>
 
-          <footer className="pt-2 pb-8 text-center text-[11px] text-muted-foreground">
-            Brand Visibility · AI Narrative Intelligence for Public Affairs ·{" "}
-            <span className="text-foreground/70">Demo data shown</span>
+          <footer className="pt-6 pb-8 border-t border-border/40">
+            <p className="text-center text-[11.5px] text-foreground/60 leading-relaxed">
+              Based on{" "}
+              <span className="font-semibold text-foreground/80 tabular-nums">1,284</span>{" "}
+              AI responses across{" "}
+              <span className="font-semibold text-foreground/80">4 platforms</span>{" "}
+              over the last 30 days.{" "}
+              <a href="#" className="text-primary hover:underline">
+                Methodology →
+              </a>
+            </p>
+            <p className="mt-2 text-center text-[11px] text-muted-foreground">
+              Brand Visibility · AI Narrative Intelligence for Public Affairs ·{" "}
+              <span className="text-foreground/70">Demo data shown</span>
+            </p>
           </footer>
         </main>
       </div>

@@ -32,10 +32,10 @@ export function Header() {
   return (
     <header className="border-b border-border bg-card sticky top-0 z-20">
       <div className="flex flex-wrap items-center gap-3 px-6 py-3 h-16">
-        <div className="flex items-baseline gap-3">
+        <div className="flex items-baseline gap-3 min-w-0">
           <h1 className="text-lg font-semibold tracking-tight text-foreground">Overview</h1>
-          <span className="text-xs text-muted-foreground hidden md:inline">
-            Elizabeth Warren · AI Visibility
+          <span className="text-xs text-muted-foreground hidden md:inline truncate">
+            Elizabeth Warren · AI Visibility · Last 30 days · updated 14m ago
           </span>
         </div>
 

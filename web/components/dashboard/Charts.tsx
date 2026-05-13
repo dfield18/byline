@@ -13,6 +13,8 @@ import {
   BarChart,
   Bar,
   Cell,
+  PieChart,
+  Pie,
 } from "recharts";
 
 const recallData = [
@@ -70,7 +72,7 @@ function MiniChart({
   return (
     <ResponsiveContainer width="100%" height={140}>
       {type === "area" ? (
-        <AreaChart data={data} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 6, right: 6, left: 4, bottom: 0 }}>
           <defs>
             <linearGradient id={`g-${color}`} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor={color} stopOpacity={0.35} />
@@ -84,7 +86,7 @@ function MiniChart({
           <Area type="monotone" dataKey="v" stroke={color} strokeWidth={2} fill={`url(#g-${color})`} />
         </AreaChart>
       ) : (
-        <LineChart data={data} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
+        <LineChart data={data} margin={{ top: 6, right: 6, left: 4, bottom: 0 }}>
           <CartesianGrid stroke="oklch(0.91 0.008 250)" strokeDasharray="2 4" vertical={false} />
           <XAxis dataKey="w" stroke="oklch(0.55 0.015 250)" fontSize={10} tickLine={false} axisLine={false} />
           <YAxis domain={domain} stroke="oklch(0.55 0.015 250)" fontSize={10} tickLine={false} axisLine={false} width={28} />
@@ -113,6 +115,51 @@ const competitors = [
   { name: "Elizabeth Warren", sov: 18, you: true },
   { name: "Pete Buttigieg", sov: 12 },
 ];
+
+// Monochromatic blue gradient — solid primary for the most-cited source,
+// progressively lighter blues for the long tail. Avoids loud rainbow
+// palettes; keeps the briefing tone.
+const SOURCE_DONUT_COLORS = [
+  "oklch(0.5 0.13 245)",
+  "oklch(0.55 0.13 245)",
+  "oklch(0.62 0.12 245)",
+  "oklch(0.68 0.10 245)",
+  "oklch(0.74 0.08 245)",
+  "oklch(0.79 0.06 245)",
+  "oklch(0.84 0.04 245)",
+];
+
+export function SourcesDonut({
+  data,
+}: {
+  data: { name: string; score: number }[];
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <PieChart>
+        <Pie
+          data={data}
+          dataKey="score"
+          nameKey="name"
+          cx="50%"
+          cy="50%"
+          innerRadius={64}
+          outerRadius={104}
+          paddingAngle={1.5}
+          stroke="none"
+        >
+          {data.map((_, i) => (
+            <Cell key={i} fill={SOURCE_DONUT_COLORS[i % SOURCE_DONUT_COLORS.length]} />
+          ))}
+        </Pie>
+        <Tooltip
+          contentStyle={tooltipStyle}
+          formatter={(value, name) => [`${value} influence`, String(name)]}
+        />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
 
 export function CompetitorBars() {
   return (
