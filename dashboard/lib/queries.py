@@ -727,6 +727,14 @@ def _compute_strategic_takeaways(
             ),
         })
 
+    # Display order for the dashboard: lead with the positive
+    # (strongest asset), then risks (opposition frame), then gaps
+    # (message gap). Makes the first card the reader sees a strength
+    # rather than a weakness, which reads better as an opening to the
+    # "what stands out" section.
+    _takeaway_order = {"strongest_asset": 0, "opposition_frame": 1, "message_gap": 2}
+    takeaways.sort(key=lambda t: _takeaway_order.get(t["kind"], 99))
+
     return takeaways
 
 

@@ -27,7 +27,7 @@ import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
-import { CompetitorBarsFromData, SourcesDonut } from "@/components/dashboard/Charts";
+import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
 import {
   getSubject,
   getSubjectOverview,
@@ -242,35 +242,65 @@ function HeroKpis({
   ];
 
   return (
-    <div className="mt-7 grid grid-cols-3 gap-8 pt-6 border-t border-border/50">
-      {tiles.map((t) => (
-        <div key={t.label} className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[12px] font-semibold text-foreground/75">
-            <span className="truncate">{t.label}</span>
-            <KpiTooltipIcon text={t.tooltip} />
-          </div>
-          {t.subtitle && (
-            <div className="mt-0.5 text-[11px] text-foreground/50 leading-snug">
-              {t.subtitle}
+    <div className="mt-8 grid grid-cols-3 gap-3">
+      {tiles.map((t) => {
+        const delta = t.kpi.delta;
+        const trend = t.kpi.trend;
+        const Icon =
+          trend === "up" ? TrendingUp : trend === "down" ? TrendingDown : Minus;
+
+        // Color logic: muted for neutral/no-data, green for improvement
+        // in this metric's good direction, amber/warning for the
+        // opposite direction. Restrained colors only.
+        let changeColor: string;
+        if (delta === null) changeColor = "text-muted-foreground";
+        else if (trend === "flat") changeColor = "text-muted-foreground";
+        else if (trend === t.goodDirection) changeColor = "text-success";
+        else changeColor = "text-warning";
+
+        return (
+          <div
+            key={t.label}
+            className="rounded-lg border border-border/60 bg-card p-4 min-h-[92px] flex flex-col"
+          >
+            {/* Top: label + tooltip */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-muted-foreground truncate">
+                {t.label}
+              </span>
+              <KpiTooltipIcon text={t.tooltip} />
             </div>
-          )}
-          <div className="mt-2 flex items-baseline gap-2.5">
+
+            {/* Middle: large KPI value */}
             <div
-              className={`font-display text-[28px] leading-none font-semibold tracking-[-0.02em] ${
+              className={`mt-2 text-2xl font-semibold tracking-tight leading-none ${
                 t.risk ? "text-warning" : "text-foreground"
               }`}
             >
               {t.value}
             </div>
-            <TrendBadge
-              trend={t.kpi.trend}
-              delta={t.kpi.delta}
-              unit={t.unit}
-              goodDirection={t.goodDirection}
-            />
+
+            {/* Bottom: change indicator. Pushed to bottom with mt-auto
+                so cards with varying value-line heights still align
+                their change rows. */}
+            <div className={`mt-auto pt-3 inline-flex items-center gap-1 text-xs ${changeColor}`}>
+              {delta === null ? (
+                <span>No prior comparison</span>
+              ) : trend === "flat" ? (
+                <>
+                  <Icon className="h-3 w-3" />
+                  <span>Unchanged</span>
+                </>
+              ) : (
+                <>
+                  <Icon className="h-3 w-3" />
+                  <span>{formatDelta(delta, t.unit)}</span>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -318,7 +348,7 @@ function DominantNarrativePanel({
       <div className="mt-2 font-display text-[24px] leading-tight font-semibold tracking-[-0.02em] text-foreground">
         {top.name}
       </div>
-      <div className="mt-1.5 text-[13px] text-foreground/60 leading-snug">
+      <div className="mt-1.5 text-[13px] text-foreground/70 leading-snug">
         Frames{" "}
         <span className="text-foreground font-semibold">
           {Math.round(topShare * 100)}%
@@ -327,7 +357,7 @@ function DominantNarrativePanel({
         {formatSubjectInline(subjectName, category)} and related topic areas.
       </div>
 
-      <ul className="mt-7 space-y-5">
+      <ul className="mt-12 space-y-8">
         {clusters.map((c, i) => {
           // Bar width = absolute share (0..1 → 0..100%). The remaining
           // track visually represents the share not covered by named
@@ -345,7 +375,7 @@ function DominantNarrativePanel({
                 <span className="text-foreground/85 font-medium">
                   {c.name}
                 </span>
-                <span className="text-foreground/55 tabular-nums text-[12px]">
+                <span className="text-foreground/70 tabular-nums text-[12px]">
                   {Math.round(c.share * 100)}%
                 </span>
               </div>
@@ -397,13 +427,7 @@ function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platfo
   const useList = merged.length >= 5;
 
   return (
-    <div
-      aria-label="Per-platform recall breakdown"
-      className="relative block mt-8 pt-6 border-t border-border/50"
-    >
-      <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55 mb-3">
-        AI Mention Rate by platform
-      </div>
+    <div aria-label="Per-platform recall breakdown" className="relative block">
       {useList ? (
         <ul className="divide-y divide-border/40 border border-border/60 rounded-md bg-card">
           {merged.map((p) => {
@@ -460,7 +484,10 @@ function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platfo
           })}
         </ul>
       ) : (
-        <div className="flex flex-wrap gap-2.5">
+        <div
+          className="grid gap-2"
+          style={{ gridTemplateColumns: `repeat(${merged.length}, minmax(0, 1fr))` }}
+        >
           {merged.map((p) => {
             const noData = p.value === null;
             return (
@@ -471,7 +498,7 @@ function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platfo
                     ? `No data available for ${p.name} in this period.`
                     : `${formatPct(p.value, 0)} of relevant prompts on ${p.name} where the subject is mentioned. Based on ${p.n_responses} responses.`
                 }
-                className={`relative rounded-md border px-3 py-2.5 grow basis-[180px] max-w-[260px] ${
+                className={`relative min-w-0 rounded-md border px-2 py-2 ${
                   noData
                     ? "border-border/50 bg-card/50"
                     : p.lowest
@@ -482,9 +509,9 @@ function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platfo
                 {p.lowest && !noData && (
                   <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-warning" />
                 )}
-                <div className="flex items-center gap-1.5 mb-1">
+                <div className="flex items-center gap-1 mb-0.5">
                   <span
-                    className="h-1.5 w-1.5 rounded-full"
+                    className="h-1.5 w-1.5 rounded-full shrink-0"
                     style={{
                       backgroundColor: noData
                         ? "var(--muted-foreground)"
@@ -493,16 +520,16 @@ function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platfo
                     }}
                   />
                   <span
-                    className={`text-[11px] font-medium ${
+                    className={`text-[10px] font-medium truncate ${
                       noData ? "text-foreground/45" : "text-foreground/70"
                     }`}
                   >
                     {p.name}
                   </span>
                 </div>
-                <div className="flex items-baseline gap-2">
+                <div className="flex items-baseline gap-1.5 min-w-0">
                   <span
-                    className={`font-display text-[18px] font-semibold tabular-nums tracking-[-0.015em] ${
+                    className={`font-display text-[15px] font-semibold tabular-nums tracking-[-0.015em] ${
                       noData ? "text-foreground/40" : "text-foreground"
                     }`}
                   >
@@ -562,7 +589,7 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
               labels={trajectory.weeks}
             />
           </div>
-          <div className="mt-3 pt-3 border-t border-border text-xs text-muted-foreground leading-relaxed">
+          <div className="mt-3 pt-3 border-t border-border text-xs text-foreground/70 leading-relaxed">
             {trajectory.weeks.length} weekly snapshot{trajectory.weeks.length === 1 ? "" : "s"};
             most recent is {formatRefreshKind(trajectory.is_historical[trajectory.is_historical.length - 1] ?? false)}.
           </div>
@@ -704,27 +731,40 @@ function EvidenceCard({ card }: { card: SubjectOverview["evidence_cards"][number
     : (card.frame_label || "—");
 
   return (
-    <Card className="p-5 flex flex-col">
-      <div className="flex items-center justify-between gap-2 mb-3">
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span
-            className="h-1.5 w-1.5 rounded-full"
-            style={{ backgroundColor: MODEL_COLORS[MODEL_DISPLAY[card.model_slug]] || "var(--muted-foreground)" }}
-          />
-          {MODEL_DISPLAY[card.model_slug] || card.model_slug}
-        </span>
-        {pillNode}
+    <Card className="flex min-h-[160px] flex-col justify-between p-4">
+      <div>
+        {/* Top row: model name (left) + type/mention badge (right).
+            Aligned identically across all cards via mb-3 spacing. */}
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: MODEL_COLORS[MODEL_DISPLAY[card.model_slug]] || "var(--muted-foreground)" }}
+            />
+            {MODEL_DISPLAY[card.model_slug] || card.model_slug}
+          </span>
+          {pillNode}
+        </div>
+
+        {/* Originating prompt — the question that elicited the quote. */}
+        <div className="text-sm font-semibold text-foreground leading-snug mb-2">
+          &ldquo;{card.prompt_text}&rdquo;
+        </div>
+
+        {/* AI's actual quote / paraphrased excerpt. line-clamp-4 keeps
+            cards visually even regardless of underlying excerpt length;
+            full text is in the rationale tooltip on hover. */}
+        <p
+          className="line-clamp-4 text-sm leading-relaxed text-foreground/70"
+          title={card.rationale}
+        >
+          {card.excerpt}
+        </p>
       </div>
-      <div className="text-[13px] font-semibold text-foreground mb-3 leading-snug">
-        &ldquo;{card.prompt_text}&rdquo;
-      </div>
-      <div
-        className="text-xs text-muted-foreground leading-relaxed flex-1 border-l-2 border-primary/40 pl-3 italic"
-        title={card.rationale}
-      >
-        {card.excerpt}
-      </div>
-      <div className="mt-4 pt-3 border-t border-border text-[11px] text-muted-foreground">
+
+      {/* Bottom: frame label. Pushed to card bottom by parent
+          justify-between so all "Frame:" rows align across cards. */}
+      <div className="mt-4 pt-3 border-t border-border/60 text-xs text-muted-foreground">
         Frame:{" "}
         <span className={frameAbsent ? "text-warning font-medium" : "text-foreground font-medium"}>
           {frameLabel}
@@ -744,7 +784,7 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
   }
   return (
     <div className="space-y-1">
-      <div className="grid grid-cols-12 text-[10px] uppercase tracking-wider text-muted-foreground px-3 pb-2 border-b border-border">
+      <div className="grid grid-cols-12 text-[10px] uppercase tracking-wider text-foreground/65 px-3 pb-2 border-b border-border">
         <div className="col-span-6">Source</div>
         <div className="col-span-3 text-right">Influence</div>
         <div className="col-span-3 text-right">Type</div>
@@ -778,9 +818,9 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
   );
 }
 
-// Same high-contrast monochromatic blue gradient used inside
-// SourcesDonut — kept in sync so the inline legend dots match the
-// wedges exactly.
+// High-contrast monochromatic blue gradient used inside the stacked
+// bar and matching legend dots so the two visualizations stay
+// visually unified.
 const SOURCE_TYPE_COLORS = [
   "oklch(0.28 0.16 245)",
   "oklch(0.45 0.16 245)",
@@ -795,7 +835,7 @@ function SourcesTypeMix({ sources }: { sources: SubjectOverview["sources"] }) {
   if (!sources.length) return null;
 
   // Roll up by type, summing influence scores. Sort desc so heavier
-  // categories take the brighter wedges via SOURCE_DONUT_COLORS order.
+  // categories appear first in both the bar segments and the legend.
   const byType = new Map<string, number>();
   for (const s of sources) {
     byType.set(s.type, (byType.get(s.type) || 0) + s.score);
@@ -805,26 +845,50 @@ function SourcesTypeMix({ sources }: { sources: SubjectOverview["sources"] }) {
     .sort((a, b) => b.score - a.score);
   const total = aggregated.reduce((acc, x) => acc + x.score, 0) || 1;
 
+  // Horizontal stacked bar replaces the donut chart — supports the
+  // source-mix readout rather than dominating the card. The legend
+  // below carries the actual labels and percentages; the bar is just
+  // a visual aid for proportions at a glance.
   return (
     <div className="lg:border-l lg:border-border/60 lg:pl-8 pt-1">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+      <div className="text-[11px] uppercase tracking-wider text-foreground/65 mb-3">
         Source mix
       </div>
-      <SourcesDonut data={aggregated} />
-      <ul className="mt-4 space-y-1.5">
+
+      {/* Horizontal stacked bar — single 10px tall row, segments
+          proportional to each category's share of total influence. */}
+      <div className="flex h-2.5 w-full overflow-hidden rounded-sm">
+        {aggregated.map((t, i) => {
+          const pct = (t.score / total) * 100;
+          return (
+            <div
+              key={t.name}
+              title={`${t.name} — ${Math.round(pct)}%`}
+              style={{
+                width: `${pct}%`,
+                backgroundColor: SOURCE_TYPE_COLORS[i % SOURCE_TYPE_COLORS.length],
+              }}
+            />
+          );
+        })}
+      </div>
+
+      {/* Legend with full category names + percentages. This is the
+          primary read; the bar is decorative reinforcement. */}
+      <ul className="mt-4 space-y-2">
         {aggregated.map((t, i) => (
           <li
             key={t.name}
-            className="flex items-center justify-between gap-2 text-[12px]"
+            className="flex items-center justify-between gap-2 text-[13px]"
           >
             <span className="flex items-center gap-2 min-w-0">
               <span
                 className="h-2 w-2 rounded-sm shrink-0"
                 style={{ backgroundColor: SOURCE_TYPE_COLORS[i % SOURCE_TYPE_COLORS.length] }}
               />
-              <span className="truncate text-foreground/80">{t.name}</span>
+              <span className="truncate text-foreground/85">{t.name}</span>
             </span>
-            <span className="tabular-nums text-foreground/55">
+            <span className="tabular-nums font-medium text-foreground/70">
               {Math.round((t.score / total) * 100)}%
             </span>
           </li>
@@ -894,15 +958,26 @@ export default async function SubjectOverviewPage({
         timeZone: "UTC",
       })
     : "—";
+  // Shorter date for the sticky header meta line — drops the year so
+  // the line stays tight ("Updated May 8" vs "Updated May 8, 2026").
+  // The hero card carries the full date with year for archival clarity.
+  const updatedShort = data.meta.last_refresh_at
+    ? new Date(data.meta.last_refresh_at).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      })
+    : null;
 
   const subjectInitials = deriveInitials(data.subject_name);
-  // Header meta packs everything that used to live on the now-removed
-  // action+meta bar below the Header. Header is sticky, so this info
-  // stays visible while scrolling.
+  // Sticky header meta — operational info only. Subject name is
+  // already visible in the entity dropdown chip to the right; "AI
+  // Visibility" is implicit from the page context. Keep only the
+  // snapshot date + response count so the band stays uncluttered.
   const headerMeta =
-    data.meta.last_refresh_at !== null
-      ? `${data.subject_name} · AI Visibility · Latest snapshot ${updated} · ${data.meta.n_responses} responses · ${data.meta.n_platforms} platforms`
-      : `${data.subject_name} · AI Visibility`;
+    updatedShort !== null
+      ? `Updated ${updatedShort} · ${data.meta.n_responses} responses`
+      : "";
 
   // Empty state: subject exists but has no completed refresh yet. The
   // normal page would render mostly empty cards and "—" values. Show
@@ -938,8 +1013,11 @@ export default async function SubjectOverviewPage({
                   <Sparkles className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <h1 className="font-display text-[26px] md:text-[30px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground">
-                    AI Narrative Brief: {data.subject_name}
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-2">
+                    AI Narrative Brief
+                  </div>
+                  <h1 className="font-display text-[30px] md:text-[34px] font-semibold leading-[1.1] tracking-[-0.02em] text-foreground">
+                    {data.subject_name}
                   </h1>
                   <p className="mt-3 text-[15px] leading-relaxed text-foreground/70">
                     No snapshots yet for this subject. Run the first one to
@@ -985,7 +1063,7 @@ export default async function SubjectOverviewPage({
         <main className="flex-1 px-4 md:px-8 py-6 space-y-8 max-w-[1500px] w-full mx-auto">
           {/* HERO */}
           <section>
-            <Card className="relative overflow-hidden p-7 md:p-10 border-border/60">
+            <Card className="relative overflow-hidden p-6 md:p-8 border-border/60">
               <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
@@ -999,42 +1077,57 @@ export default async function SubjectOverviewPage({
                     as a full-width strip so the two columns can end
                     at similar heights. */}
                 <div className="lg:col-span-3 flex flex-col">
-                  <h1 className="font-display text-[24px] md:text-[27px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground">
-                    AI Narrative Brief: {data.subject_name}
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-2">
+                    AI Narrative Brief
+                  </div>
+                  <h1 className="font-display text-[28px] md:text-[32px] font-semibold leading-[1.1] tracking-[-0.02em] text-foreground">
+                    {data.subject_name}
                   </h1>
                   <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/70 max-w-xl">
                     How major AI platforms describe {data.subject_name} across
                     voter-facing and public-affairs prompts.
                   </p>
 
-                  {/* Bottom Line — diagnostic callout, primary visual weight */}
-                  {data.bottom_line && (
-                    <div
-                      className="mt-6 relative pl-5 pr-4 py-4 rounded-md"
-                      style={{
-                        background:
-                          "color-mix(in oklab, var(--primary) 6%, transparent)",
-                      }}
-                    >
-                      <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
-                        Bottom line
-                      </div>
-                      <p className="text-[17px] leading-relaxed font-semibold tracking-[-0.005em] text-foreground">
-                        {data.bottom_line}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Recommended Focus — prescriptive follow-on, quieter */}
-                  {data.recommended_focus && (
-                    <div className="mt-3 relative pl-5 pr-4 py-3.5 rounded-md border border-border/60 bg-card">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-1.5">
-                        Recommended focus
-                      </div>
-                      <p className="text-[14.5px] leading-relaxed text-foreground/90">
-                        {data.recommended_focus}
-                      </p>
+                  {/* Executive summary — Bottom Line (diagnostic) +
+                      Recommended Focus (action) as a single visually
+                      linked block. Both share the outer container,
+                      separated by a hairline divider. Side-bar
+                      accents give stylistic parallelism while the
+                      color difference (primary blue vs muted) signals
+                      "finding vs action." */}
+                  {(data.bottom_line || data.recommended_focus) && (
+                    <div className="mt-6 rounded-md overflow-hidden border border-border/40">
+                      {data.bottom_line && (
+                        <div
+                          className="relative pl-5 pr-4 py-4"
+                          style={{
+                            background:
+                              "color-mix(in oklab, var(--primary) 6%, transparent)",
+                          }}
+                        >
+                          <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
+                            Bottom line
+                          </div>
+                          <p className="text-[17px] leading-relaxed font-semibold tracking-[-0.005em] text-foreground">
+                            {data.bottom_line}
+                          </p>
+                        </div>
+                      )}
+                      {data.bottom_line && data.recommended_focus && (
+                        <div className="border-t border-border/40" />
+                      )}
+                      {data.recommended_focus && (
+                        <div className="relative pl-5 pr-4 py-3.5 bg-card">
+                          <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-foreground/40" />
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-1.5">
+                            Recommended focus
+                          </div>
+                          <p className="text-[14.5px] leading-relaxed text-foreground/90">
+                            {data.recommended_focus}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1061,118 +1154,146 @@ export default async function SubjectOverviewPage({
                   category={data.category}
                 />
               </div>
-              <HeroKpis
-                kpis={data.kpis}
-                topicScope={formatTopicScope(
-                  data.topic_coverage,
-                  data.subject_name,
-                  data.category,
-                )}
-              />
-              <PlatformRecallStrip platforms={data.platform_recall} />
+              {/* topicScope dropped — the dynamic subtitle made the
+                  AI Mention Rate tile visually heavier than the other
+                  two KPI tiles. Methodology context lives in the
+                  tooltip and the Prompt Coverage section below. */}
+              <HeroKpis kpis={data.kpis} />
             </Card>
           </section>
 
-          {/* STRATEGIC TAKEAWAYS — Phase 2 wiring */}
+          {/* STRATEGIC TAKEAWAYS — Phase 2 wiring.
+              Extra top spacing (mt-12 = 48px, overrides the parent
+              space-y-8's 32px default) so the transition from the
+              executive topline (AI Narrative Brief card above) to
+              the strategic interpretation feels deliberate — a clean
+              visual pause, not two sections stacked back-to-back. */}
           {data.strategic_takeaways.length > 0 && (
-            <section>
+            <section className="mt-12">
               <SectionTitle
                 eyebrow="Strategic Takeaways"
                 title="What stands out right now"
-                description={`Standout patterns in how AI platforms currently describe ${data.subject_name} — strongest associations, biggest coverage gaps, and most critical framings in this snapshot.`}
+                description="The action-oriented interpretation — what to notice or do because of the current AI narrative."
               />
-              <Card className="p-2 md:p-3">
-                <ul className="divide-y divide-border/60">
+              <Card className="p-5 md:p-6">
+                {/* Each takeaway renders as its own insight card inside
+                    the outer section container. Left-border accent
+                    signals type at a glance: orange for risks/gaps,
+                    blue for assets/opportunities, muted gray for
+                    everything else. Two-column grid on md+, stacks on
+                    smaller viewports. */}
+                <div
+                  className={`grid gap-4 ${
+                    data.strategic_takeaways.length === 1
+                      ? "grid-cols-1"
+                      : "grid-cols-1 md:grid-cols-2"
+                  }`}
+                >
                   {data.strategic_takeaways.map((item) => {
-                    const Icon =
-                      item.kind === "message_gap" ? AlertOctagon
-                      : item.kind === "opposition_frame" ? Compass
-                      : Megaphone;
-                    const eyebrowClass =
+                    // Accent color per takeaway type. Restrained palette:
+                    // border-l-warning for weakness/risk signals,
+                    // border-l-primary for asset/strength signals,
+                    // border-l-muted for everything else.
+                    const accent =
+                      item.tone === "warning" ? "border-l-warning"
+                      : item.tone === "primary" ? "border-l-primary"
+                      : "border-l-foreground/30";
+                    const eyebrowColor =
                       item.tone === "warning" ? "text-warning"
-                      : item.tone === "muted" ? "text-foreground/55"
-                      : "text-primary/80";
-                    const dotClass =
-                      item.tone === "warning" ? "bg-warning"
-                      : item.tone === "muted" ? "bg-foreground/30"
-                      : "bg-primary";
+                      : item.tone === "primary" ? "text-primary"
+                      : "text-foreground/55";
                     return (
-                      <li
+                      <div
                         key={item.kind}
-                        className="relative grid grid-cols-[auto_1fr] gap-5 px-5 md:px-6 py-5"
+                        className={`rounded-lg border border-border/60 bg-muted/30 p-4 border-l-2 ${accent}`}
                       >
-                        <span className={`absolute left-0 top-5 bottom-5 w-[2px] rounded-full ${dotClass}`} />
-                        <div className="pt-0.5">
-                          <Icon className={`h-4 w-4 ${eyebrowClass}`} />
+                        <div
+                          className={`text-xs font-semibold uppercase tracking-wide ${eyebrowColor}`}
+                        >
+                          {item.eyebrow}
                         </div>
-                        <div className="min-w-0">
-                          <div className={`text-[11.5px] font-semibold uppercase tracking-[0.06em] ${eyebrowClass}`}>
-                            {item.eyebrow}
-                          </div>
-                          <div className="mt-1 text-[16px] font-semibold tracking-[-0.01em] text-foreground leading-snug">
-                            {item.title}
-                          </div>
-                          <p className="mt-1.5 text-[13.5px] text-foreground/70 leading-relaxed max-w-3xl">
-                            {item.body}
-                          </p>
+                        <div className="mt-1.5 text-sm font-semibold text-foreground leading-snug">
+                          {item.title}
                         </div>
-                      </li>
+                        <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
+                          {item.body}
+                        </p>
+                      </div>
                     );
                   })}
-                </ul>
+                </div>
               </Card>
             </section>
           )}
 
-          {/* PROMPT COVERAGE — Phase 2 wiring */}
-          {data.topic_coverage.length > 0 && (
-            <section>
-              <SectionTitle
-                eyebrow="Prompt coverage"
-                title="What types of questions were included in this analysis"
-                description="Topics derived from the subject's setup_inputs. Recall is the share of unnamed-layer prompts in that topic where AI surfaced the subject."
-              />
-              <Card className="p-5 md:p-6">
-                <div className="grid grid-cols-[1fr_auto_auto_72px] items-baseline gap-x-6 text-[10px] uppercase tracking-wider text-muted-foreground pb-2 border-b border-border/60">
-                  <span>Topic</span>
-                  <span className="text-right">Share of set</span>
-                  <span className="text-right">AI recall</span>
-                  <span></span>
-                </div>
-                {data.topic_coverage.map((t) => {
-                  const recallPct = t.ai_recall === null ? null : t.ai_recall * 100;
-                  return (
-                    <div
-                      key={t.label}
-                      className="grid grid-cols-[1fr_auto_auto_72px] items-baseline gap-x-6 py-2.5 border-b border-border/30 last:border-b-0 text-sm"
-                      title={`${t.n_unique_slots} prompt slot${t.n_unique_slots === 1 ? "" : "s"} × ${t.n_responses / t.n_unique_slots} model${t.n_unique_slots === 1 ? "" : "s"} = ${t.n_responses} responses · source: ${t.source_field}`}
-                    >
-                      <span className="font-medium text-foreground/85 truncate">
-                        {t.label}
-                      </span>
-                      <span className="text-foreground/55 tabular-nums text-right">
-                        {(t.share_of_set * 100).toFixed(0)}%
-                      </span>
-                      <span className="font-mono tabular-nums text-foreground/80 text-right">
-                        {recallPct === null ? "—" : `${recallPct.toFixed(0)}%`}
-                      </span>
-                      <div className="h-1 bg-border rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary/70"
-                          style={{ width: `${recallPct ?? 0}%` }}
-                        />
-                      </div>
+          {/* COVERAGE — combined: prompt-topic breakdown + AI-platform
+              breakdown. Both are denominators of AI Mention Rate
+              (topic dimension and platform dimension respectively),
+              so they belong in one analytical view rather than two
+              separate sections. */}
+          <section>
+            <SectionTitle
+              eyebrow="Coverage"
+              title="What was included in this analysis"
+            />
+            <Card className="p-5 md:p-6">
+              <div className="grid lg:grid-cols-2 gap-8 lg:gap-12">
+                {/* LEFT: topics */}
+                {data.topic_coverage.length > 0 && (
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55 mb-3">
+                      By topic
                     </div>
-                  );
-                })}
-                <p className="mt-3 text-[11.5px] text-foreground/50 leading-relaxed">
-                  Recall is computed on unnamed-layer prompts only (where the
-                  subject is not mentioned in the question). Named-layer recall
-                  is trivially 100%.
-                </p>
-              </Card>
-            </section>
-          )}
+                    <div className="grid grid-cols-[1fr_auto_auto_60px] items-baseline gap-x-4 text-[10px] uppercase tracking-wider text-foreground/65 pb-2 border-b border-border/60">
+                      <span>Topic</span>
+                      <span className="text-right">Share</span>
+                      <span className="text-right">Mention</span>
+                      <span></span>
+                    </div>
+                    {data.topic_coverage.map((t) => {
+                      const recallPct = t.ai_recall === null ? null : t.ai_recall * 100;
+                      return (
+                        <div
+                          key={t.label}
+                          className="grid grid-cols-[1fr_auto_auto_60px] items-baseline gap-x-4 py-2.5 border-b border-border/30 last:border-b-0 text-sm"
+                          title={`${t.n_unique_slots} prompt slot${t.n_unique_slots === 1 ? "" : "s"} × ${t.n_responses / t.n_unique_slots} model${t.n_unique_slots === 1 ? "" : "s"} = ${t.n_responses} responses · source: ${t.source_field}`}
+                        >
+                          <span className="font-medium text-foreground/85 truncate">
+                            {t.label}
+                          </span>
+                          <span className="text-foreground/70 tabular-nums text-right">
+                            {(t.share_of_set * 100).toFixed(0)}%
+                          </span>
+                          <span className="font-mono tabular-nums text-foreground/80 text-right">
+                            {recallPct === null ? "—" : `${recallPct.toFixed(0)}%`}
+                          </span>
+                          <div className="h-1 bg-border rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-primary/70"
+                              style={{ width: `${recallPct ?? 0}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {/* RIGHT: platforms */}
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55 mb-3">
+                    By AI platform
+                  </div>
+                  <PlatformRecallStrip platforms={data.platform_recall} />
+                </div>
+              </div>
+              <p className="mt-5 text-[11.5px] text-foreground/65 leading-relaxed">
+                Mention Rate is measured only on questions that don't name
+                the subject directly. Questions that DO name the subject
+                would trivially score 100% and are excluded. N/A on a
+                platform means it didn't run this snapshot.
+              </p>
+            </Card>
+          </section>
 
           {/* EVIDENCE — Phase 3c wiring */}
           {data.evidence_cards.length > 0 && (
@@ -1183,7 +1304,7 @@ export default async function SubjectOverviewPage({
                 description="Verbatim quotes selected by the top-quotes cross-analyzer from the latest snapshot. Each card shows the originating prompt, the AI's exact words, and the narrative cluster it falls under."
               />
               <div className="grid md:grid-cols-3 gap-4">
-                {data.evidence_cards.map((card, i) => (
+                {data.evidence_cards.slice(0, 3).map((card, i) => (
                   <EvidenceCard
                     key={`${card.model_response_id}-${i}`}
                     card={card}
@@ -1192,38 +1313,6 @@ export default async function SubjectOverviewPage({
               </div>
             </section>
           )}
-
-          {/* VISIBILITY TRENDS — wired. Below 2 refreshes there's no
-              trend line to draw, so render a single-row banner instead
-              of three half-empty cards. */}
-          <section>
-            {data.trajectory.weeks.length >= 2 ? (
-              <>
-                <SectionTitle
-                  eyebrow="Visibility Trends"
-                  title="How visibility has shifted"
-                  description={`Movement across the headline metrics over the last ${data.trajectory.weeks.length} weekly snapshots. Open circles are retrospective estimates; filled circles are live snapshots.`}
-                />
-                <TrajectoryStrip trajectory={data.trajectory} />
-              </>
-            ) : (
-              <>
-                <SectionTitle
-                  eyebrow="Visibility Trends"
-                  title="How visibility has shifted"
-                  description="Trend lines compare visibility week-over-week. Available after the second snapshot."
-                />
-                <Card className="flex items-center gap-3 px-5 py-4">
-                  <TrendingUp className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <p className="text-sm text-foreground/70 leading-relaxed">
-                    {data.trajectory.weeks.length === 0
-                      ? "No snapshots yet — trend charts will appear after the second snapshot."
-                      : "1 snapshot in history so far. Trend charts will appear after the next snapshot."}
-                  </p>
-                </Card>
-              </>
-            )}
-          </section>
 
           {/* COMPETITIVE SNAPSHOT — Phase 4 wiring */}
           {data.competitive.length > 0 && (
@@ -1236,7 +1325,7 @@ export default async function SubjectOverviewPage({
               />
               <div className="grid md:grid-cols-2 gap-8">
                 <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">
+                  <div className="text-[11px] uppercase tracking-wider text-foreground/65 mb-3">
                     Share of Voice (% of answers)
                   </div>
                   <CompetitorBarsFromData
@@ -1291,6 +1380,42 @@ export default async function SubjectOverviewPage({
             </Card>
           )}
 
+          {/* VISIBILITY TRENDS — wired. Below 2 refreshes there's no
+              trend line to draw, so render a single-row banner instead
+              of three half-empty cards. Positioned after Competitive
+              Snapshot so the page narrative goes "what's happening
+              now (Brief + Takeaways) → who/what's being mentioned
+              (Coverage + Evidence + Competitive) → trajectory over
+              time (Trends)". */}
+          <section>
+            {data.trajectory.weeks.length >= 2 ? (
+              <>
+                <SectionTitle
+                  eyebrow="Visibility Trends"
+                  title="How visibility has shifted"
+                  description={`Movement across the headline metrics over the last ${data.trajectory.weeks.length} weekly snapshots. Open circles are retrospective estimates; filled circles are live snapshots.`}
+                />
+                <TrajectoryStrip trajectory={data.trajectory} />
+              </>
+            ) : (
+              <>
+                <SectionTitle
+                  eyebrow="Visibility Trends"
+                  title="How visibility has shifted"
+                  description="Trend lines compare visibility week-over-week. Available after the second snapshot."
+                />
+                <Card className="flex items-center gap-3 px-5 py-4">
+                  <TrendingUp className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <p className="text-sm text-foreground/70 leading-relaxed">
+                    {data.trajectory.weeks.length === 0
+                      ? "No snapshots yet — trend charts will appear after the second snapshot."
+                      : "1 snapshot in history so far. Trend charts will appear after the next snapshot."}
+                  </p>
+                </Card>
+              </>
+            )}
+          </section>
+
           {/* SOURCES — wired */}
           <Card className="p-6">
             <SectionTitle
@@ -1323,7 +1448,7 @@ export default async function SubjectOverviewPage({
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                      <tr className="text-left text-[10px] uppercase tracking-wider text-foreground/65 border-b border-border">
                         <th className="px-3 py-2 font-medium">ID</th>
                         <th className="px-3 py-2 font-medium">Started</th>
                         <th className="px-3 py-2 font-medium">Status</th>
@@ -1379,7 +1504,7 @@ export default async function SubjectOverviewPage({
           )}
 
           <footer className="pt-6 pb-8 border-t border-border/40">
-            <p className="text-center text-[11.5px] text-foreground/60 leading-relaxed">
+            <p className="text-center text-[11.5px] text-foreground/70 leading-relaxed">
               Based on{" "}
               <span className="font-semibold text-foreground/80 tabular-nums">
                 {data.meta.n_responses}

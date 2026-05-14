@@ -80,16 +80,16 @@ function MiniChart({
             </linearGradient>
           </defs>
           <CartesianGrid stroke="oklch(0.91 0.008 250)" strokeDasharray="2 4" vertical={false} />
-          <XAxis dataKey="w" stroke="oklch(0.55 0.015 250)" fontSize={10} tickLine={false} axisLine={false} />
-          <YAxis domain={domain} stroke="oklch(0.55 0.015 250)" fontSize={10} tickLine={false} axisLine={false} width={28} />
+          <XAxis dataKey="w" stroke="oklch(0.45 0.015 250)" fontSize={10} tickLine={false} axisLine={false} />
+          <YAxis domain={domain} stroke="oklch(0.45 0.015 250)" fontSize={10} tickLine={false} axisLine={false} width={28} />
           <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: color, strokeOpacity: 0.3 }} />
           <Area type="monotone" dataKey="v" stroke={color} strokeWidth={2} fill={`url(#g-${color})`} />
         </AreaChart>
       ) : (
         <LineChart data={data} margin={{ top: 6, right: 6, left: 4, bottom: 0 }}>
           <CartesianGrid stroke="oklch(0.91 0.008 250)" strokeDasharray="2 4" vertical={false} />
-          <XAxis dataKey="w" stroke="oklch(0.55 0.015 250)" fontSize={10} tickLine={false} axisLine={false} />
-          <YAxis domain={domain} stroke="oklch(0.55 0.015 250)" fontSize={10} tickLine={false} axisLine={false} width={28} />
+          <XAxis dataKey="w" stroke="oklch(0.45 0.015 250)" fontSize={10} tickLine={false} axisLine={false} />
+          <YAxis domain={domain} stroke="oklch(0.45 0.015 250)" fontSize={10} tickLine={false} axisLine={false} width={28} />
           <Tooltip contentStyle={tooltipStyle} />
           <Line type="monotone" dataKey="v" stroke={color} strokeWidth={2} dot={{ r: 2.5, fill: color }} />
         </LineChart>
@@ -191,11 +191,11 @@ export function CompetitorBarsFromData({
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid stroke="oklch(0.91 0.008 250)" strokeDasharray="2 4" horizontal={false} />
-        <XAxis type="number" stroke="oklch(0.55 0.015 250)" fontSize={10} tickLine={false} axisLine={false} unit="%" />
+        <XAxis type="number" stroke="oklch(0.45 0.015 250)" fontSize={10} tickLine={false} axisLine={false} unit="%" />
         <YAxis
           type="category"
           dataKey="name"
-          stroke="oklch(0.4 0.015 250)"
+          stroke="oklch(0.32 0.015 250)"
           fontSize={11}
           tickLine={false}
           axisLine={false}

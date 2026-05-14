@@ -88,12 +88,11 @@ export function Header({
           {backHref && backLabel && (
             <Link
               href={backHref}
-              className="text-xs font-medium text-foreground/70 hover:text-foreground transition-colors whitespace-nowrap"
+              className="text-sm font-medium text-foreground/80 hover:text-foreground transition-colors whitespace-nowrap"
             >
               ← {backLabel}
             </Link>
           )}
-          <h1 className="text-lg font-semibold tracking-tight text-foreground">Overview</h1>
           <span className="text-xs text-muted-foreground hidden md:inline truncate">
             {metaLine}
           </span>
