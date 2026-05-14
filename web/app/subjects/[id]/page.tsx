@@ -79,6 +79,25 @@ function formatPct(v: number | null, digits = 0): string {
   if (v === null) return "—";
   return `${(v * 100).toFixed(digits)}%`;
 }
+// Category-aware short reference for very long subject names.
+// Subject names over ~40 chars (event/policy/issue descriptors like
+// "the November 2023 firing of Sam Altman by the OpenAI board") cause
+// subtitle lines to balloon to 3+ wraps in narrow columns. For those
+// cases we substitute a short category noun ("this event" / "this
+// policy" / "this issue") in mid-sentence references; the full name
+// still appears in the hero title and body copy where width allows.
+function formatSubjectInline(name: string, category: string): string {
+  if (name.length <= 40) return name;
+  const shortForms: Record<string, string> = {
+    event: "this event",
+    policy: "this policy",
+    issue: "this issue",
+    organization: "this organization",
+    person: name, // person names are rarely this long; fall back to full
+  };
+  return shortForms[category] ?? name;
+}
+
 // Self-contained subtitle for AI Mention Rate that names both the
 // denominator (topic-area responses) and the numerator (responses
 // that mention the subject) inline, so a reader gets the metric
@@ -87,6 +106,7 @@ function formatPct(v: number | null, digits = 0): string {
 function formatTopicScope(
   topics: SubjectOverview["topic_coverage"],
   subjectName: string,
+  category: string,
 ): string | null {
   if (!topics.length) return null;
   const labels = topics.map((t) => t.label);
@@ -101,7 +121,8 @@ function formatTopicScope(
     // 4+: name two, summarize the rest so the line doesn't sprawl
     topicPhrase = `${labels[0]}, ${labels[1]}, and ${labels.length - 2} more`;
   }
-  return `percent of AI responses about ${topicPhrase} that mention ${subjectName}`;
+  const subjectRef = formatSubjectInline(subjectName, category);
+  return `percent of AI responses about ${topicPhrase} that mention ${subjectRef}`;
 }
 
 // Tone value formatter — appends "positive"/"negative"/"neutral" so a
@@ -257,9 +278,14 @@ function HeroKpis({
 function DominantNarrativePanel({
   clusters,
   subjectName,
+  category,
 }: {
   clusters: SubjectOverview["narrative_clusters"];
   subjectName: string;
+  // Subject category — used to swap in a short reference ("this event"
+  // / "this policy") when subject_name is too long to fit in the
+  // narrow right-column subtitle without 3-line wrapping.
+  category: string;
 }) {
   if (clusters.length === 0) {
     return (
@@ -297,7 +323,8 @@ function DominantNarrativePanel({
         <span className="text-foreground font-semibold">
           {Math.round(topShare * 100)}%
         </span>{" "}
-        of AI responses to this snapshot's questions about {subjectName} and related topic areas.
+        of AI responses to this snapshot's questions about{" "}
+        {formatSubjectInline(subjectName, category)} and related topic areas.
       </div>
 
       <ul className="mt-7 space-y-5">
@@ -1031,6 +1058,7 @@ export default async function SubjectOverviewPage({
                 <DominantNarrativePanel
                   clusters={data.narrative_clusters}
                   subjectName={data.subject_name}
+                  category={data.category}
                 />
               </div>
               <HeroKpis
@@ -1038,6 +1066,7 @@ export default async function SubjectOverviewPage({
                 topicScope={formatTopicScope(
                   data.topic_coverage,
                   data.subject_name,
+                  data.category,
                 )}
               />
               <PlatformRecallStrip platforms={data.platform_recall} />

@@ -787,6 +787,16 @@ The reader knows this is AI analysis — don't restate it. Instead: \
 or (b) use a tight AI-attribution verb ("AI links X to Y", "AI \
 underweights X on Y", "AI surfaces X in..."). Save the words for \
 the actual finding.
+- For subjects with names longer than ~30 characters (typically \
+events, policies, issues — e.g., "the November 2023 firing of Sam \
+Altman by the OpenAI board"), aggressively shorten the subject in \
+mid-sentence references. Acceptable shortenings: take a defining \
+noun phrase ("Sam Altman's firing", "the OpenAI board firing", "the \
+IRA"), or use a category noun if the context is unambiguous ("this \
+event", "this policy"). Avoid stringing the full long name through \
+the sentence; it forces awkward prepositional chains. The full name \
+appears in the hero title elsewhere on the page, so a shortened \
+reference is unambiguous to the reader.
 - The subject's full name MUST appear at least once across the two \
 sentences (so pronouns like "he"/"his" have a clear antecedent). \
 Once is ideal; twice is acceptable; pronouns-only is NOT acceptable.
@@ -806,7 +816,7 @@ _POLISH_SCHEMA = {
 
 # Bump this string to invalidate every cached polish row at once
 # (e.g., after a meaningful prompt change). Format keeps it sortable.
-_POLISH_CACHE_TYPE = "executive_polish_v4"
+_POLISH_CACHE_TYPE = "executive_polish_v5"
 
 
 def _polish_cache_read(
