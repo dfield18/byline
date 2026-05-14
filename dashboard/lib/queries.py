@@ -528,6 +528,7 @@ def _compute_strategic_takeaways(
     refresh_run_id: int,
     setup_inputs: dict[str, Any],
     subject_name: str,
+    category: str = "",
     *,
     min_recall_gap_pp: float = 15.0,
     high_criticism_threshold: float = 0.30,
@@ -622,6 +623,14 @@ def _compute_strategic_takeaways(
 
     takeaways: list[dict[str, Any]] = []
 
+    # Short-form reference used in body copy. Equals subject_name for
+    # short-named subjects; collapses to "this event" / "this policy"
+    # for long descriptive names so the body lines don't sprawl.
+    subj_inline = _format_subject_inline(subject_name, category)
+    subj_inline_cap = (
+        subj_inline[0].upper() + subj_inline[1:] if subj_inline else subj_inline
+    )
+
     # ── Message Gap ─────────────────────────────────────────
     with_recall = [t for t in topic_metrics if t["recall"] is not None]
     if len(with_recall) >= 2:
@@ -639,14 +648,14 @@ def _compute_strategic_takeaways(
             if len(others) == 1:
                 other = others[0]
                 body = (
-                    f"AI surfaces {subject_name} in {lowest_pct}% of "
+                    f"AI surfaces {subj_inline} in {lowest_pct}% of "
                     f"{lowest['label']} prompts, vs "
                     f"{round(other['recall'] * 100)}% on "
                     f"{other['label']} prompts."
                 )
             else:
                 body = (
-                    f"AI surfaces {subject_name} in {lowest_pct}% of "
+                    f"AI surfaces {subj_inline} in {lowest_pct}% of "
                     f"{lowest['label']} prompts. Recall averages "
                     f"{round(other_mean * 100)}% across the other "
                     f"{len(others)} tracked topic areas."
@@ -673,7 +682,7 @@ def _compute_strategic_takeaways(
                 "body": (
                     f"Average criticism severity is "
                     f"{highest_crit['mean_criticism']:.2f} on these prompts, "
-                    f"the highest among tracked topic areas for {subject_name}."
+                    f"the highest among tracked topic areas for {subj_inline}."
                 ),
             })
 
@@ -712,7 +721,7 @@ def _compute_strategic_takeaways(
             "eyebrow": "Strongest asset",
             "title": f"Strongest association: {strong['label']}",
             "body": (
-                f"{subject_name} appears in {round(strong['recall'] * 100)}% "
+                f"{subj_inline_cap} appears in {round(strong['recall'] * 100)}% "
                 f"of {strong['label']} prompts with {sent_label} overall "
                 f"sentiment."
             ),
@@ -812,6 +821,27 @@ _POLISH_SCHEMA = {
     },
     "required": ["bottom_line", "recommended_focus"],
 }
+
+
+def _format_subject_inline(name: str, category: str) -> str:
+    """Python mirror of the React `formatSubjectInline` helper. Swaps
+    very long subject names (>40 chars — typically events, policies,
+    issues with descriptive titles like "the November 2023 firing of
+    Sam Altman by the OpenAI board") for a category-aware short form
+    when used in mid-sentence references. Short-named subjects pass
+    through unchanged. The full name still appears in the hero title;
+    these substitutions only apply inside body copy where width and
+    readability matter."""
+    if len(name) <= 40:
+        return name
+    short_forms = {
+        "event": "this event",
+        "policy": "this policy",
+        "issue": "this issue",
+        "organization": "this organization",
+        "person": name,  # person names rarely this long; pass through
+    }
+    return short_forms.get(category, name)
 
 
 # Bump this string to invalidate every cached polish row at once
@@ -1650,7 +1680,7 @@ def get_subject_overview(
 
         # ── Strategic takeaways (Phase 2) ───────────────────────
         strategic_takeaways = _compute_strategic_takeaways(
-            cur, latest_refresh_id, setup_inputs, sname,
+            cur, latest_refresh_id, setup_inputs, sname, category,
         )
 
         # ── Executive synthesis (Phase 3 — rule-based + LLM polish) ─
