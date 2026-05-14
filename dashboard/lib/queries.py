@@ -780,6 +780,13 @@ the customer-facing label: say "AI Mention Rate" not "AI Recall" or \
 "Risk Frame Rate" stays as-is. Better still, paraphrase the metric in \
 plain English ("mention rate" or "share of AI answers"; "tone"; \
 "critical framing").
+- BANNED: meta-commentary preambles ("AI analysis indicates...", \
+"AI analysis shows...", "AI analysis confirms...", "Analysis suggests..."). \
+The reader knows this is AI analysis — don't restate it. Instead: \
+(a) lead with the subject name ("Bernie Sanders is firmly linked to..."), \
+or (b) use a tight AI-attribution verb ("AI links X to Y", "AI \
+underweights X on Y", "AI surfaces X in..."). Save the words for \
+the actual finding.
 - The subject's full name MUST appear at least once across the two \
 sentences (so pronouns like "he"/"his" have a clear antecedent). \
 Once is ideal; twice is acceptable; pronouns-only is NOT acceptable.
@@ -799,7 +806,7 @@ _POLISH_SCHEMA = {
 
 # Bump this string to invalidate every cached polish row at once
 # (e.g., after a meaningful prompt change). Format keeps it sortable.
-_POLISH_CACHE_TYPE = "executive_polish_v3"
+_POLISH_CACHE_TYPE = "executive_polish_v4"
 
 
 def _polish_cache_read(
