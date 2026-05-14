@@ -79,6 +79,31 @@ function formatPct(v: number | null, digits = 0): string {
   if (v === null) return "—";
   return `${(v * 100).toFixed(digits)}%`;
 }
+// Self-contained subtitle for AI Mention Rate that names both the
+// denominator (topic-area responses) and the numerator (responses
+// that mention the subject) inline, so a reader gets the metric
+// definition without needing the tooltip. Returns null when there
+// are no tracked topics — UI hides the line in that case.
+function formatTopicScope(
+  topics: SubjectOverview["topic_coverage"],
+  subjectName: string,
+): string | null {
+  if (!topics.length) return null;
+  const labels = topics.map((t) => t.label);
+  let topicPhrase: string;
+  if (labels.length === 1) {
+    topicPhrase = labels[0];
+  } else if (labels.length === 2) {
+    topicPhrase = `${labels[0]} and ${labels[1]}`;
+  } else if (labels.length === 3) {
+    topicPhrase = `${labels[0]}, ${labels[1]}, and ${labels[2]}`;
+  } else {
+    // 4+: name two, summarize the rest so the line doesn't sprawl
+    topicPhrase = `${labels[0]}, ${labels[1]}, and ${labels.length - 2} more`;
+  }
+  return `percent of AI responses about ${topicPhrase} that mention ${subjectName}`;
+}
+
 // Tone value formatter — appends "positive"/"negative"/"neutral" so a
 // reader doesn't have to interpret what the sign means.
 // 0.20 → "+20% positive", -0.30 → "−30% negative", 0 → "Neutral".
@@ -145,9 +170,21 @@ function KpiTooltipIcon({ text }: { text: string }) {
 
 // ── Wired sections ──────────────────────────────────────────────────
 
-function HeroKpis({ kpis }: { kpis: SubjectOverview["kpis"] }) {
+function HeroKpis({
+  kpis,
+  topicScope,
+}: {
+  kpis: SubjectOverview["kpis"];
+  // Plain-English phrase listing the subject's tracked topic areas
+  // (e.g., "of queries about progressive politicians in the US Senate
+  // and corporate influence in American politics"). Surfaced as a
+  // subtitle under metrics scoped to unnamed-layer queries so the
+  // reader knows exactly what topic set the denominator includes.
+  topicScope?: string | null;
+}) {
   const tiles: {
     label: string;
+    subtitle?: string | null;
     tooltip: string;
     value: string;
     risk?: boolean;
@@ -157,7 +194,8 @@ function HeroKpis({ kpis }: { kpis: SubjectOverview["kpis"] }) {
   }[] = [
     {
       label: "AI Mention Rate",
-      tooltip: "Share of relevant AI answers that mention this subject. Measured on questions about the subject's topic areas — not questions that name the subject directly.",
+      subtitle: topicScope,
+      tooltip: "Share of AI answers that mention this subject. Measured only on questions about the subject's topic areas (listed below) — not questions that name the subject directly.",
       value: formatPct(kpis.ai_recall.value),
       kpi: kpis.ai_recall,
       unit: "pts",
@@ -190,6 +228,11 @@ function HeroKpis({ kpis }: { kpis: SubjectOverview["kpis"] }) {
             <span className="truncate">{t.label}</span>
             <KpiTooltipIcon text={t.tooltip} />
           </div>
+          {t.subtitle && (
+            <div className="mt-0.5 text-[11px] text-foreground/50 leading-snug">
+              {t.subtitle}
+            </div>
+          )}
           <div className="mt-2 flex items-baseline gap-2.5">
             <div
               className={`font-display text-[28px] leading-none font-semibold tracking-[-0.02em] ${
@@ -225,7 +268,7 @@ function DominantNarrativePanel({
           Dominant narrative
         </div>
         <p className="mt-3 text-[13px] text-foreground/55 leading-relaxed">
-          No narrative clustering available for this refresh yet. Run the
+          No narrative clustering available for this snapshot yet. Run the
           cross-analyzer pass to populate this panel.
         </p>
       </div>
@@ -249,12 +292,12 @@ function DominantNarrativePanel({
       <div className="mt-2 font-display text-[24px] leading-tight font-semibold tracking-[-0.02em] text-foreground">
         {top.name}
       </div>
-      <div className="mt-1.5 text-[13px] text-foreground/60">
-        Appears in{" "}
+      <div className="mt-1.5 text-[13px] text-foreground/60 leading-snug">
+        Frames{" "}
         <span className="text-foreground font-semibold">
           {Math.round(topShare * 100)}%
         </span>{" "}
-        of AI answers about {subjectName}
+        of AI responses to this snapshot's questions about {subjectName} and related topic areas.
       </div>
 
       <ul className="mt-7 space-y-5">
@@ -503,7 +546,7 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
 }
 
 function formatRefreshKind(isHistorical: boolean): string {
-  return isHistorical ? "an estimated retrospective" : "a live refresh";
+  return isHistorical ? "an estimated retrospective" : "a live snapshot";
 }
 
 function MiniSpark({
@@ -519,7 +562,7 @@ function MiniSpark({
   if (numericValues.length < 2) {
     return (
       <div className="h-[60px] flex items-center justify-center text-[11px] text-muted-foreground">
-        Need more refreshes for a trend line
+        Need more snapshots for a trend line
       </div>
     );
   }
@@ -668,7 +711,7 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
   if (!sources.length) {
     return (
       <div className="text-sm text-muted-foreground p-5">
-        No sources extracted yet. Run a refresh with grounding enabled.
+        No sources extracted yet. Run a snapshot with grounding enabled.
       </div>
     );
   }
@@ -708,16 +751,17 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
   );
 }
 
-// Same monochromatic blue gradient used inside SourcesDonut, repeated
-// here so the inline legend dots match the wedges exactly.
+// Same high-contrast monochromatic blue gradient used inside
+// SourcesDonut — kept in sync so the inline legend dots match the
+// wedges exactly.
 const SOURCE_TYPE_COLORS = [
-  "oklch(0.5 0.13 245)",
-  "oklch(0.55 0.13 245)",
-  "oklch(0.62 0.12 245)",
-  "oklch(0.68 0.10 245)",
-  "oklch(0.74 0.08 245)",
-  "oklch(0.79 0.06 245)",
-  "oklch(0.84 0.04 245)",
+  "oklch(0.28 0.16 245)",
+  "oklch(0.45 0.16 245)",
+  "oklch(0.60 0.14 245)",
+  "oklch(0.74 0.11 245)",
+  "oklch(0.85 0.07 245)",
+  "oklch(0.91 0.04 245)",
+  "oklch(0.95 0.02 245)",
 ];
 
 function SourcesTypeMix({ sources }: { sources: SubjectOverview["sources"] }) {
@@ -830,7 +874,7 @@ export default async function SubjectOverviewPage({
   // stays visible while scrolling.
   const headerMeta =
     data.meta.last_refresh_at !== null
-      ? `${data.subject_name} · AI Visibility · Latest refresh ${updated} · ${data.meta.n_responses} responses · ${data.meta.n_platforms} platforms`
+      ? `${data.subject_name} · AI Visibility · Latest snapshot ${updated} · ${data.meta.n_responses} responses · ${data.meta.n_platforms} platforms`
       : `${data.subject_name} · AI Visibility`;
 
   // Empty state: subject exists but has no completed refresh yet. The
@@ -871,19 +915,19 @@ export default async function SubjectOverviewPage({
                     AI Narrative Brief: {data.subject_name}
                   </h1>
                   <p className="mt-3 text-[15px] leading-relaxed text-foreground/70">
-                    No refreshes yet for this subject. Run the first one to
+                    No snapshots yet for this subject. Run the first one to
                     generate an executive brief — KPIs, narrative clusters,
                     evidence quotes, competitive snapshot, and source mix.
                   </p>
                   <p className="mt-2 text-[13px] text-foreground/55">
-                    A typical refresh takes 1–3 minutes and analyzes ~25
+                    A typical snapshot takes 1–3 minutes and analyzes ~25
                     responses across the major AI search platforms.
                   </p>
                 </div>
                 <div className="mt-2 text-[12px] text-foreground/55 flex items-center gap-2">
                   Use the
                   <span className="inline-flex items-center px-2 py-0.5 rounded border border-border text-foreground/70 text-[11px]">
-                    Trigger refresh
+                    Take snapshot
                   </span>
                   button at the top right to get started.
                 </div>
@@ -974,8 +1018,8 @@ export default async function SubjectOverviewPage({
                         Executive summary
                       </div>
                       <p className="mt-1.5 text-[13px] text-foreground/55 leading-relaxed max-w-xl">
-                        Not enough signal in this refresh to synthesize an
-                        executive briefing yet. Trigger another refresh or wait
+                        Not enough signal in this snapshot to synthesize an
+                        executive briefing yet. Take another snapshot or wait
                         for more data to accumulate.
                       </p>
                     </div>
@@ -989,7 +1033,13 @@ export default async function SubjectOverviewPage({
                   subjectName={data.subject_name}
                 />
               </div>
-              <HeroKpis kpis={data.kpis} />
+              <HeroKpis
+                kpis={data.kpis}
+                topicScope={formatTopicScope(
+                  data.topic_coverage,
+                  data.subject_name,
+                )}
+              />
               <PlatformRecallStrip platforms={data.platform_recall} />
             </Card>
           </section>
@@ -1000,7 +1050,7 @@ export default async function SubjectOverviewPage({
               <SectionTitle
                 eyebrow="Strategic Takeaways"
                 title="What stands out right now"
-                description={`Standout patterns in how AI platforms currently describe ${data.subject_name} — strongest associations, biggest coverage gaps, and most critical framings on this refresh.`}
+                description={`Standout patterns in how AI platforms currently describe ${data.subject_name} — strongest associations, biggest coverage gaps, and most critical framings in this snapshot.`}
               />
               <Card className="p-2 md:p-3">
                 <ul className="divide-y divide-border/60">
@@ -1101,7 +1151,7 @@ export default async function SubjectOverviewPage({
               <SectionTitle
                 eyebrow="Evidence"
                 title="What AI is actually saying"
-                description="Verbatim quotes selected by the top-quotes cross-analyzer across the latest refresh. Each card shows the originating prompt, the AI's exact words, and the narrative cluster it falls under."
+                description="Verbatim quotes selected by the top-quotes cross-analyzer from the latest snapshot. Each card shows the originating prompt, the AI's exact words, and the narrative cluster it falls under."
               />
               <div className="grid md:grid-cols-3 gap-4">
                 {data.evidence_cards.map((card, i) => (
@@ -1123,7 +1173,7 @@ export default async function SubjectOverviewPage({
                 <SectionTitle
                   eyebrow="Visibility Trends"
                   title="How visibility has shifted"
-                  description={`Movement across the headline metrics over the last ${data.trajectory.weeks.length} weekly refreshes. Open circles are retrospective estimates; filled circles are live refreshes.`}
+                  description={`Movement across the headline metrics over the last ${data.trajectory.weeks.length} weekly snapshots. Open circles are retrospective estimates; filled circles are live snapshots.`}
                 />
                 <TrajectoryStrip trajectory={data.trajectory} />
               </>
@@ -1132,14 +1182,14 @@ export default async function SubjectOverviewPage({
                 <SectionTitle
                   eyebrow="Visibility Trends"
                   title="How visibility has shifted"
-                  description="Trend lines compare visibility week-over-week. Available after the second refresh."
+                  description="Trend lines compare visibility week-over-week. Available after the second snapshot."
                 />
                 <Card className="flex items-center gap-3 px-5 py-4">
                   <TrendingUp className="h-4 w-4 text-muted-foreground shrink-0" />
                   <p className="text-sm text-foreground/70 leading-relaxed">
                     {data.trajectory.weeks.length === 0
-                      ? "No refreshes yet — trend charts will appear after the second refresh."
-                      : "1 snapshot in history so far. Trend charts will appear after the next refresh."}
+                      ? "No snapshots yet — trend charts will appear after the second snapshot."
+                      : "1 snapshot in history so far. Trend charts will appear after the next snapshot."}
                   </p>
                 </Card>
               </>
@@ -1152,7 +1202,7 @@ export default async function SubjectOverviewPage({
               <SectionTitle
                 eyebrow="Competitive Snapshot"
                 title={`How ${data.subject_name} compares to peers`}
-                description={`Share of voice and visibility against the top entities AI surfaces when asked about ${data.subject_name}'s topic areas. Pulled from unnamed-layer responses on this refresh.`}
+                description={`Share of voice and visibility against the top entities AI surfaces when asked about ${data.subject_name}'s topic areas. Pulled from unnamed-layer responses in this snapshot.`}
                 right={<Pill tone="primary">{data.competitive.length} entities tracked</Pill>}
               />
               <div className="grid md:grid-cols-2 gap-8">
@@ -1219,8 +1269,10 @@ export default async function SubjectOverviewPage({
               title="Sources shaping AI answers"
               description={`The publications and pages most often cited or paraphrased in AI responses about ${data.subject_name}.`}
             />
-            <div className="grid lg:grid-cols-[1fr_280px] gap-8 items-start">
-              <SourcesList sources={data.sources} />
+            <div className="grid lg:grid-cols-3 gap-8 items-start">
+              <div className="lg:col-span-2">
+                <SourcesList sources={data.sources} />
+              </div>
               <SourcesTypeMix sources={data.sources} />
             </div>
           </Card>
@@ -1231,7 +1283,7 @@ export default async function SubjectOverviewPage({
             <details className="group rounded-md border border-border/60 bg-card">
               <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden flex items-center justify-between px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground/65 hover:text-foreground transition-colors">
                 <span>
-                  Refresh history
+                  Snapshot history
                   <span className="ml-2 text-muted-foreground font-normal normal-case tracking-normal">
                     ({subject.refreshes.length} run{subject.refreshes.length === 1 ? "" : "s"})
                   </span>

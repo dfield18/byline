@@ -738,8 +738,8 @@ Rule-based rough draft (these capture the underlying findings):
 - Recommended focus: {raw_recommended_focus}
 
 Context (do not restate as numbers; use only for grounding):
-- AI Recall: {recall_str}
-- Avg Sentiment: {sentiment_str}
+- AI Mention Rate: {recall_str}
+- Average Tone: {sentiment_str}
 - Risk Frame Rate: {risk_str}
 
 Task: Rewrite each sentence in a natural, declarative analyst voice.
@@ -774,6 +774,12 @@ nouns together with no preposition between them, rewrite using "of", \
 "on", "around", "in", or recast as a verb phrase.
 - BANNED: marketing speak ("powerful", "stunning", "incredible", \
 "strong association", "established association").
+- BANNED: internal/technical metric names. When citing a metric, use \
+the customer-facing label: say "AI Mention Rate" not "AI Recall" or \
+"recall"; say "Average Tone" not "Avg Sentiment" or "sentiment score"; \
+"Risk Frame Rate" stays as-is. Better still, paraphrase the metric in \
+plain English ("mention rate" or "share of AI answers"; "tone"; \
+"critical framing").
 - The subject's full name MUST appear at least once across the two \
 sentences (so pronouns like "he"/"his" have a clear antecedent). \
 Once is ideal; twice is acceptable; pronouns-only is NOT acceptable.
@@ -793,7 +799,7 @@ _POLISH_SCHEMA = {
 
 # Bump this string to invalidate every cached polish row at once
 # (e.g., after a meaningful prompt change). Format keeps it sortable.
-_POLISH_CACHE_TYPE = "executive_polish_v1"
+_POLISH_CACHE_TYPE = "executive_polish_v3"
 
 
 def _polish_cache_read(
@@ -1378,22 +1384,51 @@ def _compute_recommended_focus(
     subject_name: str,
     takeaways: list[dict[str, Any]],
 ) -> str | None:
-    """One-sentence prescriptive recommendation. Fires only when both a
-    Message Gap and a Strongest Asset exist — otherwise there isn't a
-    "connect Y to X" story to tell. Subject-name-aware copy, no LLM.
+    """One-sentence prescriptive recommendation. Fires in two cases,
+    in order of preference:
+
+      1. Strongest Asset + Message Gap both present → the constructive
+         "Connect [gap] messaging to your established [asset]" story.
+      2. Opposition Frame present (with or without an asset) → the
+         defensive "Address the critical framing on [topic]" pattern.
+         Surfaces when AI volunteers critical framing but no
+         message-gap exists to redirect toward (Heritage's case).
+
+    Returns None when neither pattern can be assembled. Subject-name-
+    aware copy, no LLM.
     """
     strong = _find_takeaway(takeaways, "strongest_asset")
     gap = _find_takeaway(takeaways, "message_gap")
-    if not strong or not gap:
-        return None
-    strong_topic = _extract_topic_from_takeaway(strong)
-    gap_topic = _extract_topic_from_takeaway(gap)
-    if not strong_topic or not gap_topic:
-        return None
-    return (
-        f"Connect {gap_topic} messaging to {subject_name}'s established "
-        f"association with {strong_topic}."
-    )
+    opp = _find_takeaway(takeaways, "opposition_frame")
+
+    # Pattern 1: the connect-asset-to-gap story is the most constructive,
+    # so prefer it when the data supports it.
+    if strong and gap:
+        strong_topic = _extract_topic_from_takeaway(strong)
+        gap_topic = _extract_topic_from_takeaway(gap)
+        if strong_topic and gap_topic:
+            return (
+                f"Connect {gap_topic} messaging to {subject_name}'s established "
+                f"association with {strong_topic}."
+            )
+
+    # Pattern 2: defensive "address the criticism" when an opposition
+    # frame is the dominant signal.
+    if opp:
+        opp_topic = _extract_topic_from_takeaway(opp)
+        if opp_topic:
+            # Topic comes through capitalized (the title applies
+            # _cap_first); lowercase the first letter so it reads
+            # naturally in the middle of a sentence.
+            opp_topic_natural = (
+                opp_topic[0].lower() + opp_topic[1:] if opp_topic else opp_topic
+            )
+            return (
+                f"Address the critical framing of {subject_name} "
+                f"on {opp_topic_natural} prompts."
+            )
+
+    return None
 
 
 # ─── dashboard overview (Phase 1 wiring) ───────────────────────────────

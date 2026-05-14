@@ -116,17 +116,19 @@ const competitors = [
   { name: "Pete Buttigieg", sov: 12 },
 ];
 
-// Monochromatic blue gradient — solid primary for the most-cited source,
-// progressively lighter blues for the long tail. Avoids loud rainbow
-// palettes; keeps the briefing tone.
+// Monochromatic blue gradient — stays in the blue family for tonal
+// consistency, but with steep lightness/chroma jumps between stops
+// so adjacent slices in the donut are clearly distinguishable. The
+// previous palette had ~5pt lightness gaps between stops, which
+// rendered adjacent slices nearly identical at small sizes.
 const SOURCE_DONUT_COLORS = [
-  "oklch(0.5 0.13 245)",
-  "oklch(0.55 0.13 245)",
-  "oklch(0.62 0.12 245)",
-  "oklch(0.68 0.10 245)",
-  "oklch(0.74 0.08 245)",
-  "oklch(0.79 0.06 245)",
-  "oklch(0.84 0.04 245)",
+  "oklch(0.28 0.16 245)",  // deep navy
+  "oklch(0.45 0.16 245)",  // dark blue
+  "oklch(0.60 0.14 245)",  // medium blue
+  "oklch(0.74 0.11 245)",  // light blue
+  "oklch(0.85 0.07 245)",  // pale blue
+  "oklch(0.91 0.04 245)",  // very pale
+  "oklch(0.95 0.02 245)",  // near-white
 ];
 
 export function SourcesDonut({
@@ -134,8 +136,12 @@ export function SourcesDonut({
 }: {
   data: { name: string; score: number }[];
 }) {
+  // Total influence across all slices, used to render hover tooltips
+  // as a share of links rather than the raw aggregated influence
+  // number (which is internal and unitless to a reader).
+  const total = data.reduce((acc, x) => acc + x.score, 0) || 1;
   return (
-    <ResponsiveContainer width="100%" height={240}>
+    <ResponsiveContainer width="100%" height={320}>
       <PieChart>
         <Pie
           data={data}
@@ -143,8 +149,8 @@ export function SourcesDonut({
           nameKey="name"
           cx="50%"
           cy="50%"
-          innerRadius={64}
-          outerRadius={104}
+          innerRadius={88}
+          outerRadius={144}
           paddingAngle={1.5}
           stroke="none"
         >
@@ -154,7 +160,10 @@ export function SourcesDonut({
         </Pie>
         <Tooltip
           contentStyle={tooltipStyle}
-          formatter={(value, name) => [`${value} influence`, String(name)]}
+          formatter={(value, name) => [
+            `${Math.round((Number(value) / total) * 100)}% of citations`,
+            String(name),
+          ]}
         />
       </PieChart>
     </ResponsiveContainer>

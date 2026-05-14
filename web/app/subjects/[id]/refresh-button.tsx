@@ -43,7 +43,7 @@ export function RefreshButton({ subjectId }: { subjectId: number }) {
     return () => window.clearInterval(handle);
   }, [job, subjectId]);
 
-  let label = "Trigger refresh";
+  let label = "Take snapshot";
   if (job?.status === "queued") label = "Queued…";
   else if (job?.status === "running") label = "Running…";
   else if (job?.status === "succeeded") label = "Done";
@@ -62,7 +62,7 @@ export function RefreshButton({ subjectId }: { subjectId: number }) {
       {job && (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           job #{job.id}
-          {job.refresh_run_id ? ` → refresh ${job.refresh_run_id}` : ""}
+          {job.refresh_run_id ? ` → snapshot ${job.refresh_run_id}` : ""}
         </p>
       )}
       {error && (
