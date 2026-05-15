@@ -727,12 +727,19 @@ def _compute_strategic_takeaways(
             ),
         })
 
-    # Display order for the dashboard: lead with the positive
-    # (strongest asset), then risks (opposition frame), then gaps
-    # (message gap). Makes the first card the reader sees a strength
-    # rather than a weakness, which reads better as an opening to the
-    # "what stands out" section.
-    _takeaway_order = {"strongest_asset": 0, "opposition_frame": 1, "message_gap": 2}
+    # Display order for the dashboard: Strongest Asset on the left
+    # (anchors the section with what's working), Message Gap on the
+    # right (the action item to address), Opposition Frame after
+    # those, then future types. Don't rely on the order takeaways
+    # were appended — sort by an explicit table so the editorial
+    # hierarchy is stable.
+    _takeaway_order = {
+        "strongest_asset": 1,
+        "message_gap": 2,
+        "opposition_frame": 3,
+        "what_changed": 4,
+        "coverage_caveat": 5,
+    }
     takeaways.sort(key=lambda t: _takeaway_order.get(t["kind"], 99))
 
     return takeaways
@@ -1776,6 +1783,7 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
             "ai_recall": [],
             "avg_sentiment": [],
             "risk_frame_rate": [],
+            "citation_rate": [],
         },
         "sources": [],
         "topic_coverage": [],
@@ -1958,18 +1966,24 @@ def _platform_recall_for_refresh(
 def _kpis_per_refresh_bulk(
     cur, refresh_ids: list[int], risk_frame_threshold: float,
 ) -> dict[int, dict[str, float | None]]:
-    """Compute AI Recall + Avg Sentiment + Risk Frame Rate for many
-    refreshes in two queries (one grouped GROUP BY per metric family).
-    Returns a {refresh_id: {ai_recall, avg_sentiment, risk_frame_rate}}
-    map; missing refreshes (no matching responses) get None values.
+    """Compute AI Recall + Avg Sentiment + Risk Frame Rate + Citation
+    Rate for many refreshes in three grouped queries. Returns a
+    {refresh_id: {ai_recall, avg_sentiment, risk_frame_rate,
+    citation_rate}} map; missing refreshes (no matching responses) get
+    None values.
 
-    Replaces N×3 queries from looping `_compute_kpis_for_refresh` with
-    2 total queries. For Obama (13 refreshes) that's 39 → 2."""
+    Replaces N×4 queries from looping `_compute_kpis_for_refresh` with
+    3 total queries. For Obama (13 refreshes) that's 52 → 3."""
     if not refresh_ids:
         return {}
 
     out: dict[int, dict[str, float | None]] = {
-        rid: {"ai_recall": None, "avg_sentiment": None, "risk_frame_rate": None}
+        rid: {
+            "ai_recall": None,
+            "avg_sentiment": None,
+            "risk_frame_rate": None,
+            "citation_rate": None,
+        }
         for rid in refresh_ids
     }
 
@@ -2030,6 +2044,29 @@ def _kpis_per_refresh_bulk(
         out[rid]["avg_sentiment"] = float(sentiment) if sentiment is not None else None
         out[rid]["risk_frame_rate"] = float(risk) if risk is not None else None
 
+    # Citation Rate — share of responses where AI cited the subject's
+    # canonical site. Mirrors `_compute_kpis_for_refresh`'s singular
+    # version but grouped across many refreshes.
+    cur.execute(
+        """
+        SELECT
+          mr.refresh_run_id,
+          AVG(CASE WHEN sc.cited_own_site THEN 1.0 ELSE 0.0 END)
+        FROM model_responses mr
+        JOIN LATERAL (
+            SELECT cited_own_site
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND cited_own_site IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sc ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s) AND mr.success = TRUE
+        GROUP BY mr.refresh_run_id
+        """,
+        (refresh_ids,),
+    )
+    for rid, citation in cur.fetchall():
+        out[rid]["citation_rate"] = float(citation) if citation is not None else None
+
     return out
 
 
@@ -2065,11 +2102,12 @@ def _trajectory_for_subject(
         refresh_ids.append(rid)
         is_historical.append(hist)
 
-    # Bulk-compute KPIs for all refreshes in 2 queries instead of N×3
+    # Bulk-compute KPIs for all refreshes in 3 queries instead of N×4
     kpi_map = _kpis_per_refresh_bulk(cur, refresh_ids, risk_frame_threshold)
     ai_recall = [kpi_map.get(rid, {}).get("ai_recall") for rid in refresh_ids]
     avg_sentiment = [kpi_map.get(rid, {}).get("avg_sentiment") for rid in refresh_ids]
     risk_frame_rate = [kpi_map.get(rid, {}).get("risk_frame_rate") for rid in refresh_ids]
+    citation_rate = [kpi_map.get(rid, {}).get("citation_rate") for rid in refresh_ids]
 
     return {
         "weeks": weeks_labels,
@@ -2078,7 +2116,32 @@ def _trajectory_for_subject(
         "ai_recall": ai_recall,
         "avg_sentiment": avg_sentiment,
         "risk_frame_rate": risk_frame_rate,
+        "citation_rate": citation_rate,
     }
+
+
+def _canonical_domain(domain: str) -> str:
+    """Collapse multi-subdomain projects to a single registrable name
+    so the Sources list doesn't double-count them. Today this only
+    handles language-keyed Wikimedia projects (`en.wikipedia.org`,
+    `es.wikipedia.org`, `commons.wikimedia.org` → `wikipedia.org` /
+    `wikimedia.org`); extend this map as additional multi-subdomain
+    sources show up in the data.
+
+    Generic public-suffix-aware collapsing isn't done — it would
+    flatten distinctions that matter (e.g., `news.bbc.co.uk` vs
+    `bbc.co.uk` vs `bbc.com` are arguably the same outlet but might
+    want to be tracked separately in some analyses). Better to be
+    explicit about the merges than apply a blanket rule.
+    """
+    if not domain:
+        return domain
+    d = domain.lower()
+    if d == "wikipedia.org" or d.endswith(".wikipedia.org"):
+        return "wikipedia.org"
+    if d == "wikimedia.org" or d.endswith(".wikimedia.org"):
+        return "wikimedia.org"
+    return d
 
 
 def _top_sources_for_refresh(
@@ -2086,7 +2149,11 @@ def _top_sources_for_refresh(
 ) -> list[dict[str, Any]]:
     """Aggregate citations from `sources` JSONB across responses,
     rank by occurrence count, surface top N with a normalized 0-100
-    'influence' score and the source_type."""
+    'influence' score and the source_type. Subdomain variants of the
+    same source (e.g. `en.wikipedia.org` + `wikipedia.org`) are
+    collapsed via `_canonical_domain` before ranking — fetching
+    without a SQL LIMIT so post-merge totals don't miss subdomains
+    that individually fell below the cutoff."""
     cur.execute(
         """
         WITH per_response_sources AS (
@@ -2119,22 +2186,47 @@ def _top_sources_for_refresh(
         SELECT domain, source_type, n_citations
         FROM counts
         ORDER BY n_citations DESC
-        LIMIT %s
         """,
-        (refresh_run_id, limit),
+        (refresh_run_id,),
     )
     rows = cur.fetchall()
     if not rows:
         return []
-    max_n = rows[0][2] or 1
+
+    # Merge by canonical domain. Sum n_citations across subdomains;
+    # take the source_type from the highest-cited variant (it's the
+    # most "representative" classification).
+    merged: dict[str, dict[str, Any]] = {}
+    for domain, source_type, n_citations in rows:
+        canon = _canonical_domain(domain)
+        n = int(n_citations or 0)
+        if canon not in merged:
+            merged[canon] = {
+                "name": canon,
+                "source_type": source_type,
+                "n_citations": n,
+                "_top_n": n,  # tracks the largest contributor's count
+            }
+        else:
+            merged[canon]["n_citations"] += n
+            if n > merged[canon]["_top_n"]:
+                merged[canon]["_top_n"] = n
+                merged[canon]["source_type"] = source_type
+
+    ranked = sorted(
+        merged.values(), key=lambda r: r["n_citations"], reverse=True,
+    )[:limit]
+    if not ranked:
+        return []
+    max_n = ranked[0]["n_citations"] or 1
     return [
         {
-            "name": domain,
-            "score": round((n / max_n) * 100),
-            "type": (source_type or "unknown").replace("_", " ").title(),
-            "n_citations": n,
+            "name": r["name"],
+            "score": round((r["n_citations"] / max_n) * 100),
+            "type": (r["source_type"] or "unknown").replace("_", " ").title(),
+            "n_citations": r["n_citations"],
         }
-        for domain, source_type, n in rows
+        for r in ranked
     ]
 
 

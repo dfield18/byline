@@ -22,14 +22,20 @@ export function SectionTitle({
   title,
   description,
   right,
+  className,
 }: {
   eyebrow?: string;
   title: string;
   description?: string;
   right?: ReactNode;
+  // Optional override for the wrapper's bottom margin (defaults to
+  // mb-5, giving a comfortable gap between section header and the
+  // content card below). Pass "mb-3" or "mb-4" when a section's
+  // content should feel more tightly bound to the header.
+  className?: string;
 }) {
   return (
-    <div className="flex items-end justify-between gap-4 mb-5">
+    <div className={`flex items-end justify-between gap-4 ${className ?? "mb-5"}`}>
       <div>
         {eyebrow && (
           <div className="text-[12px] font-semibold text-primary/80 mb-1.5">

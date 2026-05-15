@@ -197,6 +197,7 @@ export type SubjectOverview = {
     ai_recall: (number | null)[];
     avg_sentiment: (number | null)[];
     risk_frame_rate: (number | null)[];
+    citation_rate: (number | null)[];
   };
   sources: { name: string; score: number; type: string; n_citations: number }[];
   topic_coverage: {

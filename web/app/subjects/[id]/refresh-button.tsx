@@ -49,32 +49,34 @@ export function RefreshButton({ subjectId }: { subjectId: number }) {
   else if (job?.status === "succeeded") label = "Done";
   else if (job?.status === "failed") label = "Failed — retry";
 
+  // Stay inline with the rest of the Header chrome so the row height
+  // doesn't break. Job ID and any error surface via the button's title
+  // attribute instead of stacking visible text below the button.
+  const tooltipParts: string[] = [];
+  if (job) {
+    tooltipParts.push(
+      `job #${job.id}${job.refresh_run_id ? ` → snapshot ${job.refresh_run_id}` : ""}`,
+    );
+  }
+  if (error) tooltipParts.push(error);
+  if (job?.status === "failed" && job.error) tooltipParts.push(job.error);
+  const tooltip = tooltipParts.join(" · ") || undefined;
+
   return (
-    <div className="flex flex-col items-end gap-2">
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={inFlight}
-        className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-zinc-700 disabled:bg-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-      >
-        {label}
-      </button>
-      {job && (
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          job #{job.id}
-          {job.refresh_run_id ? ` → snapshot ${job.refresh_run_id}` : ""}
-        </p>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={inFlight}
+      title={tooltip}
+      className="flex items-center gap-1.5 rounded-md border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {inFlight && (
+        <span
+          aria-hidden
+          className="h-2 w-2 rounded-full bg-primary-foreground/80 animate-pulse"
+        />
       )}
-      {error && (
-        <p className="max-w-md text-right text-xs text-red-600 dark:text-red-400">
-          {error}
-        </p>
-      )}
-      {job?.status === "failed" && job.error && (
-        <p className="max-w-md text-right text-xs text-red-600 dark:text-red-400">
-          {job.error}
-        </p>
-      )}
-    </div>
+      {label}
+    </button>
   );
 }

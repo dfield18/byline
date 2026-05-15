@@ -1,9 +1,10 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-13 (after
-> customer-facing dashboard polish pass: caching, layout, plain-English
-> labels, methodology fixes)**. Read this first if you're a fresh Claude
-> Code session picking up work. Update when state shifts meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-15 (after
+> Hero refactor, topic-gap promotion to headline, Citation Rate
+> trajectory swap, Wikipedia source merging, and Risk Frame Rate
+> credibility fix)**. Read this first if you're a fresh Claude Code
+> session picking up work. Update when state shifts meaningfully.
 
 ---
 
@@ -308,6 +309,311 @@ concerns; 011 is next free for analysis-layer concerns. Phase B's
   Failed jobs don't count toward either quota (so a customer whose
   first attempt errors can immediately retry). Both limits are
   constants at the top of `subjects.py` — easy to tune.
+
+**Hero refactor + briefing polish — shipped this session (2026-05-14 / 2026-05-15):**
+
+A long polish-and-restructure pass on the Overview page. The thesis
+shift: stop showing three "everything is fine" KPIs (AI Mention Rate,
+Average Tone, Risk Frame Rate) and instead lead with the **per-topic
+recall gap** — the actionable signal that AI underweights certain
+topics for a subject. Plus a credibility fix for Risk Frame Rate
+naming, layout consolidation, and a host of smaller UI polish.
+
+*Hero metric row — replaced Risk Frame Rate tile with Weakest Topic Recall:*
+- Tile shows lowest topic-level mention rate in the snapshot, with the
+  topic name as a subtitle below the value. Low-N badge ("LOW N" small
+  warning chip) when `n_responses < 5` for the weakest topic.
+- Color follows the same `getKpiValueColor("mention_rate", …)` ladder
+  as AI Mention Rate (≥50% green, <20% orange).
+- Delta line currently shows "No prior snapshot available" — per-topic
+  historical data isn't in the API yet (see follow-ups below).
+- Risk Frame Rate is dropped from the hero entirely. The
+  `risk_frame_rate` field still ships in the API response and feeds
+  the renamed UI elsewhere.
+
+*New Topic Recall section between hero and Strategic Takeaways:*
+- `TopicRecallChart` component — horizontal bar list, sorted strongest
+  → weakest by mention rate. Lowest bar uses `bg-warning/70`; others
+  `bg-primary/70`.
+- One row per `data.topic_coverage[i]` with non-null `ai_recall`. Topic
+  name (with `capitalizeFirst` applied), bar, percentage. Hover title
+  on the topic label shows response count for transparency. The
+  visual "LOW N" badge that briefly lived on each row was removed —
+  reads cleaner without it; the data is still in the title attribute.
+
+*Bottom Line refactored to lead with the gap:*
+- New helper `buildGapBottomLine(subjectName, topics)` synthesizes the
+  bottom line from `topic_coverage` instead of using the
+  server-polished `data.bottom_line`. Falls back to the server text
+  when fewer than 2 topics have non-null recall, or when all topics
+  tie at the same rate.
+- Template chosen by topic count:
+  - 2 topics: `"AI underweights {subject} on {weakest} — {X}% mention rate vs {Y}% on {other_topic}."`
+  - 3+ topics: `"AI underweights {subject} on {weakest} — {X}% mention rate vs {Y}% average across {N} other tracked topics."` (mean-of-others framing avoids thematic mismatches that picking a single "strongest" comparator was producing.)
+- Per-topic phrasing uses the raw topic label as-is (no separate
+  `display_phrase` field added — labels are already human-readable).
+- `findStrongestTopic` is now an unused helper (orphaned by the
+  comparator switch); leaving it for now in case a later tile needs it.
+
+*Risk Frame Rate → "Unprompted Criticism Rate" (credibility fix):*
+- The user flagged a real credibility issue: Rubio's snapshot showed
+  Risk Frame Rate = 0% while the Evidence section had a damning
+  drone-strikes / civilian-casualties / due-process quote attributed
+  to ChatGPT. Investigation confirmed the methodology was technically
+  correct (named-layer "what are the criticisms of X?" prompts are
+  excluded from the metric — they would mechanically inflate it), but
+  **the label oversold what the metric measured**.
+- **Renamed** in two places: the Hero KPI tile (no longer in hero
+  after subsequent refactor) and the Visibility Trends sparkline
+  title. Backend field name (`risk_frame_rate`) unchanged to avoid
+  breaking the API and SQL columns.
+- **Tooltip rewritten** to make the exclusion explicit and pre-empt
+  the contradiction: *"Share of AI answers about this subject's topic
+  areas where the AI volunteered a critical framing (criticism severity
+  > 0.5) without being asked. Responses to prompts that explicitly ask
+  about criticism are excluded — counting them would mechanically reflect
+  those prompts rather than AI's own framing. Quotes in the Evidence
+  section below may include responses to direct criticism prompts;
+  those don't count toward this metric."*
+- **Added "SOLICITED PROMPT" eyebrow tag** to Evidence cards from the
+  named layer (only). Small uppercase muted-foreground tag above the
+  prompt text, with a hover title that explicitly cites the
+  Unprompted Criticism Rate exclusion. Closes the visual loop:
+  reader sees a damning quote + "Solicited prompt" tag, immediately
+  understands why both can be true.
+- Subsequent Hero refactor moved Risk Frame Rate out of the headline
+  tiles entirely (replaced by Weakest Topic Recall), but the renamed
+  metric still appears in `TrajectoryStrip` initially — then was also
+  swapped out (see Citation Rate trajectory below).
+
+*Visibility Trends — Citation Rate replaces Unprompted Criticism Rate:*
+- Backend `_kpis_per_refresh_bulk` now computes 4 metrics instead of
+  3 (added `citation_rate` via a third grouped query mirroring
+  `_compute_kpis_for_refresh`'s singular version).
+- `_trajectory_for_subject` returns `citation_rate: (number | null)[]`.
+- `_empty_overview` populated with `citation_rate: []`.
+- Frontend type `SubjectOverview["trajectory"]` extended.
+- TrajectoryStrip third tile swapped to "Citation Rate"
+  (`formatPct`). For subjects without a `canonical_url` configured,
+  every snapshot returns `null` and the chart shows "Need more
+  snapshots for a trend line".
+
+*Visibility Trends conditional render:*
+- Section is now hidden completely when fewer than 2 snapshots exist
+  (was previously rendering a placeholder card with "trend will
+  appear after the next snapshot"). The Snapshot History section
+  below still communicates the snapshot count, so a missing Trends
+  section here doesn't leave the user confused.
+- When exactly 2 snapshots: section renders with description "Early
+  trend — based on 2 snapshots. Open circles are retrospective
+  estimates; filled circles are live snapshots."
+
+*MiniSpark sparkline got a subtle Y-axis:*
+- Min/max value labels rendered as **HTML overlays** (not SVG
+  `<text>`) so they stay crisp and don't distort under the SVG's
+  `preserveAspectRatio="none"` stretching.
+- Two faint dashed gridlines at top/bottom of the plot area (`stroke-dasharray="2 3"`, `opacity={0.5}`).
+- New `format` prop on `MiniSpark` so axis labels render in the
+  metric's natural units (`75%` not `0.75`, `+12% positive` not
+  `0.12`).
+- Chart height bumped 60px → 120px so the line has vertical room to
+  breathe; circle markers slightly enlarged (r=2 → 2.5, stroke
+  1.2 → 1.4).
+
+*KPI tile color logic — `getKpiValueColor`:*
+- Replaced the always-orange `risk: true` flag (which painted Risk
+  Frame Rate orange even at 0%) with per-metric thresholds:
+  - `mention_rate` (higher = better): ≥50% success, <20% warning, else foreground
+  - `avg_tone`: > +0.5% success, < -0.5% warning, else foreground
+    (mirrors `formatTonePct`'s positive/negative/neutral labeling so
+    the color matches the text — prior ±20% threshold left mild
+    negatives like −13% reading as neutral-black while the change
+    indicator already showed warning orange)
+  - `risk_frame_rate`: ≤5% success, >20% warning, else foreground
+- Restraint preserved — values stay neutral inside a wide middle
+  band so colors don't overfire on noise.
+
+*KpiTooltipIcon — added `align` prop to fix viewport clipping:*
+- Tooltip used to center on the icon (`left-1/2 -translate-x-1/2`).
+  For icons sitting at the right edge of a card (Hero KPI tooltips,
+  Competitive Snapshot "First Mention" header), the tooltip extended
+  ~112px past the icon and clipped past the viewport edge.
+- New `align: "left" | "center" | "right"` prop. Right-aligned for
+  all three Hero KPI tiles and the Competitive Snapshot "First
+  Mention" header. Left/center variants stay available for callers
+  that need them.
+
+*Coverage section reframed as Analysis Scope (multi-step polish):*
+- Eyebrow "Coverage" → "Analysis Scope".
+- Title "What was included in this analysis" → "What this snapshot includes".
+- Description added: "The topics, platforms, and caveats behind this AI narrative snapshot."
+- Inner column headers: "By topic" → "Topics covered", "By AI platform" → "Platforms included".
+- Subcolumn labels: "Share" → "Share of prompts", "Mention" → "Mention rate".
+- Caveat copy rewritten to user-friendly: "Mention rate is measured
+  only on prompts where the subject could reasonably appear. Prompts
+  where the subject was not a valid answer are excluded. N/A means a
+  platform was not included in this snapshot."
+- **Layout fix**: switched the topics table from per-row independent
+  CSS grids (which auto-sized columns to each row's content — header
+  text vs. data values produced misalignment) to a **single grid
+  container** with explicit fixed column widths
+  `[1fr_132px_104px_64px]`. Header cells and data cells now share
+  the same column dimensions, so headers sit directly above their
+  data. Bottom border under the empty bar-column header was removed
+  so the underline doesn't visually extend past "Mention rate" into
+  the sparkline column.
+- Row padding bumped `py-2.5` → `py-3` for breathing room.
+- `Fragment` import added for the single-grid wrapping.
+
+*Topic capitalization helper:*
+- New `capitalizeFirst(s)` helper — uppercases the leading character
+  only, preserves embedded acronyms ("US", "UK", etc.). Applied to
+  topic labels at three standalone display points: Topic Recall
+  chart row labels, Weakest Topic Recall tile subtitle, Analysis
+  Scope topics table. Bottom Line template intentionally untouched
+  (mid-sentence usage; "Post-presidency political influence" reads
+  wrong as a proper noun mid-sentence).
+- Underlying DB labels remain inconsistent (some sentence-cased,
+  some lowercase). If the backend later canonicalizes labels at
+  write time, these display-layer calls become no-ops — safe to
+  leave.
+
+*Strategic Takeaways — Recommended Action callout added then removed:*
+- Briefly added a "Recommended Action" callout above the insight
+  cards (sourced from `data.recommended_focus`, reframed via the
+  eyebrow as imperative).
+- User reverted: the same text was already rendering in the Hero's
+  "Recommended Focus" block above, so the callout duplicated content
+  on the same page.
+- Section condition reverted to `strategic_takeaways.length > 0`.
+
+*Header consolidation — removed global Clerk auth band:*
+- Previously: thin global header in `app/layout.tsx` rendered just
+  the `<UserButton>` at the top edge of every page.
+- Now: that band is gone. `<ClerkProvider>` still wraps the app for
+  auth state. The dashboard `Header.tsx` renders `<UserButton>`
+  inline on the right side after the Take snapshot button (wrapped
+  in `<span suppressHydrationWarning>` to silence Clerk's portal-
+  mount mismatch).
+- Net effect: ~50px less wasted vertical space at the top of every
+  dashboard page. Only one chrome row instead of two.
+- **Side effect**: pages that don't use the dashboard `Header`
+  (landing `/`, `/subjects/new`) lose the visible UserButton.
+  Auth still works (cookies + middleware); avatar UI just isn't
+  shown. If you want it back on those pages, add inline UserButton
+  per page.
+
+*Snapshot button (`refresh-button.tsx`) styling fix:*
+- Was wrapped in `flex flex-col items-end gap-2` with a "job #N → snapshot N"
+  caption and any error text rendering as `<p>` siblings BELOW the
+  button. When dropped into the Header's horizontal row, the caption
+  pushed the row taller than `h-16` and visually broke out of the
+  chrome row.
+- Now: returns just the `<button>` directly. Job ID + error info
+  surface via a `title=` tooltip on the button instead. Restyled to
+  match the chrome (`border border-primary bg-primary text-primary-foreground px-3 py-1.5`,
+  matching the height/padding rhythm of Export PNG and the subject
+  picker).
+- Pulsing dot indicator (`bg-primary-foreground/80 animate-pulse`)
+  appears on the left of the label when `inFlight` so the user has
+  a visual heartbeat during long snapshots.
+
+*Sources Wikipedia merging:*
+- Reported issue: `wikipedia.org` and `en.wikipedia.org` showed as
+  separate entries in the Sources Shaping AI Answers section.
+- New `_canonical_domain(domain)` helper in `dashboard/lib/queries.py`
+  collapses subdomain variants:
+  - `*.wikipedia.org` → `wikipedia.org`
+  - `*.wikimedia.org` → `wikimedia.org`
+- Other multi-subdomain sites (BBC, YouTube, etc.) intentionally NOT
+  collapsed by default — generic public-suffix-aware merging would
+  flatten distinctions that may matter (`news.bbc.co.uk` vs `bbc.com`).
+  Extend the helper as more cases come up.
+- `_top_sources_for_refresh` rewrite:
+  - **Removed the SQL `LIMIT`** so subdomains that fall below the
+    cutoff individually still contribute to the merged total. Previously,
+    `wikipedia.org` at rank 8 with 2 citations would have been dropped
+    before merge and the total miscounted.
+  - Merge sums `n_citations` per canonical domain; takes
+    `source_type` from the highest-citation variant (most
+    representative classification).
+  - Re-rank by aggregated count, take top `limit`, recompute the
+    0–100 influence score against the new max.
+- **No frontend change needed** — `data.sources[i].name` just
+  contains `wikipedia.org` instead of two separate strings. Sources
+  list, By-category stacked bar, and (any remaining) donut all
+  benefit immediately on next page render. No DB migration; the
+  collapse is read-time.
+
+*Dominant Narrative — top 4 cap:*
+- Capped clusters at the top 4 by share (was previously up to 5 for
+  some subjects). Keeps the panel visually balanced with the hero's
+  KPI strip below.
+
+*Worker stale-process bug + Marco Rubio empty-Dominant-Narrative fix:*
+- Root cause: worker process (PID 56826) was started **Tue May 12 10:41 AM**,
+  ~27 hours BEFORE `NarrativeClusterAnalyzer` was added to
+  `cross_analyzer.py` (Wed May 13 13:48). Python caches imported
+  modules in `sys.modules`; the long-running worker kept executing
+  the stale snapshot of `worker.py` that lacked the new analyzer in
+  its registration list.
+- Symptom: Rubio's last two snapshots (refreshes 38 and 40) had 4 of
+  5 cross-analyzer outputs in `refresh_analyses` (`asymmetry`,
+  `top_quotes`, `share_of_voice`, `narrative_drift`) but
+  **`narrative_clusters` was missing** — so the dashboard's empty
+  guard fired and the right-side panel showed the placeholder.
+- **Fix**:
+  1. `pkill -f "python -m app.worker"` — killed PID 56826.
+  2. `nohup .venv/bin/python -m app.worker > /tmp/byline-worker.log 2>&1 &` — restarted with fresh code.
+  3. `python -m app.cross_analyzer 40` — backfilled Rubio's
+     refresh 40 (created `analysis_run_id=144` with all 5 analyzer
+     outputs including `narrative_clusters`). Dashboard's
+     `ORDER BY ar.id DESC LIMIT 1` picks the new run automatically.
+- **Lesson**: any time `worker.py` (or anything it imports) gets a
+  new analyzer or extractor added, restart the worker. Long-lived
+  Python processes don't auto-pick up code changes even though
+  `--reload` would for the API.
+- Worker is now running detached via `nohup`; survives the shell
+  session but won't auto-restart on machine reboot. If there's a
+  launchd / supervisor config that previously brought it up,
+  consider re-wiring it.
+
+*Cleanup notes (orphaned helpers, intentionally not deleted):*
+- `formatTopicScope` (page.tsx ~line 107) — unused after the AI
+  Mention Rate subtitle was dropped earlier in the session.
+- `findStrongestTopic` — unused after Bottom Line comparator
+  switched from "vs strongest" to "vs mean of others".
+- `topicScope?` prop signature gone from HeroKpis.
+- Both helpers are pure, ~10-line, type-safe functions. Leaving them
+  for now in case a later tile/chart wants them; safe to delete in a
+  cleanup pass if you'd like a tighter file.
+
+*Follow-ups created by this session's work:*
+- **Per-topic trajectory** (backend): `topic_coverage` rows have no
+  `prev_ai_recall` field, so the Weakest Topic Recall tile shows "No
+  prior snapshot available" on its delta line. Smallest fix:
+  in `_topic_coverage_for_refresh` (or via a new
+  `_topic_coverage_per_refresh_bulk`), look up the prior refresh's
+  per-topic recall and attach as `prev_ai_recall`. Frontend will
+  surface it via the existing `getKpiChangeDisplay` path with no
+  rendering changes.
+- **Citation Rate gap for subjects without `canonical_url`**: the
+  trajectory chart shows the "need more snapshots" placeholder for
+  subjects whose canonical URL isn't configured. Either prompt for
+  it during subject creation, or fall back to a different third
+  trajectory metric for those subjects.
+- **Topic label canonicalization** (backend): `_compute_strategic_takeaways`
+  / `_topic_for_prompt` could lowercase or sentence-case topic
+  labels at write/read time so the frontend `capitalizeFirst` calls
+  become unnecessary.
+- **Stuck-job reaper**: still on the older list below; not addressed.
+- **`buildGapBottomLine` returns null** when all topics tie. For
+  Obama specifically, his last ~10 refreshes all show 100% across
+  all 3 tracked topics, so the templated bottom line renders nothing
+  and the page falls back to the server-polished version (which for
+  recent refreshes hasn't been recomputed, leaving the polish cache
+  empty). Worth investigating whether the polish step is being
+  skipped or whether the server text needs a re-render trigger.
 
 **Known issues / followups from the 2026-05-12 QA pass (none blocking):**
 

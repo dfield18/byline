@@ -4,6 +4,7 @@ import { ChevronDown, Download, Check } from "lucide-react";
 import { toPng } from "html-to-image";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { UserButton } from "@clerk/nextjs";
 
 // Defaults match the Warren design reference so /dashboard-preview keeps
 // working without changes. /subjects/[id] passes the real subject in.
@@ -173,6 +174,15 @@ export function Header({
           </button>
 
           {refreshSlot}
+
+          {/* User avatar — moved out of the global layout header so
+              the dashboard has a single chrome row instead of two
+              stacked bands. UserButton is a Clerk portal-mount
+              component; suppressHydrationWarning matches the same
+              SSR/CSR mount pattern used elsewhere. */}
+          <span suppressHydrationWarning className="ml-1">
+            <UserButton />
+          </span>
         </div>
       </div>
     </header>

@@ -1,12 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import {
-  ClerkProvider,
-  Show,
-  SignInButton,
-  SignUpButton,
-  UserButton,
-} from "@clerk/nextjs";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -36,24 +30,10 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       >
         <body className="min-h-full flex flex-col">
-          {/* Clerk's UserButton is a portal-mounted client component:
-              the server emits an empty wrapper and the client adds the
-              portal <div> on mount. That's a known intentional SSR/CSR
-              difference, so we suppress hydration warnings for the
-              auth header — without this, every page logs a recoverable
-              hydration error during dev. */}
-          <header
-            suppressHydrationWarning
-            className="flex justify-end items-center gap-4 px-6 py-3 border-b border-black/10"
-          >
-            <Show when="signed-out">
-              <SignInButton />
-              <SignUpButton />
-            </Show>
-            <Show when="signed-in">
-              <UserButton />
-            </Show>
-          </header>
+          {/* Auth UI lives inside per-page chrome (e.g., the dashboard
+              Header on subject pages) rather than as a global thin
+              top band. Removes wasted vertical space at the top of
+              the dashboard. */}
           <main className="flex-1">{children}</main>
         </body>
       </html>
