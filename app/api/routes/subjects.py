@@ -18,6 +18,7 @@ from dashboard.lib.queries import (
     create_subject,
     get_subject,
     get_subject_overview,
+    invalidate_recommended_actions_cache,
     list_subjects,
 )
 
@@ -233,3 +234,37 @@ async def trigger_refresh(subject_id: int, user: User = Depends(current_user)):
         "status": status,
         "enqueued_at": enqueued_at.isoformat(),
     }
+
+
+@router.post("/{subject_id}/recommended-actions/regenerate", status_code=204)
+async def regenerate_recommended_actions(
+    subject_id: int, user: User = Depends(current_user),
+):
+    """Drop the cached LLM recommendations for this subject's latest
+    snapshot. The next page render will re-call the LLM and produce a
+    fresh set of recommendations. Org-scoped; cross-org access 404s.
+    """
+    org_id = _require_org(user)
+
+    s = get_subject(subject_id, org_id=org_id)
+    if not s:
+        raise HTTPException(status_code=404, detail=f"subject {subject_id} not found")
+
+    with get_cursor(commit=False) as cur:
+        cur.execute(
+            """
+            SELECT id FROM refresh_runs
+            WHERE subject_id = %s AND status = 'completed'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (subject_id,),
+        )
+        row = cur.fetchone()
+
+    if row is None:
+        # No snapshots yet — nothing to regenerate. 204 (no-op) instead
+        # of 404 since the request itself was well-formed.
+        return None
+
+    invalidate_recommended_actions_cache(row[0])
+    return None

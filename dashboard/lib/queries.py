@@ -509,6 +509,7 @@ def _topic_coverage_for_refresh(
             "label": b["label"],
             "source_field": b["source_field"],
             "n_responses": b["n_responses"],
+            "n_mentioned": b["n_mentioned"],
             "n_unique_slots": len(b["prompt_slots"]),
             "share_of_set": b["n_responses"] / total,
             "ai_recall": (
@@ -1079,6 +1080,527 @@ def _polish_executive_summary(
         "bottom_line": polished_bl or raw_bottom_line,
         "recommended_focus": polished_rf or raw_recommended_focus,
     }
+
+
+# ─── recommended actions (LLM-generated concrete recommendations) ──────
+
+# Bump suffix to invalidate every cached actions row at once after a
+# meaningful prompt or schema change.
+# v2: added subject role + recent_news + audience to payload; filtered
+#     out "Current events" bucket from topics; added prompt guardrails
+#     against assuming subject's role.
+_RECOMMENDED_ACTIONS_TYPE = "recommended_actions_v2"
+
+_RECOMMENDED_ACTIONS_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "primary": {
+            "type": "OBJECT",
+            "properties": {
+                "label": {"type": "STRING"},
+                "action": {"type": "STRING"},
+            },
+            "required": ["label", "action"],
+        },
+        "secondary": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "label": {"type": "STRING"},
+                    "action": {"type": "STRING"},
+                },
+                "required": ["label", "action"],
+            },
+        },
+    },
+    "required": ["primary", "secondary"],
+}
+
+_RECOMMENDED_ACTIONS_PROMPT = """You are a senior public-affairs strategist generating concrete, executable
+recommendations from AI search visibility data for one tracked subject.
+
+Your output is read by a comms director who needs to know what to DO this
+week — not what the data says. Every recommendation you produce must be
+something a person could put on a calendar, hand to a junior staffer, or
+write into a project plan.
+
+For each recommendation, specify:
+  1. A SURFACE — where the action lands. Examples: an op-ed in a named
+     publication, a Wikipedia edit, a journalist briefing at a named
+     outlet, a podcast booking on a named show, a paid placement in a
+     named channel, an SEO update on the subject's own website, a panel
+     pitch to a named conference, a research-firm briefing, a backgrounder
+     to a beat reporter.
+  2. AN ANGLE — the specific message or framing the surface delivers.
+  3. A LEVERAGED ENTITY — at least one specific item from the input
+     payload: a source domain, a tracked topic name, the dominant
+     narrative cluster name, or a specific KPI value. Reference it by
+     name in the action sentence.
+
+Hard constraints:
+- Every action sentence must reference at least one specific entity by
+  name from the input payload. Generic verbs without named entities
+  (e.g. "improve messaging," "build presence," "amplify the narrative")
+  fail this rule.
+- BANNED phrases: "messaging," "alignment," "positioning," "narrative
+  connection," "brand presence," "thought leadership," "awareness
+  building," "value proposition," "key stakeholder." If you find
+  yourself reaching for these, you're describing the data instead of
+  prescribing an action.
+- BANNED pattern: restating the visibility gap as the recommendation.
+  "Close the gap on {{topic}}" is not an action. "Pitch a {{publication}}
+  op-ed on {{topic}} that cites {{source}}" is an action.
+- BANNED pattern: hedging verbs like "consider," "explore," "look
+  into," "potentially." Use direct imperatives: pitch, brief, draft,
+  publish, edit, schedule, book, file, request, meet with.
+- One sentence per recommendation. Under 30 words.
+- Output exactly 1 primary + 2 secondary. The primary should be the
+  single highest-leverage move given this snapshot's signals; secondaries
+  are alternative angles, not lower-priority versions of the primary.
+
+CRITICAL — grounding in subject's actual context:
+- The input payload includes `current_role` and `recent_news` describing
+  what the subject is doing TODAY. Treat these as authoritative. Do NOT
+  rely on prior knowledge of who the subject is, what office they
+  hold, or what they've worked on historically — that knowledge may be
+  out of date.
+- Every recommendation must be PLAUSIBLE for the subject's current
+  role as stated in the payload. A recommendation that contradicts
+  the role (e.g., suggesting legislative action for someone not in
+  the legislature, or campaign moves for someone not running) is a
+  failure regardless of how well-crafted the surface and angle are.
+- If `recent_news` describes specific events, prefer recommendations
+  that connect to those events rather than generic moves on the topic.
+- If a topic name in the payload sounds operational or methodological
+  rather than substantive (e.g. "Current events," "General overview"),
+  do NOT treat it as a real topic area to act on. Recommend on the
+  named substantive topics instead.
+
+Output JSON only, matching this schema:
+{{
+  "primary":   {{"label": "3-5 word action label", "action": "one-sentence specific recommendation"}},
+  "secondary": [
+    {{"label": "...", "action": "..."}},
+    {{"label": "...", "action": "..."}}
+  ]
+}}
+
+Input data for this snapshot:
+{payload_json}
+"""
+
+_FALLBACK_RECOMMENDED_ACTIONS = {
+    "primary": {
+        "label": "Review snapshot signals",
+        "action": "Review the per-topic recall chart and Sources panel below to identify the strongest moves for this snapshot.",
+    },
+    "secondary": [
+        {
+            "label": "Audit source mix",
+            "action": "Audit the Sources Shaping AI Answers section for outlets where presence could be increased.",
+        },
+        {
+            "label": "Cross-check narrative",
+            "action": "Cross-check the Dominant Narrative panel against your current public-affairs strategy.",
+        },
+    ],
+    "warning": "Recommendations could not be generated for this snapshot — showing generic guidance.",
+}
+
+
+def _build_recommended_actions_payload(
+    *,
+    subject_name: str,
+    subject_category: str | None,
+    setup_inputs: dict[str, Any],
+    kpis: dict[str, dict[str, Any]],
+    topic_coverage: list[dict[str, Any]],
+    narrative_clusters: list[dict[str, Any]],
+    sources: list[dict[str, Any]],
+    n_responses: int,
+    n_platforms: int,
+) -> dict[str, Any] | None:
+    """Assemble the structured payload for the LLM. Returns None when
+    the snapshot is too thin to recommend on (no topics scored, no
+    sources, etc.) — caller falls back to generic guidance in that
+    case.
+
+    Two grounding sources surface in the payload:
+      - `current_role` + `audience` from the subject's setup_inputs,
+        so the LLM knows who the subject is TODAY (Cabinet member vs
+        legislator vs candidate, etc.) rather than defaulting to its
+        training-data prior.
+      - `recent_news` from setup_inputs (truncated), so the LLM can
+        connect recommendations to actual current events the subject
+        is involved in.
+
+    Topic-level filtering: the "Current events" bucket (sourced from
+    recent_news prompts) is excluded from the topics passed to the
+    LLM. It's not a substantive topic area a comms director should
+    act on — it's an internal mechanism for testing visibility on
+    whatever's in the news that week. Letting the LLM see it as a
+    "topic" produces nonsense recommendations like "edit the Wikipedia
+    page about Current events.\""""
+    # Filter out the recent_news / "Current events" bucket — it's not
+    # a real topic area, and surfacing it as one anchors the LLM on
+    # the wrong thing. Real subject-matter topics are what we want
+    # recommendations to act on.
+    real_topics = [
+        t for t in topic_coverage
+        if t.get("ai_recall") is not None
+        and t.get("source_field") != "recent_news"
+        and t.get("label") != _RECENT_NEWS_LABEL
+    ]
+    if not real_topics:
+        return None
+
+    weakest = min(real_topics, key=lambda t: t["ai_recall"])
+    others_sorted = sorted(
+        (t for t in real_topics if t is not weakest),
+        key=lambda t: -t["ai_recall"],
+    )
+    strongest = others_sorted[:3]
+
+    tone_value = (kpis.get("avg_sentiment") or {}).get("value")
+    if tone_value is None:
+        tone_dir = "neutral"
+    elif tone_value > 0.005:
+        tone_dir = "positive"
+    elif tone_value < -0.005:
+        tone_dir = "negative"
+    else:
+        tone_dir = "neutral"
+
+    # Truncate recent_news so the payload doesn't balloon. ~500 chars
+    # is enough for the LLM to anchor on specific events while keeping
+    # token cost predictable.
+    recent_news_raw = (setup_inputs.get("recent_news") or "").strip()
+    recent_news = (
+        recent_news_raw[:500] + ("…" if len(recent_news_raw) > 500 else "")
+        if recent_news_raw else None
+    )
+
+    return {
+        "subject_name": subject_name,
+        "subject_category": subject_category,
+        "current_role": setup_inputs.get("role") or None,
+        "audience": setup_inputs.get("audience") or None,
+        "recent_news": recent_news,
+        "weakest_topic": {
+            "name": weakest["label"],
+            "mention_rate": round(weakest["ai_recall"], 3),
+            "raw_fraction": f"{weakest['n_mentioned']}/{weakest['n_responses']}",
+        },
+        "strongest_topics": [
+            {"name": t["label"], "mention_rate": round(t["ai_recall"], 3)}
+            for t in strongest
+        ],
+        "dominant_narrative_cluster": (
+            {
+                "name": narrative_clusters[0]["name"],
+                "share": round(narrative_clusters[0].get("share", 0), 3),
+            }
+            if narrative_clusters else None
+        ),
+        "top_sources": [
+            {
+                "domain": s["name"],
+                "influence_score": s.get("score"),
+                "type": s.get("type"),
+            }
+            for s in sources[:7]
+        ],
+        "average_tone": {
+            "value": round(tone_value, 3) if tone_value is not None else None,
+            "direction": tone_dir,
+        },
+        "n_responses": n_responses,
+        "n_platforms": n_platforms,
+    }
+
+
+def _validate_actions_grounding(
+    actions: dict[str, Any], payload: dict[str, Any],
+) -> bool:
+    """Check that every action sentence references at least one
+    specific entity by name from the payload (substring match,
+    case-insensitive). Catches hallucinated sources / topics and
+    actions that ducked the named-entity requirement."""
+    valid_entities: list[str] = []
+    weakest = payload.get("weakest_topic") or {}
+    if weakest.get("name"):
+        valid_entities.append(weakest["name"].lower())
+    for t in payload.get("strongest_topics") or []:
+        if t.get("name"):
+            valid_entities.append(t["name"].lower())
+    cluster = payload.get("dominant_narrative_cluster") or {}
+    if cluster.get("name"):
+        valid_entities.append(cluster["name"].lower())
+    for s in payload.get("top_sources") or []:
+        if s.get("domain"):
+            valid_entities.append(s["domain"].lower())
+    if not valid_entities:
+        return True  # nothing to ground against; pass
+
+    actions_to_check = [actions.get("primary") or {}] + list(
+        actions.get("secondary") or []
+    )
+    for a in actions_to_check:
+        text = (a.get("action") or "").lower()
+        if not any(ent in text for ent in valid_entities):
+            return False
+    return True
+
+
+def _shape_actions(parsed: Any) -> dict[str, Any] | None:
+    """Coerce parsed JSON to the expected shape: 1 primary +
+    exactly 2 secondary, all four label+action strings non-empty.
+    Returns None on shape mismatch."""
+    if not isinstance(parsed, dict):
+        return None
+    primary = parsed.get("primary")
+    secondary = parsed.get("secondary")
+    if not isinstance(primary, dict) or not isinstance(secondary, list):
+        return None
+    if len(secondary) != 2:
+        return None
+    def _ok(a: Any) -> bool:
+        return (
+            isinstance(a, dict)
+            and isinstance(a.get("label"), str) and a["label"].strip()
+            and isinstance(a.get("action"), str) and a["action"].strip()
+        )
+    if not _ok(primary):
+        return None
+    if not all(_ok(s) for s in secondary):
+        return None
+    return {
+        "primary": {"label": primary["label"].strip(), "action": primary["action"].strip()},
+        "secondary": [
+            {"label": s["label"].strip(), "action": s["action"].strip()}
+            for s in secondary
+        ],
+    }
+
+
+def _recommended_actions_cache_read(
+    refresh_run_id: int, payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Return cached actions for this refresh if the cached input
+    payload matches the current one. Mismatch (snapshot data changed
+    since the LLM call) returns None and forces regeneration."""
+    try:
+        with get_cursor(commit=False) as cur:
+            cur.execute(
+                """
+                SELECT findings FROM refresh_analyses
+                WHERE refresh_run_id = %s AND analysis_type = %s
+                ORDER BY id DESC LIMIT 1
+                """,
+                (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
+            )
+            row = cur.fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    findings = _maybe_json(row[0]) or {}
+    cached_payload = findings.get("payload")
+    if cached_payload != payload:
+        return None
+    actions = findings.get("actions")
+    if not isinstance(actions, dict):
+        return None
+    return {
+        "actions": actions,
+        "warning": findings.get("warning"),
+    }
+
+
+def _recommended_actions_cache_write(
+    refresh_run_id: int,
+    subject_id: int,
+    payload: dict[str, Any],
+    actions: dict[str, Any],
+    warning: str | None,
+) -> None:
+    """Persist actions keyed by refresh. Same DELETE-then-INSERT
+    pattern as polish so the table holds at most one row per
+    (refresh_run_id, analysis_type). Errors swallowed — a cache write
+    failure must not break page render."""
+    try:
+        with get_cursor(commit=True) as cur:
+            cur.execute(
+                """
+                SELECT id FROM analysis_runs
+                WHERE refresh_run_id = %s
+                ORDER BY id DESC LIMIT 1
+                """,
+                (refresh_run_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return
+            analysis_run_id = row[0]
+            cur.execute(
+                """
+                DELETE FROM refresh_analyses
+                WHERE refresh_run_id = %s AND analysis_type = %s
+                """,
+                (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
+            )
+            cur.execute(
+                """
+                INSERT INTO refresh_analyses (
+                    analysis_run_id, refresh_run_id, subject_id,
+                    analysis_type, findings, methodology_version
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    analysis_run_id,
+                    refresh_run_id,
+                    subject_id,
+                    _RECOMMENDED_ACTIONS_TYPE,
+                    Json({
+                        "payload": payload,
+                        "actions": actions,
+                        "warning": warning,
+                    }),
+                    _RECOMMENDED_ACTIONS_TYPE,
+                ),
+            )
+    except Exception:
+        pass
+
+
+def invalidate_recommended_actions_cache(refresh_run_id: int) -> None:
+    """Public API: drop the cached actions row for a refresh so the
+    next page render regenerates from the LLM. Called by the
+    'Regenerate' button's server action."""
+    try:
+        with get_cursor(commit=True) as cur:
+            cur.execute(
+                """
+                DELETE FROM refresh_analyses
+                WHERE refresh_run_id = %s AND analysis_type = %s
+                """,
+                (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
+            )
+    except Exception:
+        pass
+
+
+def _compute_recommended_actions(
+    *,
+    refresh_run_id: int | None,
+    subject_id: int | None,
+    subject_name: str,
+    subject_category: str | None,
+    setup_inputs: dict[str, Any],
+    kpis: dict[str, dict[str, Any]],
+    topic_coverage: list[dict[str, Any]],
+    narrative_clusters: list[dict[str, Any]],
+    sources: list[dict[str, Any]],
+    n_responses: int,
+    n_platforms: int,
+) -> dict[str, Any]:
+    """Generate concrete, executable recommendations from snapshot data
+    via Gemini 2.5 Pro. Output: {primary, secondary, warning?}.
+
+    Caching: keyed on (refresh_run_id, payload-shape). When the cached
+    payload exactly matches the current snapshot's payload, returns
+    cached actions without an LLM call. Any mismatch (new snapshot,
+    schema change, manual invalidation) regenerates.
+
+    Failure handling: any exception path returns the subject-agnostic
+    fallback. Two LLM attempts maximum (initial + one stricter retry
+    when the first response fails grounding validation)."""
+    payload = _build_recommended_actions_payload(
+        subject_name=subject_name,
+        subject_category=subject_category,
+        setup_inputs=setup_inputs,
+        kpis=kpis,
+        topic_coverage=topic_coverage,
+        narrative_clusters=narrative_clusters,
+        sources=sources,
+        n_responses=n_responses,
+        n_platforms=n_platforms,
+    )
+    if payload is None:
+        return _FALLBACK_RECOMMENDED_ACTIONS
+
+    if refresh_run_id is not None:
+        cached = _recommended_actions_cache_read(refresh_run_id, payload)
+        if cached is not None:
+            out = dict(cached["actions"])
+            if cached.get("warning"):
+                out["warning"] = cached["warning"]
+            return out
+
+    try:
+        import json as _json
+        import os
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        return _FALLBACK_RECOMMENDED_ACTIONS
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return _FALLBACK_RECOMMENDED_ACTIONS
+
+    base_prompt = _RECOMMENDED_ACTIONS_PROMPT.format(
+        payload_json=_json.dumps(payload, indent=2),
+    )
+
+    def _call(prompt: str) -> dict[str, Any] | None:
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model="gemini-2.5-pro",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=_RECOMMENDED_ACTIONS_SCHEMA,
+                    thinking_config=types.ThinkingConfig(thinking_budget=2048),
+                ),
+            )
+            parsed = _json.loads(response.text or "{}")
+            return _shape_actions(parsed)
+        except Exception:
+            return None
+
+    actions = _call(base_prompt)
+    grounded = (
+        actions is not None and _validate_actions_grounding(actions, payload)
+    )
+
+    if actions is None or not grounded:
+        retry_prompt = base_prompt + (
+            "\n\nYour previous response did not reference any specific entity "
+            "from the input data. Every action MUST mention a specific source "
+            "domain, topic name, or narrative cluster name from the payload "
+            "above, by name. Try again."
+        )
+        retry_actions = _call(retry_prompt)
+        if retry_actions is not None and _validate_actions_grounding(
+            retry_actions, payload,
+        ):
+            actions = retry_actions
+            grounded = True
+
+    if actions is None or not grounded:
+        return _FALLBACK_RECOMMENDED_ACTIONS
+
+    # Cache the successful generation so subsequent page loads skip
+    # the LLM call. Cache write is fire-and-forget.
+    if refresh_run_id is not None and subject_id is not None:
+        _recommended_actions_cache_write(
+            refresh_run_id, subject_id, payload, actions, warning=None,
+        )
+
+    return actions
 
 
 # ─── executive synthesis (Phase 3 wiring) ──────────────────────────────
@@ -1733,6 +2255,24 @@ def get_subject_overview(
         )
         n_responses, n_platforms = cur.fetchone()
 
+    # ── Recommended actions (LLM-generated, post-cursor close) ──
+    # Outside the `with get_cursor` block: _compute_recommended_actions
+    # opens its own short-lived connections for cache read/write so the
+    # ~5–15s LLM call doesn't hold the page-render cursor open.
+    recommended_actions = _compute_recommended_actions(
+        refresh_run_id=latest_refresh_id,
+        subject_id=sid,
+        subject_name=sname,
+        subject_category=category,
+        setup_inputs=setup_inputs,
+        kpis=kpis,
+        topic_coverage=topic_coverage,
+        narrative_clusters=narrative_clusters,
+        sources=sources,
+        n_responses=n_responses,
+        n_platforms=n_platforms,
+    )
+
     return {
         "subject_id": sid,
         "subject_name": sname,
@@ -1745,6 +2285,7 @@ def get_subject_overview(
         "strategic_takeaways": strategic_takeaways,
         "bottom_line": bottom_line,
         "recommended_focus": recommended_focus,
+        "recommended_actions": recommended_actions,
         "narrative_clusters": narrative_clusters,
         "evidence_cards": evidence_cards,
         "competitive": competitive,
@@ -1790,6 +2331,7 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "strategic_takeaways": [],
         "bottom_line": None,
         "recommended_focus": None,
+        "recommended_actions": _FALLBACK_RECOMMENDED_ACTIONS,
         "narrative_clusters": [],
         "evidence_cards": [],
         "competitive": [],

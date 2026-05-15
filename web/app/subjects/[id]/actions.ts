@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { triggerRefresh } from "@/lib/api";
+import { regenerateRecommendedActions, triggerRefresh } from "@/lib/api";
 
 export async function triggerRefreshAction(subjectId: number) {
   const job = await triggerRefresh(subjectId);
@@ -12,4 +12,19 @@ export async function triggerRefreshAction(subjectId: number) {
 
 export async function revalidateSubjectPage(subjectId: number) {
   revalidatePath(`/subjects/${subjectId}`);
+}
+
+// Drops the cached recommendations and revalidates the page so the
+// next render re-calls the LLM. Returns a discriminated result so the
+// client component can surface errors inline rather than throwing.
+export async function regenerateRecommendedActionsAction(
+  subjectId: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await regenerateRecommendedActions(subjectId);
+    revalidatePath(`/subjects/${subjectId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }

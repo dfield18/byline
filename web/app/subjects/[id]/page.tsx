@@ -39,6 +39,7 @@ import {
   type KpiValue,
 } from "@/lib/api";
 import { RefreshButton } from "./refresh-button";
+import { RecommendedActionsBlock } from "./recommended-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -136,16 +137,27 @@ function formatTopicScope(
   return `percent of AI responses about ${topicPhrase} that mention ${subjectRef}`;
 }
 
-// Tone value formatter — appends "positive"/"negative"/"neutral" so a
-// reader doesn't have to interpret what the sign means.
+// Tone value formatter — by default appends "positive"/"negative"/"neutral"
+// so a reader doesn't have to interpret what the sign means.
 // 0.20 → "+20% positive", -0.30 → "−30% negative", 0 → "Neutral".
-function formatTonePct(v: number | null, digits = 0): string {
+//
+// Pass includeDirection=false to get just "+20%" / "−30%" — used in
+// the hero KPI tile where the title ("Positive vs negative") already
+// frames the scale and the descriptor word would push the value to
+// wrap onto a second line.
+function formatTonePct(
+  v: number | null,
+  digits = 0,
+  includeDirection = true,
+): string {
   if (v === null) return "—";
   const pct = v * 100;
   if (Math.abs(pct) < 0.5) return "Neutral";
   const sign = pct > 0 ? "+" : "−";
+  const base = `${sign}${Math.abs(pct).toFixed(digits)}%`;
+  if (!includeDirection) return base;
   const direction = pct > 0 ? "positive" : "negative";
-  return `${sign}${Math.abs(pct).toFixed(digits)}% ${direction}`;
+  return `${base} ${direction}`;
 }
 function formatDelta(d: number | null, unit: string): string {
   if (d === null) return "—";
@@ -231,7 +243,12 @@ function KpiTooltipIcon({
 // metrics (the prior behavior, which painted Risk Frame Rate orange
 // even at 0%).
 function getKpiValueColor(
-  kind: "mention_rate" | "avg_tone" | "risk_frame_rate",
+  kind:
+    | "mention_rate"
+    | "avg_tone"
+    | "risk_frame_rate"
+    | "weakest_topic_recall"
+    | "citation_rate",
   value: number | null,
 ): string {
   if (value === null) return "text-foreground";
@@ -256,6 +273,30 @@ function getKpiValueColor(
       // 0..1 — lower is better
       if (value <= 0.05) return "text-success";
       if (value > 0.2) return "text-warning";
+      return "text-foreground";
+    case "weakest_topic_recall":
+      // 0..1 — narrower color ladder than overall mention rate. Even
+      // at 50% the framing of the tile is "this is the weakest topic"
+      // / "this is where AI underweights the subject" — celebrating
+      // that with a green value undercuts the headline. Only go
+      // warning for genuinely severe gaps (<30%); otherwise stay
+      // neutral. Never go success: the weakest topic isn't a "win,"
+      // and on the only path where weakest = 100% (all topics tied at
+      // ceiling) the templated Bottom Line returns null and this tile
+      // sits next to no actionable gap to surface anyway.
+      if (value < 0.3) return "text-warning";
+      return "text-foreground";
+    case "citation_rate":
+      // 0..1 — higher is better, but the real-world range is much
+      // lower than overall mention rate (canonical URLs typically
+      // appear in 5–25% of cited responses, not 50%+). Softer ladder:
+      // genuinely strong citation share goes green at ≥20%; truly
+      // absent (=0%) stays neutral since it often just means no
+      // canonical_url is configured for the subject, not a real
+      // signal. Warning fires only for low-but-nonzero (<5%, >0%) —
+      // a configured site that AI is essentially ignoring.
+      if (value >= 0.2) return "text-success";
+      if (value > 0 && value < 0.05) return "text-warning";
       return "text-foreground";
   }
 }
@@ -335,27 +376,32 @@ function HeroKpis({
 }: {
   kpis: SubjectOverview["kpis"];
   // Per-topic mention rates from the same snapshot. Used to populate
-  // the Weakest Topic Recall tile (value + topic-name subtitle + low-N
-  // badge). The full per-topic breakdown also renders below the hero
-  // in TopicRecallChart — same source, two different surfacings.
+  // the Weakest Topic Recall tile (value + topic-name subtitle). The
+  // full per-topic breakdown also renders below the hero in
+  // TopicRecallChart — same source, two different surfacings.
   topics: SubjectOverview["topic_coverage"];
 }) {
   const weakest = findWeakestTopic(topics);
 
   const tiles: {
-    label: string;
+    // Plain-English title. Was previously the metric's official name
+    // (e.g., "AI Mention Rate") with a parenthetical definition; now
+    // the definition IS the title, since it's what a non-technical
+    // reader needs to understand the card. The official metric name
+    // is preserved in the tooltip's leading clause for technical
+    // readers / consistency with internal naming.
+    title: string;
     subtitle?: string | null;
     tooltip: string;
     value: string;
     valueColor: string;
-    lowN?: boolean;
     kpi: KpiValue;
     unit: string;
     goodDirection: "up" | "down";
   }[] = [
     {
-      label: "AI Mention Rate",
-      tooltip: "Share of AI answers that mention this subject. Measured only on questions about the subject's topic areas (listed below) — not questions that name the subject directly.",
+      title: "Unprompted mentions",
+      tooltip: "AI Mention Rate — share of AI answers that mention this subject. Measured only on questions about the subject's topic areas (listed below) — not questions that name the subject directly.",
       value: formatPct(kpis.ai_recall.value),
       valueColor: getKpiValueColor("mention_rate", kpis.ai_recall.value),
       kpi: kpis.ai_recall,
@@ -363,21 +409,23 @@ function HeroKpis({
       goodDirection: "up",
     },
     {
-      label: "Average Tone",
-      tooltip: "Average tone of AI answers about this subject, expressed as a percentage above or below neutral. Range −100% (most negative) to +100% (most positive). 0% means perfectly neutral.",
-      value: formatTonePct(kpis.avg_sentiment.value, 0),
+      title: "Positive vs negative",
+      tooltip: "Average Tone — average tone of AI answers about this subject, expressed as a percentage above or below neutral. Range −100% (most negative) to +100% (most positive). 0% means perfectly neutral.",
+      // Drop "positive"/"negative" word — title carries that context
+      // and color/sign convey direction. Frees the value from
+      // wrapping to a second line at this card width.
+      value: formatTonePct(kpis.avg_sentiment.value, 0, false),
       valueColor: getKpiValueColor("avg_tone", kpis.avg_sentiment.value),
       kpi: kpis.avg_sentiment,
       unit: "pts",
       goodDirection: "up",
     },
     {
-      label: "Weakest Topic Recall",
+      title: "Biggest visibility gap",
       subtitle: weakest ? capitalizeFirst(weakest.label) : null,
-      tooltip: "Lowest topic-level mention rate in this snapshot. Highlights the largest gap in how AI associates the subject with its tracked topics. Same data feeds the Topic Recall chart below.",
+      tooltip: "Weakest Topic Recall — lowest topic-level mention rate in this snapshot. Highlights the largest gap in how AI associates the subject with its tracked topics. Same data feeds the Topic Recall chart below.",
       value: formatPct(weakest?.ai_recall ?? null),
-      valueColor: getKpiValueColor("mention_rate", weakest?.ai_recall ?? null),
-      lowN: weakest ? weakest.n_responses < 5 : false,
+      valueColor: getKpiValueColor("weakest_topic_recall", weakest?.ai_recall ?? null),
       // Per-topic deltas aren't tracked in the current API (trajectory
       // carries overall rates, not per-topic ones). Surface "no prior"
       // until a backend change adds prev_ai_recall to topic_coverage.
@@ -385,10 +433,19 @@ function HeroKpis({
       unit: "pts",
       goodDirection: "up",
     },
+    {
+      title: "% citing own site",
+      tooltip: "Citation Rate — share of AI answers that cite the subject's canonical website (e.g., campaign homepage or org domain). Tracks whether AI is sending readers to the subject's owned web property when answering questions about them. Subjects without a canonical URL configured will show 0%.",
+      value: formatPct(kpis.citation_rate.value),
+      valueColor: getKpiValueColor("citation_rate", kpis.citation_rate.value),
+      kpi: kpis.citation_rate,
+      unit: "pts",
+      goodDirection: "up",
+    },
   ];
 
   return (
-    <div className="mt-8 grid grid-cols-3 gap-3">
+    <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
       {tiles.map((t) => {
         const change = getKpiChangeDisplay(
           t.kpi.delta,
@@ -400,57 +457,50 @@ function HeroKpis({
 
         return (
           <div
-            key={t.label}
-            className="rounded-lg border border-border/60 bg-card p-4 min-h-[92px] flex flex-col"
+            key={t.title}
+            className="rounded-lg border border-border/60 bg-card p-5 min-h-[140px] flex flex-col"
           >
-            {/* Top: label + tooltip. Icon sits at the card's
-                top-right, so the tooltip is right-aligned to keep it
-                inside the card (and viewport) rather than overflowing
-                — the prior center alignment clipped on the rightmost
-                tile. */}
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-muted-foreground truncate">
-                {t.label}
+            {/* Top: title + tooltip. The plain-English title (e.g.
+                "Unprompted mentions") replaces the prior label +
+                parenthetical-definition pairing. The official metric
+                name is preserved in the tooltip's leading clause. */}
+            <div className="flex items-start justify-between gap-2">
+              <span className="text-sm font-medium text-foreground truncate">
+                {t.title}
               </span>
               <KpiTooltipIcon text={t.tooltip} align="right" />
             </div>
 
-            {/* Middle: large KPI value. Color is conditional on the
-                value itself via getKpiValueColor — success/warning fire
-                only when the value clearly clears the noise band, so
-                the color treatment reflects current state rather than
-                always painting "risk" metrics orange. */}
-            <div
-              className={`mt-2 text-2xl font-semibold tracking-tight leading-none ${t.valueColor}`}
-            >
-              {t.value}
-              {t.lowN && (
-                <span
-                  className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-[0.06em] text-warning"
-                  title="Low statistical confidence — fewer than 5 prompt responses for this topic."
-                >
-                  low N
-                </span>
-              )}
-            </div>
-
-            {/* Optional subtitle — shows the topic name under the
-                value for the Weakest Topic Recall tile. truncate keeps
-                long topic labels from forcing the card taller; full
-                label is in the topic recall chart below. */}
-            {t.subtitle && (
-              <div className="mt-1 text-xs text-muted-foreground truncate">
-                {t.subtitle}
+            {/* Value + change + subtitle stack — each on its own line.
+                Stacking (vs the prior horizontal value+change layout)
+                keeps the value from wrapping at narrow card widths and
+                gives the change indicator its own room. mt-auto floats
+                this stack to the bottom of the card so the value
+                baseline aligns across all four tiles. */}
+            <div className="mt-auto pt-4 space-y-1.5">
+              <div
+                className={`text-2xl font-semibold tracking-tight leading-none ${t.valueColor}`}
+              >
+                {t.value}
               </div>
-            )}
-
-            {/* Bottom: change indicator with prose wording. Pushed to
-                bottom with mt-auto so cards with varying value-line
-                heights still align their change rows. leading-snug
-                accommodates 2-line wrap on narrower viewports. */}
-            <div className={`mt-auto pt-3 inline-flex items-start gap-1.5 text-xs leading-snug ${change.color}`}>
-              <ChangeIcon className="h-3 w-3 shrink-0 mt-0.5" />
-              <span>{change.text}</span>
+              <div
+                className={`flex items-center gap-1 text-xs leading-none ${change.color}`}
+              >
+                <ChangeIcon className="h-3 w-3 shrink-0" />
+                <span>{change.text}</span>
+              </div>
+              {/* Subtitle slot — reserved with min-h even when empty
+                  so the bottom edge of every card sits at the same
+                  vertical position regardless of whether this tile
+                  carries a subtitle. Only the Biggest Visibility Gap
+                  tile populates this today (with the weakest topic
+                  name); the others render an empty placeholder. */}
+              <div
+                className="text-[11px] text-muted-foreground truncate min-h-[14px]"
+                title={t.subtitle ?? undefined}
+              >
+                {t.subtitle ?? ""}
+              </div>
             </div>
           </div>
         );
@@ -477,7 +527,7 @@ function getKpiChangeDisplay(
   // No prior snapshot at all
   if (delta === null) {
     return {
-      text: "No prior snapshot available",
+      text: "no prior data",
       color: "text-muted-foreground",
       icon: Minus,
     };
@@ -493,18 +543,18 @@ function getKpiChangeDisplay(
   if (effectiveTrend === "flat") {
     return {
       text:
-        delta === 0 || trend === "flat"
-          ? "No change from previous snapshot"
-          : "Effectively unchanged from previous snapshot",
+        delta === 0 || trend === "flat" ? "no change" : "≈ unchanged",
       color: "text-muted-foreground",
       icon: Minus,
     };
   }
 
-  // Real movement — format as prose, color by good/bad direction.
-  const direction = effectiveTrend === "up" ? "Up" : "Down";
+  // Real movement — compact format ("10 pts vs prior") rather than
+  // prose ("Down 10 pts from previous snapshot") so the indicator
+  // fits on one line beside the value and doesn't crowd the card.
+  // Direction is conveyed by the icon + color, not the words.
   const formatted = abs % 1 === 0 ? abs.toFixed(0) : abs.toFixed(1);
-  const text = `${direction} ${formatted} ${unit} from previous snapshot`;
+  const text = `${formatted} ${unit} vs prior`;
   const color =
     effectiveTrend === goodDirection ? "text-success" : "text-warning";
   const icon = effectiveTrend === "up" ? TrendingUp : TrendingDown;
@@ -761,10 +811,9 @@ function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platfo
 
 // Per-topic mention rate as a horizontal bar list. Sorts strongest →
 // weakest; the lowest bar gets the warning accent so the gap reads as
-// the actionable signal. Topics with fewer than 5 prompt responses
-// carry a "low N" badge to flag low statistical confidence. Topics
-// whose ai_recall is null (no scored responses yet) drop out entirely
-// rather than render as 0% — would be misleading.
+// the actionable signal. Topics whose ai_recall is null (no scored
+// responses yet) drop out entirely rather than render as 0% — would
+// be misleading.
 function TopicRecallChart({
   topics,
 }: {
@@ -1447,59 +1496,51 @@ export default async function SubjectOverviewPage({
                     voter-facing and public-affairs prompts.
                   </p>
 
-                  {/* Executive summary — Bottom Line (diagnostic) +
-                      Recommended Focus (action) as a single visually
-                      linked block. Both share the outer container,
-                      separated by a hairline divider. Side-bar
-                      accents give stylistic parallelism while the
-                      color difference (primary blue vs muted) signals
-                      "finding vs action." */}
-                  {(effectiveBottomLine || data.recommended_focus) && (
+                  {/* Bottom Line — diagnostic finding. Sits in the
+                      same prominent slot as before, with the primary-
+                      tinted background and left-bar accent. */}
+                  {effectiveBottomLine && (
                     <div className="mt-6 rounded-md overflow-hidden border border-border/40">
-                      {effectiveBottomLine && (
-                        <div
-                          className="relative pl-5 pr-4 py-4"
-                          style={{
-                            background:
-                              "color-mix(in oklab, var(--primary) 6%, transparent)",
-                          }}
-                        >
-                          <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
-                            Bottom line
-                          </div>
-                          <p className="text-[17px] leading-relaxed font-semibold tracking-[-0.005em] text-foreground">
-                            {effectiveBottomLine}
-                          </p>
+                      <div
+                        className="relative pl-5 pr-4 py-4"
+                        style={{
+                          background:
+                            "color-mix(in oklab, var(--primary) 6%, transparent)",
+                        }}
+                      >
+                        <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
+                          Bottom line
                         </div>
-                      )}
-                      {effectiveBottomLine && data.recommended_focus && (
-                        <div className="border-t border-border/40" />
-                      )}
-                      {data.recommended_focus && (
-                        <div className="relative pl-5 pr-4 py-3.5 bg-card">
-                          <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-foreground/40" />
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-1.5">
-                            Recommended focus
-                          </div>
-                          <p className="text-[14.5px] leading-relaxed text-foreground/90">
-                            {data.recommended_focus}
-                          </p>
-                        </div>
-                      )}
+                        <p className="text-[17px] leading-relaxed font-semibold tracking-[-0.005em] text-foreground">
+                          {effectiveBottomLine}
+                        </p>
+                      </div>
                     </div>
                   )}
 
-                  {/* Fallback when neither piece could be synthesized */}
-                  {!effectiveBottomLine && !data.recommended_focus && (
+                  {/* Recommended Actions — LLM-generated concrete moves.
+                      Primary recommendation in a prominent block (same
+                      visual weight as the prior Recommended Focus slot,
+                      now action-oriented), followed by two secondary
+                      recommendations in a compact 2-column grid below.
+                      Header has a Regenerate button to bust the cache
+                      and re-call the LLM. */}
+                  <RecommendedActionsBlock
+                    actions={data.recommended_actions}
+                    subjectId={subjectId}
+                  />
+
+                  {/* Fallback when no Bottom Line could be synthesized */}
+                  {!effectiveBottomLine && (
                     <div className="mt-6 rounded-md border border-dashed border-border/70 bg-muted/30 px-5 py-4">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/45">
                         Executive summary
                       </div>
                       <p className="mt-1.5 text-[13px] text-foreground/55 leading-relaxed max-w-xl">
-                        Not enough signal in this snapshot to synthesize an
-                        executive briefing yet. Take another snapshot or wait
-                        for more data to accumulate.
+                        Not enough signal in this snapshot to synthesize a
+                        bottom line yet. Take another snapshot or wait for
+                        more data to accumulate.
                       </p>
                     </div>
                   )}
@@ -1513,12 +1554,13 @@ export default async function SubjectOverviewPage({
                   category={data.category}
                 />
               </div>
-              {/* KPI strip: AI Mention Rate · Average Tone · Weakest
-                  Topic Recall. Risk Frame / Unprompted Criticism Rate
-                  was promoted out of the hero in favor of the gap
-                  metric — it lives in TopicRecallChart's data feed.
-                  Passing topic_coverage so the third tile can show the
-                  weakest topic + low-N badge. */}
+              {/* KPI strip: Unprompted mentions · Positive vs negative ·
+                  Biggest visibility gap · % citing own site. Risk
+                  Frame / Unprompted Criticism Rate was promoted out
+                  of the hero in favor of the gap metric — it lives in
+                  TopicRecallChart's data feed. Passing topic_coverage
+                  so the Biggest Visibility Gap tile can show the
+                  weakest topic name as a subtitle. */}
               <HeroKpis kpis={data.kpis} topics={data.topic_coverage} />
             </Card>
           </section>

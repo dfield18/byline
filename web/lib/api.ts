@@ -60,6 +60,26 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+// POST that doesn't expect a JSON response body (e.g., 204 No Content).
+async function apiPostNoContent(path: string, body: unknown = {}): Promise<void> {
+  const token = await bearerToken();
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `byline API POST ${path} → HTTP ${res.status}: ${text.slice(0, 300)}`
+    );
+  }
+}
+
 // ─── types ───────────────────────────────────────────────────────────
 
 export type Subject = {
@@ -165,6 +185,12 @@ export const triggerRefresh = (subjectId: number) =>
 
 export const getJob = (jobId: number) => apiGet<Job>(`/api/jobs/${jobId}`);
 
+// Drops the cached LLM recommendations for the subject's latest
+// snapshot. The next page render will re-call the LLM. Caller is
+// expected to revalidate the subject page after this resolves.
+export const regenerateRecommendedActions = (subjectId: number) =>
+  apiPostNoContent(`/api/subjects/${subjectId}/recommended-actions/regenerate`);
+
 // Dashboard overview (Phase 1 wiring)
 
 export type KpiValue = {
@@ -204,6 +230,7 @@ export type SubjectOverview = {
     label: string;
     source_field: string;
     n_responses: number;
+    n_mentioned: number;
     n_unique_slots: number;
     share_of_set: number;
     ai_recall: number | null;
@@ -217,6 +244,11 @@ export type SubjectOverview = {
   }[];
   bottom_line: string | null;
   recommended_focus: string | null;
+  recommended_actions: {
+    primary: { label: string; action: string };
+    secondary: { label: string; action: string }[];
+    warning?: string | null;
+  };
   narrative_clusters: {
     name: string;
     description: string;

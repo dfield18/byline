@@ -1,10 +1,11 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-15 (after
-> Hero refactor, topic-gap promotion to headline, Citation Rate
-> trajectory swap, Wikipedia source merging, and Risk Frame Rate
-> credibility fix)**. Read this first if you're a fresh Claude Code
-> session picking up work. Update when state shifts meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-15 (Recommended
+> Actions LLM refactor, role-grounding fix, KPI-card layout iteration,
+> Citation Rate KPI tile, plus the earlier Hero refactor / topic-gap
+> headline / Wikipedia source merging / Risk Frame Rate credibility
+> fix)**. Read this first if you're a fresh Claude Code session picking
+> up work. Update when state shifts meaningfully.
 
 ---
 
@@ -614,6 +615,223 @@ naming, layout consolidation, and a host of smaller UI polish.
   recent refreshes hasn't been recomputed, leaving the polish cache
   empty). Worth investigating whether the polish step is being
   skipped or whether the server text needs a re-render trigger.
+
+**Recommended Actions LLM refactor + KPI-card layout pass — shipped this session (2026-05-15, continued):**
+
+*Recommended Focus → Recommended Actions (full LLM rewrite):*
+- The old `Recommended Focus` rule-based output was abstract consultant
+  speak ("Connect post-presidency political influence messaging to
+  Barack Obama's established identity..."). Replaced with a per-snapshot
+  LLM call that produces 1 primary + 2 secondary concrete, executable
+  recommendations.
+- New backend in `dashboard/lib/queries.py`:
+  - `_compute_recommended_actions()` — orchestrator. Builds payload,
+    checks cache, calls Gemini 2.5 Pro with `thinking_budget=2048`,
+    validates grounding, retries once with stricter follow-up on
+    failure, falls back to subject-agnostic copy if still failing.
+  - `_build_recommended_actions_payload()` — assembles structured
+    input from existing snapshot fields. **No new schema** beyond
+    adding `n_mentioned` to `topic_coverage` rows so the payload can
+    show exact "2/4"-style raw fractions on the weakest topic.
+  - `_validate_actions_grounding()` — for each of the 3 action
+    sentences, substring-matches against valid entities (source
+    domains, topic names, dominant narrative cluster name). Catches
+    hallucinated sources / generic advice that ducked the
+    named-entity requirement.
+  - `_shape_actions()` — coerces parsed JSON to the expected shape
+    (1 primary + exactly 2 secondary, all four label+action strings
+    non-empty); rejects malformed responses.
+  - `_recommended_actions_cache_read/write()` — DELETE-then-INSERT
+    pattern in `refresh_analyses` keyed on
+    `(refresh_run_id, payload-shape)`. Mismatch on payload contents
+    auto-busts cache so a new snapshot or schema change forces
+    regeneration.
+  - `invalidate_recommended_actions_cache()` — public API used by
+    the Regenerate button.
+  - `_FALLBACK_RECOMMENDED_ACTIONS` — subject-agnostic default with a
+    `warning` field surfaced quietly in the UI.
+- Cache type: `recommended_actions_v2` (was `_v1` before the
+  role-grounding fix below). Bump to invalidate all cached rows.
+
+*Role-grounding fix (Rubio "edit Wikipedia about his legislative work"
+hallucination):*
+- Reported issue: a recommendation for Marco Rubio said "Edit the
+  Marco Rubio page on wikipedia.org to include his recent legislative
+  work and statements on domestic 'Current events'" — Rubio is no
+  longer a senator and has been Secretary of State for >1 year. The
+  LLM defaulted to "US Senator" prior because we sent zero current-
+  role context.
+- Three coordinated fixes (A + B + C):
+  - **A — pass subject context into the payload**: `current_role`,
+    `audience`, and a 500-char-truncated `recent_news` from
+    `subjects.setup_inputs`. For Rubio, this means the LLM sees
+    `current_role: "US Secretary of State"` and a paragraph about
+    his immigration declaration / House testimony / drug-trafficker
+    actions, instead of inferring a stale role from the metric data
+    alone.
+  - **B — filter "Current events" from topics**: the
+    `_RECENT_NEWS_LABEL` bucket (sourced from `recent_news` prompts)
+    is now excluded from the topics passed to the LLM. It's an
+    internal mechanism for testing visibility on whatever's in the
+    news that week, not a substantive topic area to recommend on.
+    The Topic Recall chart in the UI still surfaces it.
+  - **C — prompt rules**: new "CRITICAL — grounding in subject's
+    actual context" section in the system prompt instructing the
+    model to treat `current_role` and `recent_news` as
+    authoritative, never rely on training-data prior, reject
+    operational/methodological topic names as recommendation
+    targets.
+- **Important caveat**: this fix is data-dependent. If a subject's
+  `setup_inputs.role` falls out of date and nobody updates the row,
+  the LLM will faithfully follow the stale data. The next layer
+  (deferred) is either a recent-news-driven role-staleness check
+  or enabling Gemini's grounded-search tool.
+
+*New FastAPI endpoint + Regenerate button:*
+- `POST /api/subjects/{id}/recommended-actions/regenerate` in
+  `app/api/routes/subjects.py` — org-scoped, looks up the latest
+  `refresh_run_id` for the subject, calls
+  `invalidate_recommended_actions_cache()`, returns 204.
+- New `apiPostNoContent()` helper in `web/lib/api.ts` for 204
+  responses (the existing `apiPost` always tried to parse a JSON
+  body).
+- `regenerateRecommendedActionsAction()` server action in
+  `web/app/subjects/[id]/actions.ts` — calls the endpoint, then
+  `revalidatePath()`s the subject page, returns discriminated
+  `{ok}` result so the client can surface errors inline.
+- New client component `web/app/subjects/[id]/recommended-actions.tsx`
+  (`RecommendedActionsBlock`) — header with "Regenerate" link
+  (spinning icon during pending), optional warning banner when the
+  fallback fired, primary block in the same prominent slot as the
+  old Recommended Focus, 2-column secondary grid below.
+
+*KPI card layout — multi-iteration polish:*
+- **Added Citation Rate as 4th KPI tile** (alongside AI Mention Rate,
+  Average Tone, Weakest Topic Recall). Grid bumped from
+  `grid-cols-3` to `grid-cols-2 md:grid-cols-4`. New `citation_rate`
+  kind in `getKpiValueColor` with a softer ladder than mention_rate
+  (≥20% green, 0%<v<5% warning, 0% neutral) — citation-rate values
+  are typically lower than mention-rate values in absolute terms.
+- **Tile structure refactor** — went through three iterations based
+  on user feedback:
+  - First: added parenthetical definition inline next to each label
+    (`AI Mention Rate (unprompted mentions)`).
+  - Second: moved definition to its own line below the label
+    (truncation issue with the inline parens).
+  - Final: **dropped the official metric name from the visible
+    label entirely**; the plain-English definition IS the title now
+    (e.g., title is "Unprompted mentions"; "AI Mention Rate" lives
+    in the tooltip's leading clause for technical readers).
+- **Card spacing consistency fix**: values were sitting at different
+  vertical positions across cards because the Weakest Topic Recall
+  tile has a subtitle (the topic name) and the others don't. Fixed
+  by:
+  - Stacking value + change indicator vertically (each on own
+    line) so the value never wraps even with a long change string.
+  - Reserving subtitle slot in every tile (`min-h-[14px]` empty div
+    when no subtitle present) so all four cards have identical
+    bottom-stack height.
+  - Compacting change-indicator text: "Down 10 pts from previous
+    snapshot" → "↓ 10 pts vs prior". Direction conveyed by icon +
+    color, not the words.
+  - Min card height: 92 → 140px to accommodate the new vertical
+    stack.
+- **`formatTonePct` gained an `includeDirection=true` default**
+  parameter. Hero KPI tile passes `false` (just "−13%" — title
+  "Positive vs negative" + color + sign convey direction, descriptor
+  word would force wrap). Trajectory chart keeps the descriptor
+  ("−13% negative") since it has more room.
+- **Removed `LOW N` badge entirely** — the 3-character-prompt-count
+  warning chip was on the Weakest Topic Recall hero tile (and
+  briefly on Topic Recall chart bars). Per user direction: "low n
+  should not appear anywhere in the dashboard." Removed the field
+  from the tile config, the badge JSX, and stale comments. The
+  underlying `n_responses` data is preserved in tile and chart row
+  hover tooltips for users who want it.
+
+*Weakest Topic Recall color ladder — never goes green:*
+- Added `weakest_topic_recall` kind to `getKpiValueColor`. Previously
+  used the same `mention_rate` ladder which painted 50% green; the
+  user flagged this as undercutting the "this is the gap to address"
+  framing of the tile.
+- New ladder: <30% warning, otherwise foreground. Never success.
+  The whole tile is "this is your worst topic"; celebrating the
+  worst with green undermines the headline.
+
+*Bottom Line refinements:*
+- "recall" → "mention rate" in the templated phrase ("...50% mention
+  rate vs 100% on Current events"). Matches the language used
+  everywhere else on the page.
+- **Comparator switched** from "vs strongest single topic" to
+  "vs mean of N other tracked topics". Strongest-single produced
+  thematically off juxtapositions (Obama: "post-presidency political
+  influence vs Current events"). Mean-of-others reads as a sober
+  gap measurement and avoids picking a curated comparator.
+  - 2-topic case still compares directly to the single other topic
+    by name.
+  - Ties between weakest and all others → return null → server
+    bottom_line fallback.
+- `findStrongestTopic` is now an unused helper (orphaned by the
+  comparator switch). Left in place; safe to delete.
+
+*Schema additions (frontend types):*
+- `topic_coverage[i].n_mentioned` (number) — for "2/4" raw
+  fractions in the LLM payload.
+- `recommended_actions: { primary, secondary, warning? }` on
+  `SubjectOverview` — fully typed, replaces the old
+  `recommended_focus` rendering path.
+- `trajectory.citation_rate: (number | null)[]` — for the third
+  Visibility Trends sparkline.
+
+*Cleanup notes:*
+- `formatTopicScope` still orphaned (since the AI Mention Rate
+  subtitle was dropped earlier in the session).
+- `findStrongestTopic` orphaned (since comparator switched).
+- Both are short, type-safe pure functions; safe to delete in a
+  cleanup pass when scope allows.
+
+*Cost / latency notes for the new LLM call:*
+- ~$0.05/snapshot at Gemini 2.5 Pro pricing with 2K thinking tokens.
+- One-time cost per snapshot; cached afterwards.
+- Latency ~5–15s on cold call (page renders synchronously while
+  waiting). Acceptable today since each snapshot only triggers it
+  once. If snapshots scale up, consider:
+  - Moving the call into the worker (precompute when refresh
+    completes, not at page render).
+  - Streaming the response into the page if Gemini SDK supports it
+    well enough.
+
+*Validation behavior:*
+- First LLM call, then validate. If shape OK + every action references
+  a valid entity (substring match) → cache and return.
+- If validation fails, retry once with stricter follow-up: "Your
+  previous response did not reference any specific entity from the
+  input data. Every action MUST mention a specific source domain,
+  topic name, or narrative cluster name from the payload above, by
+  name. Try again."
+- If still failing → return `_FALLBACK_RECOMMENDED_ACTIONS` with a
+  `warning` field. UI shows a small warning banner above the
+  recommendations.
+
+*Follow-ups created by this session's work:*
+- **Per-topic delta backend** (still pending from earlier session):
+  Weakest Topic Recall tile shows "no prior data" until
+  `prev_ai_recall` is added to `topic_coverage` rows.
+- **Role-staleness detection**: when `setup_inputs.role` is older
+  than `recent_news_fetched_at` by some threshold, surface a
+  "review subject metadata" prompt so the LLM doesn't faithfully
+  follow stale role context.
+- **Gemini grounded search** (Option E from the role-grounding
+  menu): would let the LLM verify real-world facts at call time.
+  ~2× cost, +2–5s latency. Deferred unless A+B+C produces
+  visible factual errors.
+- **Cache warming via worker**: precompute recommendations when a
+  refresh job completes so first page load doesn't pay the LLM
+  latency cost. Easy follow-up.
+- **Recommended Action regeneration cooldown**: the Regenerate
+  button currently has no rate limit. If a user spam-clicks it, it
+  will spam the LLM. Add a per-subject cooldown similar to the
+  refresh button.
 
 **Known issues / followups from the 2026-05-12 QA pass (none blocking):**
 
