@@ -59,6 +59,7 @@ from app.cross_analyzer import (  # noqa: E402
 from app.db import get_database_url  # noqa: E402
 from app.query_engine import run_refresh  # noqa: E402
 from app.refresh import _ensure_recent_news_fresh  # noqa: E402
+from dashboard.lib.queries import get_subject_overview  # noqa: E402
 
 import psycopg  # noqa: E402
 from psycopg.types.json import Json  # noqa: E402
@@ -232,6 +233,45 @@ async def _execute_refresh_job(
         refresh_run_id,
         cross_analysis_run_id,
     )
+
+    # 5. Precompute the dashboard's Recommended Actions (LLM-driven,
+    # 5-15s Gemini 2.5 Pro call) so the first dashboard load for this
+    # subject is a pure cache hit instead of paying the full LLM
+    # latency in the user-facing request path. Triggered as a side
+    # effect of `get_subject_overview`, which calls
+    # `_compute_recommended_actions` and writes the result to
+    # `refresh_analyses` via the upsert + advisory-lock pattern.
+    #
+    # Failure handling: any exception here is logged at WARNING and
+    # swallowed. The dashboard render path falls back to firing the
+    # LLM call on demand the same way it did before this precompute
+    # existed — worst case is the user waits the full 5-15s, same
+    # as the pre-L11 behavior.
+    #
+    # Concurrency: if a user opens the dashboard for this subject
+    # concurrently with the worker's precompute, the advisory lock
+    # serializes them. Only one LLM call fires regardless of who
+    # gets to it first.
+    #
+    # `get_subject_overview(subject_id)` (no org_id) runs in
+    # operator/unscoped mode — appropriate for the worker, which
+    # has no Clerk user context.
+    try:
+        logger.info(
+            "[refresh %s] precomputing recommended actions",
+            refresh_run_id,
+        )
+        await asyncio.to_thread(get_subject_overview, subject_id)
+        logger.info(
+            "[refresh %s] recommended actions precomputed",
+            refresh_run_id,
+        )
+    except Exception as e:
+        logger.warning(
+            "[refresh %s] recommended actions precompute failed: %s",
+            refresh_run_id,
+            e,
+        )
 
     return {
         "refresh_run_id": refresh_run_id,
