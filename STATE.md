@@ -1,14 +1,16 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-16 (full
-> project QA pass + remediation — 7 commits closing runtime safety
-> gaps, concurrency races, validation false positives, and assorted
-> visual correctness issues. Plus the earlier 2026-05-15 Recommended
-> Actions LLM refactor, role-grounding fix, KPI-card layout iteration,
-> Citation Rate KPI tile, Hero refactor / topic-gap headline /
-> Wikipedia source merging / Risk Frame Rate credibility fix)**.
-> Read this first if you're a fresh Claude Code session picking up
-> work. Update when state shifts meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-16 (two full
+> QA pass cycles + remediation in one day — 13 commits total closing
+> runtime safety gaps, concurrency races, validation false positives,
+> visual correctness issues, then a secondary audit closing four more
+> real bugs the first pass missed and porting the LLM precompute off
+> the request path. Plus the earlier 2026-05-15 Recommended Actions
+> LLM refactor, role-grounding fix, KPI-card layout iteration, Citation
+> Rate KPI tile, Hero refactor / topic-gap headline / Wikipedia source
+> merging / Risk Frame Rate credibility fix)**. Read this first if
+> you're a fresh Claude Code session picking up work. Update when state
+> shifts meaningfully.
 
 ---
 
@@ -1068,18 +1070,231 @@ Regenerate flow (separate endpoint):
   the locked transaction). Left in place as documentation of the cache
   row shape; safe to delete in a future cleanup pass.
 
-*Follow-ups identified but not addressed (low priority)*
+*Follow-ups identified but not addressed (low priority — at time of
+first pass; cache warming was addressed in the secondary pass below)*
 
-- **Cache warming via worker** — precompute actions when a refresh
-  completes so the first page render doesn't pay the 5-15s LLM
-  latency cost. Decouples generation from render entirely.
+- ~~**Cache warming via worker**~~ — DONE in commit `986dd32` (L11
+  from the secondary QA pass below).
 - **Source palette extension** — could extend `SOURCE_TYPE_COLORS`
   beyond 7 entries to support 8+ distinct categories without the
   "Other" collapse. Current "Other" bucket is more honest about
   chart legibility but loses some detail.
-- **STATE.md long-tail** — this file is now ~2000 lines. Worth
+- **STATE.md long-tail** — this file is now ~2100 lines. Worth
   rolling old session entries into a separate `STATE_archive.md`
   once it's clear no fresh session will need them.
+
+---
+
+**Secondary QA pass + remediation — shipped this session (2026-05-16, continued):**
+
+After the first full QA pass landed, ran a second audit specifically
+focused on the just-shipped commits. The intent: catch any issues
+the first pass missed and verify the architecture state of the
+Recommended Actions pipeline post-refactor. Audit performed via a
+parallel subagent reviewing all 8 prior commits + direct verification
+against the live dev DB. Surfaced 2 high + 4 medium + 3 low — all
+closed across 5 commits.
+
+*Commit chain (oldest → newest):*
+
+9. **`982c041`** — QA commit A: H1 timeouts, M4 Regenerate lock,
+   M5 isFinite, M6 sparkline path break (runtime safety + correctness)
+10. **`ac9ff26`** — QA commit B: clock_timestamp, %% escape docs,
+    schema doc patch (defensive cleanup)
+11. **`ada0449`** — L9: grounding regex tolerates hyphen/space normalization
+12. **`5aac619`** — L10: self-cleaning orphan version rows
+13. **`986dd32`** — L11: precompute Recommended Actions in worker
+
+*H1 — Stuck connection + held lock if Gemini hangs (commit 982c041)*
+- `_compute_recommended_actions` held a transaction + advisory lock
+  across the 5-15s Gemini call with NO timeouts anywhere in the
+  stack (`app/db.py` has no `connect_timeout`/`statement_timeout`,
+  Gemini SDK call had no `HttpOptions` timeout). A hung call would
+  have wedged the connection AND the lock indefinitely; the except
+  block handles thrown exceptions but a hang is not an exception.
+  Other renders for the same refresh would have wedged behind the
+  lock until OS reclaimed the socket (minutes-to-hours).
+- Fix: `SET LOCAL lock_timeout = '30s'` and `statement_timeout =
+  '60s'` inside the locked transaction. `HttpOptions(timeout=45_000)`
+  (45s) passed to the Gemini client. Verified live: `SET LOCAL
+  lock_timeout = '2s'` + peer holding lock raised
+  `psycopg.errors.LockNotAvailable` after exactly 2.08s. Existing
+  `except Exception` catches it and falls through to naked LLM call.
+
+*M4 — Regenerate during in-flight render was a silent no-op (commit 982c041)*
+- Race trace: Render A acquires lock at T=0, starts 14s Gemini call.
+  User clicks Regenerate at T=3s. Endpoint runs DELETE — but DELETE
+  doesn't take the advisory lock, so it doesn't block on A. Row
+  doesn't exist (A hasn't written yet), DELETE no-ops, returns 204.
+  A finishes at T=14s, INSERTs the fresh row. User reloads at T=15s,
+  sees A's "fresh" recommendations — generated BEFORE the Regenerate
+  click. Defeated Regenerate intent entirely.
+- Fix: Regenerate endpoint (`app/api/routes/subjects.py`) now takes
+  `pg_advisory_xact_lock(1, refresh_run_id)` before the cooldown
+  check + DELETE. If a render is mid-LLM call, the endpoint waits
+  for the render to commit, then DELETEs the freshly-written row.
+  Same SET LOCAL timeouts applied. Cooldown violation handling moved
+  outside the with-block so the transaction commits cleanly
+  (releasing the lock) before the HTTPException propagates.
+
+*M5 — NaN ai_recall propagation shipped "NaN%" to UI (commit 982c041)*
+- `withRecall` filters across `findWeakestTopic`,
+  `findStrongestTopic`, `buildGapBottomLine`, and `TopicRecallChart`
+  checked `!== null` only. NaN / Infinity values passed through;
+  `Math.abs(NaN - X) < epsilon` is always false → tie-detection
+  short-circuit doesn't fire → `Math.round(NaN * 100) = NaN` →
+  output: `"AI underweights Obama on policy — NaN% mention rate vs
+  42% on …"` ships to the UI.
+- Fix: shared `_hasFiniteRecall` predicate (`!== null && Number.isFinite`)
+  applied to all 4 filter sites.
+
+*M6 — MiniSpark sparkline drew through null gaps (commit 982c041)*
+- Mixed null + non-null sparkline values produced a path that
+  connected surrounding non-null points DIRECTLY — visually drawing
+  a value where there isn't one. Dots correctly skipped nulls, but
+  the line passed through the missing position as if interpolated.
+- Fix: path builder emits `M` (move) instead of `L` (line-to) after
+  a null, breaking the path at gaps. Reads as discontinuity instead
+  of phantom interpolation.
+
+*L8 — `NOW()` inside long transactions ≠ wall-clock write time (commit ac9ff26)*
+- `created_at = NOW()` on the upsert ran inside a transaction
+  holding the advisory lock across the 5-15s Gemini call. `NOW()`
+  returns transaction-start time, not wall-clock, so the timestamp
+  landed 5-15s in the past relative to the actual write. The
+  Regenerate cooldown's age comparison (`NOW() - created_at`, also
+  using `NOW()` in its own short transaction) saw a SHORTER age
+  than the true wall-clock time, effectively shrinking the 30s
+  cooldown.
+- Fix: both sides switched to `clock_timestamp()`. Same pitfall
+  already bit the worker's job timing (per the Phase B entry above);
+  applied the same treatment here.
+- Verified live: `NOW()` didn't advance over a 3s sleep inside one
+  transaction; `clock_timestamp()` advanced by 3.01s as expected.
+
+*M7 — Defensive comment on `%%` escape in ON CONFLICT WHERE (commit ac9ff26)*
+- Documented why the upsert's `WHERE analysis_type LIKE
+  'recommended_actions_%%'` predicate uses `%%` (psycopg's escape
+  for a literal `%` in parameterized queries). Notes the alternative
+  `ON CONFLICT ON CONSTRAINT idx_recommended_actions_unique`
+  syntax that avoids the escape entirely if a future writer
+  bypasses psycopg.
+
+*L12 — Schema doc patch (commit ac9ff26)*
+- `docs/database-schema.md` updated to include migration 011's
+  partial unique index, three new analysis_type vocabulary entries
+  (`narrative_clusters`, `executive_polish_v5`, `recommended_actions_v4`),
+  and notes on the versioned-cache pattern + upsert/lock pattern.
+
+*L9 — Grounding regex tolerates LLM hyphen/space normalization (commit ada0449)*
+- The word-boundary grounding match (from `e3f846c`) was strict
+  about exact entity form. LLMs commonly normalize hyphens to
+  spaces (or vice versa): payload `"post-presidency political
+  influence"` + action `"post presidency political influence
+  reform"` failed grounding, triggered an unnecessary stricter
+  retry (~$0.05 extra per affected snapshot).
+- Fix: new `_grounding_pattern_for(entity)` builds the word-boundary
+  pattern with hyphens and whitespace inside the entity expanded
+  to `[\s\-]+`. Entities WITHOUT a hyphen/space stay strict —
+  `trade` still rejects `trade-off`, `ap.org` still rejects `map`,
+  `Policy` still rejects `policymaker`. Only relaxes within entity
+  boundaries, not the boundaries themselves.
+- Verified with 7 test cases: 2 new positives that previously
+  failed now correctly accepted; 2 prior positives still accepted;
+  3 prior false positives still correctly rejected.
+
+*L10 — Self-cleaning orphan version rows (commit 5aac619)*
+- The partial unique index on `(refresh_run_id, analysis_type)
+  WHERE analysis_type LIKE 'recommended_actions_%'` allowed
+  different version strings to co-exist legally (a v3 row and v4
+  row for the same refresh both pass). Storage waste accumulated
+  over version bumps until L10. Dev DB had 4 orphan rows
+  (v1 × 1, v2 × 1, v3 × 2, v4 × 1) pre-fix.
+- Fix: bounded DELETE inside the locked upsert transaction
+  removes prior-version rows for THIS refresh before the upsert
+  fires. Self-cleaning over the next render cycle for any subject
+  whose page is opened after a version bump.
+- Live one-time cleanup: ran `DELETE FROM refresh_analyses WHERE
+  analysis_type LIKE 'recommended_actions_%' AND analysis_type !=
+  'recommended_actions_v4'`. Cleared 4 orphan rows. Only the live
+  v4 row remains.
+- Caveat: auto-cleanup only fires for refreshes that get
+  re-rendered. A refresh whose dashboard page is never opened
+  again keeps its orphan forever. Acceptable: rows are harmless
+  reads (never returned by the orchestrator's current-version
+  query) and storage cost is ~400KB/yr at projected scale.
+
+*L11 — Precompute Recommended Actions in worker (commit 986dd32)*
+- The dashboard's LLM call (Gemini 2.5 Pro, ~5-15s) ran
+  synchronously inside the page render request path. First page
+  load for a freshly-refreshed subject paid the full latency in
+  front of the user, and the connection-hold-during-LLM pattern
+  was the underlying concern behind the L11 audit item.
+- Fix: `app/worker.py` now calls `get_subject_overview(subject_id)`
+  as a final step after `run_cross_analysis` completes. That
+  triggers `_compute_recommended_actions` as a side effect,
+  fires the Gemini call, writes the cache row via the upsert +
+  advisory-lock pattern. First dashboard load drops from 5-15s
+  to ~100ms.
+- Failure handling: wrapped in try/except, logs at WARNING and
+  swallows. Dashboard render path still has its on-demand LLM
+  call as fallback — same behavior as pre-L11 (waits the full
+  5-15s) if precompute fails. No regression possible.
+- Concurrency: the advisory lock serializes the worker's
+  precompute against any concurrent user-driven render. One
+  paid LLM call per refresh either way.
+- Connection-hold-during-LLM no longer happens on the user-facing
+  request path; it happens in the worker's connection scope
+  instead, which is the right place for it (one worker process
+  per box, predictable load) vs. the request path (where
+  concurrent users could exhaust the pool).
+- **Operational note**: any `app/worker.py` change requires a
+  worker process restart since Python doesn't auto-reload module
+  imports for long-running processes. Worker restarted as part
+  of this commit (PID 46765 → 6912).
+
+*The Recommended Actions pipeline now has FOUR defensive layers
+(was three after the first QA pass):*
+
+1. **Worker precompute** (L11, new in this pass) — cache is
+   warm before the user opens the dashboard. First page render
+   is a pure cache hit.
+2. **Application advisory lock** (MED 9, first pass) —
+   `pg_advisory_xact_lock(1, refresh_run_id)` serializes concurrent
+   writers; only one paid LLM call per snapshot regardless of how
+   many tabs/users hit the page simultaneously. Now with timeout
+   bounds from H1 (30s lock_timeout, 60s statement_timeout, 45s
+   Gemini timeout) so a hung call can't wedge anything indefinitely.
+2. **Validation** (MED 12 first pass + L9 second pass) —
+   word-boundary regex grounding catches LLM hallucinations;
+   hyphen/space tolerance handles common LLM normalizations
+   without triggering unnecessary retries.
+3. **Schema** (Piece 1, first pass) — partial unique index makes
+   duplicate `(refresh_run_id, recommended_actions_*)` rows
+   physically impossible. Upsert path writes idempotently.
+
+*Bugs surfaced by the audit that turned out to be REAL but
+hadn't fired in production yet (good catches):*
+
+- H1: the connection/lock wedge under a Gemini hang would have
+  cascaded badly if it ever fired. Worker restart was already
+  noted as a required step after analyzer changes, but a stuck
+  render-time LLM call would have wedged user pages indefinitely
+  until manual intervention.
+- M4: the Regenerate-during-in-flight race would have silently
+  produced "you got the result you didn't want" outcomes in
+  customer-facing usage. Hard to debug — looks like Regenerate
+  worked but the recommendations look the same.
+
+*Things left after the secondary pass:*
+
+- **Source palette extension** — still deferred (low priority,
+  rare in practice).
+- **STATE.md archive split** — this file is approaching ~2400
+  lines after this update; the older session entries (Phase A2,
+  Phase B, schema-driven new-subject form, historical
+  retrospective) could split into `STATE_archive.md` to keep
+  the active section focused. Not urgent.
 
 **Known issues / followups from the 2026-05-12 QA pass (none blocking):**
 
