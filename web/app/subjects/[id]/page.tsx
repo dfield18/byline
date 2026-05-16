@@ -812,7 +812,9 @@ function PlatformRecallStrip({ platforms }: { platforms: SubjectOverview["platfo
 
 // Per-topic mention rate as a horizontal bar list. Sorts strongest →
 // weakest; the lowest bar gets the warning accent so the gap reads as
-// the actionable signal. Topics whose ai_recall is null (no scored
+// the actionable signal — UNLESS there's no real gap (single topic,
+// or all topics tied at the same rate), in which case no bar gets the
+// warning treatment. Topics whose ai_recall is null (no scored
 // responses yet) drop out entirely rather than render as 0% — would
 // be misleading.
 function TopicRecallChart({
@@ -825,7 +827,23 @@ function TopicRecallChart({
     .slice()
     .sort((a, b) => (b.ai_recall ?? 0) - (a.ai_recall ?? 0));
   if (sorted.length === 0) return null;
-  const weakest = sorted[sorted.length - 1];
+  // Use findWeakestTopic so the chart highlights the same topic as
+  // the Hero's Weakest Topic Recall tile subtitle on ties (first-wins).
+  // Prior implementation used sorted[length-1] which is last-wins —
+  // user-visible inconsistency on tied snapshots.
+  const weakestTopic = findWeakestTopic(sorted);
+  // Only mark a bar as "weakest" when a real gap exists — skip the
+  // warning treatment entirely for single-topic snapshots or when
+  // every topic ties at the same rate. Float tolerance for the tie
+  // check (DB aggregation can produce micro-differences).
+  const TIE_EPSILON = 0.001;
+  const hasRealGap =
+    sorted.length > 1 &&
+    !sorted.every(
+      (t) =>
+        Math.abs((t.ai_recall ?? 0) - (sorted[0].ai_recall ?? 0)) <
+        TIE_EPSILON,
+    );
   return (
     <section>
       <SectionTitle
@@ -838,7 +856,7 @@ function TopicRecallChart({
         <div className="space-y-4">
           {sorted.map((t) => {
             const pct = Math.round((t.ai_recall ?? 0) * 100);
-            const isWeakest = t === weakest;
+            const isWeakest = hasRealGap && t === weakestTopic;
             return (
               <div
                 key={t.label}
@@ -910,7 +928,17 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
     <div className="grid md:grid-cols-3 gap-4">
       {metrics.map((m) => {
         const latestValue = m.values[m.values.length - 1] ?? null;
-        const valueColor = getKpiValueColor(m.colorKind, latestValue);
+        // "Not measured" when every snapshot returned null for this
+        // metric (e.g. Citation Rate for a subject with no
+        // canonical_url). Distinct from "no snapshots yet" — the
+        // header value and footer copy both adjust so the tile reads
+        // as not-applicable rather than waiting-on-data.
+        const notMeasured =
+          m.values.length > 0 &&
+          m.values.every((v) => v === null);
+        const valueColor = notMeasured
+          ? "text-muted-foreground"
+          : getKpiValueColor(m.colorKind, latestValue);
         return (
           <Card key={m.title} className="p-5">
             <div className="flex items-center justify-between gap-2">
@@ -920,7 +948,7 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
               <KpiTooltipIcon text={m.tooltip} align="right" />
             </div>
             <div className={`mt-1 text-2xl font-semibold tracking-tight ${valueColor}`}>
-              {m.format(latestValue)}
+              {notMeasured ? "—" : m.format(latestValue)}
             </div>
             <div className="mt-3">
               <MiniSpark
@@ -931,8 +959,14 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
               />
             </div>
             <div className="mt-3 pt-3 border-t border-border text-xs text-foreground/70 leading-relaxed">
-              {trajectory.weeks.length} weekly snapshot{trajectory.weeks.length === 1 ? "" : "s"};
-              most recent is {formatRefreshKind(trajectory.is_historical[trajectory.is_historical.length - 1] ?? false)}.
+              {notMeasured ? (
+                <>This metric isn&apos;t measured for this subject.</>
+              ) : (
+                <>
+                  {trajectory.weeks.length} weekly snapshot{trajectory.weeks.length === 1 ? "" : "s"};
+                  most recent is {formatRefreshKind(trajectory.is_historical[trajectory.is_historical.length - 1] ?? false)}.
+                </>
+              )}
             </div>
           </Card>
         );
@@ -961,6 +995,18 @@ function MiniSpark({
   format: (v: number | null) => string;
 }) {
   const numericValues = values.filter((v): v is number => v !== null);
+  // Distinguish "we have snapshots but the metric isn't measurable for
+  // this subject" from "we just don't have enough snapshots yet." For
+  // Citation Rate against a subject with no canonical_url, every
+  // snapshot's value is null — the user shouldn't see "need more
+  // snapshots" since taking more wouldn't fix it.
+  if (values.length > 0 && numericValues.length === 0) {
+    return (
+      <div className="h-[120px] flex items-center justify-center text-center text-[11px] text-muted-foreground px-3 leading-relaxed">
+        Not measured for this subject
+      </div>
+    );
+  }
   if (numericValues.length < 2) {
     return (
       <div className="h-[120px] flex items-center justify-center text-[11px] text-muted-foreground">
@@ -1053,7 +1099,7 @@ function MiniSpark({
             vectorEffect="non-scaling-stroke"
           >
             <title>
-              {`${labels[i]}: ${v === null ? "—" : v.toFixed(3)}${
+              {`${labels[i]}: ${format(v)}${
                 isHistorical[i] ? " (retrospective estimate)" : ""
               }`}
             </title>
