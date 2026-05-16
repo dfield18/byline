@@ -310,9 +310,15 @@ async def regenerate_recommended_actions(
         # Cooldown check inside the lock: how old is the current cache
         # row (which may have just been written by the render we
         # waited on)? If younger than the cooldown, refuse.
+        #
+        # `clock_timestamp()` (wall-clock) instead of NOW()/CURRENT_TIMESTAMP
+        # (transaction-start) so the age is accurate across long-lived
+        # transactions. Matches the `created_at = clock_timestamp()`
+        # on the upsert side; using NOW() here would under-count the age
+        # by however long this transaction has been open.
         cur.execute(
             """
-            SELECT EXTRACT(EPOCH FROM (NOW() - created_at))::int AS age_s
+            SELECT EXTRACT(EPOCH FROM (clock_timestamp() - created_at))::int AS age_s
             FROM refresh_analyses
             WHERE refresh_run_id = %s AND analysis_type = %s
             ORDER BY id DESC LIMIT 1

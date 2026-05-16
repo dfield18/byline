@@ -1858,10 +1858,41 @@ def _compute_recommended_actions(
                     # (refresh, type) by schema rather than by
                     # convention.
                     #
-                    # `created_at = NOW()` on UPDATE so the Regenerate
-                    # cooldown's age check measures time since the
-                    # latest write (matches the prior DELETE+INSERT
-                    # semantics — old row's created_at was thrown away).
+                    # `created_at = clock_timestamp()` on UPDATE so the
+                    # Regenerate cooldown's age check measures time
+                    # since the actual wall-clock write moment.
+                    #
+                    # `NOW()` (and `CURRENT_TIMESTAMP`) return the
+                    # transaction START time. Since this transaction
+                    # holds the advisory lock across a 5-15s LLM call,
+                    # `NOW()` would back-date the write by however
+                    # long the call took — effectively shortening the
+                    # Regenerate cooldown by the same amount. The same
+                    # pitfall already bit the worker's job timing
+                    # (STATE.md / Phase B: switched job started_at /
+                    # completed_at writes to clock_timestamp() for the
+                    # same reason).
+                    # The `WHERE analysis_type LIKE 'recommended_actions_%%'`
+                    # predicate selects the matching partial unique index
+                    # (`idx_recommended_actions_unique` from migration
+                    # 011) for ON CONFLICT inference. The predicate text
+                    # MUST match the index's WHERE clause exactly.
+                    #
+                    # The `%%` (double percent) is psycopg's escape for a
+                    # literal `%` inside a parameterized query — psycopg
+                    # treats `%s` as a placeholder, so we double the
+                    # literal percents to disambiguate. After psycopg
+                    # substitutes parameters, the SQL Postgres actually
+                    # receives is `... LIKE 'recommended_actions_%'`,
+                    # which matches the index's predicate.
+                    #
+                    # If you ever copy this SQL to run manually (psql,
+                    # ORM, etc.), strip one of the percents back to a
+                    # single `%`, or you'll get "there is no unique or
+                    # exclusion constraint matching the ON CONFLICT
+                    # specification". Alternative form that avoids the
+                    # escape: `ON CONFLICT ON CONSTRAINT
+                    # idx_recommended_actions_unique DO UPDATE …`.
                     cur.execute(
                         """
                         INSERT INTO refresh_analyses (
@@ -1875,7 +1906,7 @@ def _compute_recommended_actions(
                             subject_id = EXCLUDED.subject_id,
                             findings = EXCLUDED.findings,
                             methodology_version = EXCLUDED.methodology_version,
-                            created_at = NOW()
+                            created_at = clock_timestamp()
                         """,
                         (
                             analysis_run_id,

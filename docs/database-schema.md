@@ -430,6 +430,17 @@ CREATE TABLE refresh_analyses (
 
 CREATE INDEX idx_refresh_analyses_subject ON refresh_analyses (subject_id, analysis_type, created_at DESC);
 CREATE INDEX idx_refresh_analyses_run ON refresh_analyses (refresh_run_id);
+
+-- Migration 011: partial unique index for the dashboard-driven LLM
+-- cache rows (`recommended_actions_*`, `executive_polish_*`).
+-- Enforces "at most one row per (refresh, type)" for those families,
+-- which is the shape they need for the upsert + advisory-lock pattern
+-- in `_compute_recommended_actions`. Other analyzers (asymmetry,
+-- share_of_voice) write multiple per-model rows per refresh and are
+-- intentionally NOT covered by this index.
+CREATE UNIQUE INDEX idx_recommended_actions_unique
+  ON refresh_analyses (refresh_run_id, analysis_type)
+  WHERE analysis_type LIKE 'recommended_actions_%';
 ```
 
 #### `analysis_type` vocabulary (open-ended)
@@ -444,6 +455,9 @@ No CHECK constraint on `analysis_type` — the vocabulary is expected to grow as
 | `position_appearance` | Issue (#2 vs. user-defined positions) | `{"position": "strict regulation", "appeared": true, "framing_match": 0.8}` |
 | `share_of_voice` | Aggregate of all unnamed-layer responses | `{"mention_rate": 0.6, "mentioned_in": 3, "total": 5, "avg_rank": 2.5}` |
 | `top_quotes` | Every refresh | `{"quotes": [{"quote": "...", "source_response_id": 312, "rank": 1, "dimension": "criticism"}]}` |
+| `narrative_clusters` | Every refresh; LLM-driven | `{"clusters": [{"name": "Defending Democratic Norms", "share": 0.35, "response_ids": [...], ...}]}` |
+| `executive_polish_v5` | Dashboard render only (cached) | `{"raw_bottom_line": "...", "polished_bottom_line": "...", "raw_recommended_focus": "...", "polished_recommended_focus": "..."}` |
+| `recommended_actions_v4` | Dashboard render only (cached) | `{"payload": {...}, "actions": {"primary": {"label": "...", "action": "...", "why": "..."}, "secondary": [...]}, "warning": null}` |
 
 #### Notes
 
@@ -452,6 +466,10 @@ No CHECK constraint on `analysis_type` — the vocabulary is expected to grow as
 - **`source_response_ids` makes findings traceable.** Each row lists which `model_responses.id` values were used to compute the finding — without it, you'd need to know which prompts feed each `analysis_type`.
 
 - **`analysis_key` is a free-form disambiguator** for cases where one `analysis_type` produces multiple rows per refresh (e.g., for the Issue category, `position_appearance` would have one row per user-defined position, with `analysis_key` set to the position name).
+
+- **Versioned cache types (`executive_polish_v5`, `recommended_actions_v4`).** Both are dashboard-driven LLM caches keyed by `refresh_run_id`. The version suffix lets us bump the type string to invalidate every cached row at once (without dropping the table or running a separate cleanup) when the prompt or payload schema changes. Bumping happens in `dashboard/lib/queries.py` via the `_POLISH_CACHE_TYPE` and `_RECOMMENDED_ACTIONS_TYPE` constants. Old version rows remain in the table forever (never read once the constant moves); ~400KB/yr storage waste, optional one-time cleanup via `DELETE FROM refresh_analyses WHERE analysis_type LIKE 'recommended_actions_v%' AND analysis_type != 'recommended_actions_v4'` (and similar for polish).
+
+- **`recommended_actions_*` rows are upserted, not duplicated.** Migration 011 adds a partial unique index `idx_recommended_actions_unique` on `(refresh_run_id, analysis_type) WHERE analysis_type LIKE 'recommended_actions_%'`. The write path uses `INSERT … ON CONFLICT (refresh_run_id, analysis_type) WHERE analysis_type LIKE 'recommended_actions_%' DO UPDATE SET … created_at = clock_timestamp()`. Combined with `pg_advisory_xact_lock(1, refresh_run_id)` around the read/LLM/write window, concurrent renders for the same subject serialize and only one paid LLM call fires per snapshot regardless of how many tabs/users hit the page simultaneously.
 
 ---
 
