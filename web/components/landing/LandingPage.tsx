@@ -6,10 +6,6 @@ const CTA_URL = "[CTA_URL_PLACEHOLDER]";
 const SAMPLE_REPORT_URL = "[SAMPLE_REPORT_URL_PLACEHOLDER]";
 const CONTACT_EMAIL = "[CONTACT_EMAIL_PLACEHOLDER]";
 
-const PROBLEM_HEADLINE = "[PROBLEM_HEADLINE_PLACEHOLDER]";
-const STAT = "[STAT_PLACEHOLDER]";
-const STAT_SOURCE = "[STAT_SOURCE_PLACEHOLDER]";
-
 const DEMO_SUBJECT = "[DEMO_SUBJECT_PLACEHOLDER]";
 
 const SUBJECT_LIMITS = "[SUBJECT_LIMITS_PLACEHOLDER]";
@@ -202,21 +198,36 @@ function Problem() {
           The problem
         </div>
         <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
-          {PROBLEM_HEADLINE}
+          AI is the new front door to the internet.
         </h2>
         <div className="mt-12 flex flex-col items-center">
           <div className="font-display text-[64px] font-semibold leading-none tracking-[-0.03em] text-primary sm:text-[88px]">
-            {STAT}
+            50%
           </div>
-          <div className="mt-3 text-xs text-muted-foreground">
-            Source: {STAT_SOURCE}
+          <div className="mt-3 max-w-md text-[15px] leading-relaxed text-foreground/75">
+            of US consumers now intentionally seek out AI-powered search.
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            <a
+              href="https://www.mckinsey.com/capabilities/growth-marketing-and-sales/our-insights/new-front-door-to-the-internet-winning-in-the-age-of-ai-search"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline-offset-2 hover:underline hover:text-foreground transition-colors"
+            >
+              McKinsey, <em>New Front Door to the Internet</em>, August 2025
+            </a>
           </div>
         </div>
         <p className="mx-auto mt-12 max-w-2xl text-[16.5px] leading-relaxed text-foreground/75">
-          Every time someone asks an AI assistant about your candidate, your
-          issue, or your organization, they get an answer. That answer is
-          shaping opinions in real time &mdash; and most communications teams
-          have no idea what it says.
+          AI has quietly become the front door to the internet. Half of
+          Americans now intentionally seek out AI search — ChatGPT, Gemini,
+          Claude, or Google&apos;s AI features — to research candidates,
+          policies, and the organizations shaping them. Among those who&apos;ve
+          tried it, 44% say it&apos;s already their primary source, beating
+          Google&apos;s traditional results (31%). The AI doesn&apos;t link
+          your audience to your press release, your op-ed, or your fact sheet.
+          It gives them an answer. Most communications teams have no idea
+          what that answer says.
         </p>
       </div>
     </section>
