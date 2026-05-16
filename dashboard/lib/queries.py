@@ -1888,6 +1888,25 @@ def _compute_recommended_actions(
                 ar_row = cur.fetchone()
                 if ar_row is not None:
                     analysis_run_id = ar_row[0]
+                    # Sweep up orphan rows from prior cache versions
+                    # for THIS refresh. The partial unique index
+                    # constrains (refresh_run_id, analysis_type) so
+                    # different version strings co-exist legally —
+                    # `recommended_actions_v3` and v4 can both live
+                    # in the table for the same refresh. That's how
+                    # storage waste accumulates over version bumps.
+                    # Self-cleaning at write time keeps the table
+                    # tidy without a separate cleanup job. Bounded
+                    # to this refresh's rows so it stays cheap.
+                    cur.execute(
+                        """
+                        DELETE FROM refresh_analyses
+                        WHERE refresh_run_id = %s
+                          AND analysis_type LIKE 'recommended_actions_%%'
+                          AND analysis_type != %s
+                        """,
+                        (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
+                    )
                     # INSERT ... ON CONFLICT DO UPDATE, leveraging the
                     # partial unique index `idx_recommended_actions_unique`
                     # on (refresh_run_id, analysis_type) WHERE
