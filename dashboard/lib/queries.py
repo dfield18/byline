@@ -1818,19 +1818,35 @@ def _compute_recommended_actions(
                 ar_row = cur.fetchone()
                 if ar_row is not None:
                     analysis_run_id = ar_row[0]
-                    cur.execute(
-                        """
-                        DELETE FROM refresh_analyses
-                        WHERE refresh_run_id = %s AND analysis_type = %s
-                        """,
-                        (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
-                    )
+                    # INSERT ... ON CONFLICT DO UPDATE, leveraging the
+                    # partial unique index `idx_recommended_actions_unique`
+                    # on (refresh_run_id, analysis_type) WHERE
+                    # analysis_type LIKE 'recommended_actions_%'. The
+                    # advisory lock above already serializes writers,
+                    # but the upsert pattern makes the write idempotent
+                    # under any race that bypasses the lock, and
+                    # guarantees the table holds at most one row per
+                    # (refresh, type) by schema rather than by
+                    # convention.
+                    #
+                    # `created_at = NOW()` on UPDATE so the Regenerate
+                    # cooldown's age check measures time since the
+                    # latest write (matches the prior DELETE+INSERT
+                    # semantics — old row's created_at was thrown away).
                     cur.execute(
                         """
                         INSERT INTO refresh_analyses (
                             analysis_run_id, refresh_run_id, subject_id,
                             analysis_type, findings, methodology_version
                         ) VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (refresh_run_id, analysis_type)
+                        WHERE analysis_type LIKE 'recommended_actions_%%'
+                        DO UPDATE SET
+                            analysis_run_id = EXCLUDED.analysis_run_id,
+                            subject_id = EXCLUDED.subject_id,
+                            findings = EXCLUDED.findings,
+                            methodology_version = EXCLUDED.methodology_version,
+                            created_at = NOW()
                         """,
                         (
                             analysis_run_id,
