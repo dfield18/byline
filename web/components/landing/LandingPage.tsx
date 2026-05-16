@@ -22,7 +22,6 @@ const WHO_IT_IS_FOR: { title: string; description: string }[] = [
   { title: "[SEGMENT_3_PLACEHOLDER]", description: "[SEGMENT_3_COPY_PLACEHOLDER]" },
 ];
 
-const DIFFERENTIATION_COPY = "[DIFFERENTIATION_COPY_PLACEHOLDER]";
 
 export function LandingPage() {
   return (
@@ -35,7 +34,6 @@ export function LandingPage() {
         <Capabilities />
         <HowItWorks />
         <WhoItsFor />
-        <Differentiation />
         <ClosingCTA />
       </main>
       <MarketingFooter />
@@ -413,54 +411,12 @@ function WhoItsFor() {
   );
 }
 
-function Differentiation() {
-  return (
-    <section className="border-b border-border/60">
-      <div className="mx-auto max-w-[1000px] px-6 py-24">
-        <div className="mb-10 max-w-2xl">
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary/80">
-            What it isn&rsquo;t
-          </div>
-          <h2 className="font-display text-[28px] font-semibold leading-[1.2] tracking-[-0.02em] text-foreground sm:text-[34px]">
-            Not social listening. Not generic AI search analytics.
-          </h2>
-        </div>
-        <Card className="p-8">
-          <p className="text-[16px] leading-relaxed text-foreground/80">
-            {DIFFERENTIATION_COPY}
-          </p>
-          <div className="mt-8 grid gap-6 border-t border-border pt-6 sm:grid-cols-2">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                What others measure
-              </div>
-              <div className="mt-2 text-[14.5px] leading-relaxed text-foreground/75">
-                [DIFF_LEFT_COLUMN_PLACEHOLDER] &mdash; brand mentions, social
-                share of voice, sentiment on public posts.
-              </div>
-            </div>
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary">
-                What byline measures
-              </div>
-              <div className="mt-2 text-[14.5px] leading-relaxed text-foreground/75">
-                [DIFF_RIGHT_COLUMN_PLACEHOLDER] &mdash; what AI assistants
-                actually tell your audience when asked about your issue.
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
-    </section>
-  );
-}
-
 function ClosingCTA() {
   return (
     <section className="border-b border-border/60">
       <div className="mx-auto max-w-[800px] px-6 py-28 text-center">
         <h2 className="font-display text-[36px] font-semibold leading-[1.1] tracking-[-0.025em] text-foreground sm:text-[48px]">
-          Find out what AI is saying about your issue.
+          AI is already shaping the conversation about your issue &mdash; find out what it&apos;s saying.
         </h2>
         <p className="mx-auto mt-5 max-w-xl text-[16.5px] leading-relaxed text-foreground/70">
           [CLOSING_SUBHEAD_PLACEHOLDER] &mdash; one sentence reinforcing
