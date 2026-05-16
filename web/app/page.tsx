@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
 import { listSubjects, type Subject } from "@/lib/api";
+import { LandingPage } from "@/components/landing/LandingPage";
 
 const CATEGORY_LABEL: Record<Subject["category"], string> = {
   person: "Person",
@@ -18,6 +20,14 @@ const CATEGORY_BADGE: Record<Subject["category"], string> = {
 };
 
 export default async function Home() {
+  // Public marketing landing for signed-out visitors; authed subjects
+  // dashboard for signed-in users. Proxy makes `/` public so this page
+  // is reachable without a session.
+  const { userId } = await auth();
+  if (!userId) {
+    return <LandingPage />;
+  }
+
   const subjects = await listSubjects();
 
   // Empty-state on a fresh org — direct the user straight to subject creation

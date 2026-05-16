@@ -1,12 +1,15 @@
 // Next.js 16 renamed `middleware.ts` to `proxy.ts`. clerkMiddleware()
 // works unchanged here.
 //
-// We require auth on every route in this app. Signed-out users get
-// redirected to Clerk's hosted sign-in (the default for pk_test apps
-// without a self-hosted /sign-in route).
-import { clerkMiddleware } from '@clerk/nextjs/server'
+// Every route requires auth EXCEPT the marketing landing at `/`, which
+// renders a public page for signed-out visitors and the authed dashboard
+// for signed-in users. The dispatch happens inside app/page.tsx.
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 
-export default clerkMiddleware(async (auth) => {
+const isPublicRoute = createRouteMatcher(['/'])
+
+export default clerkMiddleware(async (auth, req) => {
+  if (isPublicRoute(req)) return
   const { userId, redirectToSignIn } = await auth()
   if (!userId) {
     return redirectToSignIn()
