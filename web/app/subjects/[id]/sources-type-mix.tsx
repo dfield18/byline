@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SubjectOverview } from "@/lib/api";
 
 // Mirror of the page-level constant so the donut + legend share one
@@ -20,9 +20,24 @@ export function SourcesTypeMix({
 }: {
   sources: SubjectOverview["sources"];
 }) {
-  // Hovered segment index, or null when nothing is hovered. Drives the
-  // center label content + segment opacity dimming.
+  // Hovered/selected segment index, or null when nothing is active.
+  // Drives the center label content + segment opacity dimming.
+  // Single state for both hover (desktop) and tap-toggle (touch).
   const [hovered, setHovered] = useState<number | null>(null);
+
+  // Reset the index whenever the sources data shape changes. Without
+  // this, a stale `hovered` after a Regenerate that adds/removes a
+  // category could highlight the wrong segment, or point out of
+  // bounds. Stable identity key derived from category names so the
+  // effect only fires on meaningful changes (not on parent re-renders
+  // that pass a fresh-reference but identical array).
+  const dataKey = useMemo(
+    () => sources.map((s) => `${s.type}:${s.name}`).join("|"),
+    [sources],
+  );
+  useEffect(() => {
+    setHovered(null);
+  }, [dataKey]);
 
   if (!sources.length) return null;
 
@@ -91,7 +106,11 @@ export function SourcesTypeMix({
           />
           {/* Segments — rotate -90deg so the first segment starts at
               12 o'clock. Each segment is a stroked circle whose
-              dash-array exposes only its slice of the circumference. */}
+              dash-array exposes only its slice of the circumference.
+              onClick toggles the selection for touch devices (which
+              don't fire hover events). On desktop, hover and tap
+              both work; tapping the same segment a second time
+              clears it. */}
           <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
             {segments.map((s, i) => {
               const isHovered = hovered === i;
@@ -109,11 +128,12 @@ export function SourcesTypeMix({
                   strokeDashoffset={s.dashOffset}
                   opacity={isDimmed ? 0.35 : 1}
                   style={{
-                    cursor: "default",
+                    cursor: "pointer",
                     transition: "opacity 120ms ease",
                   }}
                   onMouseEnter={() => setHovered(i)}
                   onMouseLeave={() => setHovered(null)}
+                  onClick={() => setHovered((cur) => (cur === i ? null : i))}
                 />
               );
             })}
@@ -143,7 +163,10 @@ export function SourcesTypeMix({
       </div>
 
       {/* Legend with full category names + percentages. The donut is
-          the at-a-glance visual; the legend is the readable map. */}
+          the at-a-glance visual; the legend is the readable map. Both
+          surfaces (donut segment + legend row) drive the same hovered
+          state — hovering one highlights the other. Tap-toggles on
+          legend rows for touch parity with the donut segments. */}
       <ul className="mt-4 space-y-2">
         {aggregated.map((t, i) => {
           const isHovered = hovered === i;
@@ -151,10 +174,11 @@ export function SourcesTypeMix({
           return (
             <li
               key={t.name}
-              className="flex items-center justify-between gap-2 text-[13px] transition-opacity"
+              className="flex items-center justify-between gap-2 text-[13px] transition-opacity cursor-pointer"
               style={{ opacity: isDimmed ? 0.45 : 1 }}
               onMouseEnter={() => setHovered(i)}
               onMouseLeave={() => setHovered(null)}
+              onClick={() => setHovered((cur) => (cur === i ? null : i))}
             >
               <span className="flex items-center gap-2 min-w-0">
                 <span
