@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { RefreshCw, AlertTriangle } from "lucide-react";
+import { RefreshCw, AlertTriangle, ArrowRight } from "lucide-react";
+import Link from "next/link";
 import { regenerateRecommendedActionsAction } from "./actions";
 
 type Action = { label: string; action: string; why: string };
@@ -15,9 +16,17 @@ export type RecommendedActions = {
 export function RecommendedActionsBlock({
   actions,
   subjectId,
+  variant = "full",
 }: {
   actions: RecommendedActions | null | undefined;
   subjectId: number;
+  // `full` renders primary + all secondaries (used on the dedicated
+  // /recommendations spoke page). `primary-only` renders just the
+  // primary card + a "View all recommendations" link to the spoke —
+  // used on the Overview tab so the dashboard's executive briefing
+  // surfaces the headline action without sprawling into the
+  // alternatives.
+  variant?: "full" | "primary-only";
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -93,14 +102,16 @@ export function RecommendedActionsBlock({
         </div>
       </div>
 
-      {/* Secondary recommendations — flat bullet list under an
-          "ALSO CONSIDER" eyebrow. Dropped the 2-column card grid
-          since three boxed cards stacked competing visual weight;
-          a simple list gives the primary clear priority and reads
-          as supplementary options. Label sits inline with the
-          action separated by an em-dash; why renders below in
-          muted italic. */}
-      {secondary.length > 0 && (
+      {/* Secondary recommendations — full variant only. On the
+          Overview tab (primary-only), the secondaries collapse into
+          a single "View all recommendations" link to the dedicated
+          /recommendations spoke so the briefing stays focused on the
+          headline action. Flat bullet list under an "ALSO CONSIDER"
+          eyebrow on the spoke: a simple list gives the primary clear
+          priority and reads as supplementary options. Label sits
+          inline with the action separated by an em-dash; why renders
+          below in muted italic. */}
+      {variant === "full" && secondary.length > 0 && (
         <div className="mt-5">
           <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-2.5">
             Also consider
@@ -134,6 +145,20 @@ export function RecommendedActionsBlock({
             ))}
           </ul>
         </div>
+      )}
+
+      {/* Primary-only variant: link to the dedicated spoke page where
+          the user can see all recommendations + future history /
+          export controls. Rendered when at least one secondary
+          exists — no point linking to "more" when there isn't more. */}
+      {variant === "primary-only" && secondary.length > 0 && (
+        <Link
+          href={`/subjects/${subjectId}/recommendations`}
+          className="mt-3 inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+        >
+          View all recommendations
+          <ArrowRight className="h-3 w-3" aria-hidden />
+        </Link>
       )}
 
       {error && (

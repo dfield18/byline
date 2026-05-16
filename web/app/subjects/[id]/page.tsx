@@ -1562,6 +1562,7 @@ export default async function SubjectOverviewPage({
                   <RecommendedActionsBlock
                     actions={data.recommended_actions}
                     subjectId={subjectId}
+                    variant="primary-only"
                   />
 
                   {/* Fallback when no Bottom Line could be synthesized */}
