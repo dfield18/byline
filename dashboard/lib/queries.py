@@ -1481,6 +1481,17 @@ def _shape_actions(parsed: Any) -> dict[str, Any] | None:
     }
 
 
+# Postgres advisory-lock class for the Recommended Actions cache
+# window. `pg_advisory_xact_lock(class, refresh_run_id)` serializes
+# concurrent renders for the same refresh — the first one fires the
+# Gemini call and writes the cache row; the second waits on the lock,
+# re-checks cache inside the lock, finds the row, and returns it
+# without firing its own (paid) LLM call. Reserve class 1 for this
+# system; new advisory-lock users in the future should pick distinct
+# classes to avoid collisions.
+_LOCK_CLASS_RECOMMENDED_ACTIONS = 1
+
+
 def _recommended_actions_cache_read(
     refresh_run_id: int, payload: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -1610,6 +1621,20 @@ def _compute_recommended_actions(
     cached actions without an LLM call. Any mismatch (new snapshot,
     schema change, manual invalidation) regenerates.
 
+    Concurrency: when `refresh_run_id` is present, the read → LLM call
+    → write window is serialized via a Postgres advisory lock keyed on
+    (class=1, refresh_run_id). The first concurrent render fires the
+    LLM call and writes the cache row; the second blocks on the lock,
+    re-checks cache inside the lock, finds the freshly-written row,
+    and returns it without firing a second (paid) LLM call. The lock
+    auto-releases on transaction commit/rollback.
+
+    Caveat: the LLM call (5-15s) happens with a DB connection open and
+    the advisory lock held. Acceptable for typical render volume.
+    If connection-pool pressure becomes a problem under load, the
+    natural next step is precomputing actions in the worker when a
+    refresh completes (decoupling generation from page render entirely).
+
     Failure handling: any exception path returns the subject-agnostic
     fallback. Two LLM attempts maximum (initial + one stricter retry
     when the first response fails grounding validation)."""
@@ -1627,14 +1652,8 @@ def _compute_recommended_actions(
     if payload is None:
         return _FALLBACK_RECOMMENDED_ACTIONS
 
-    if refresh_run_id is not None:
-        cached = _recommended_actions_cache_read(refresh_run_id, payload)
-        if cached is not None:
-            out = dict(cached["actions"])
-            if cached.get("warning"):
-                out["warning"] = cached["warning"]
-            return out
-
+    # LLM provider availability — checked before opening any
+    # connection so we fail fast without holding a slot for nothing.
     try:
         import json as _json
         import os
@@ -1668,12 +1687,12 @@ def _compute_recommended_actions(
         except Exception:
             return None
 
-    actions = _call(base_prompt)
-    grounded = (
-        actions is not None and _validate_actions_grounding(actions, payload)
-    )
-
-    if actions is None or not grounded:
+    def _run_llm_with_retry() -> dict[str, Any] | None:
+        """Initial call + one stricter retry on grounding failure.
+        Returns valid actions dict on success, None on total failure."""
+        actions = _call(base_prompt)
+        if actions is not None and _validate_actions_grounding(actions, payload):
+            return actions
         retry_prompt = base_prompt + (
             "\n\nYour previous response did not reference any specific entity "
             "from the input data. Every action MUST mention a specific source "
@@ -1684,20 +1703,108 @@ def _compute_recommended_actions(
         if retry_actions is not None and _validate_actions_grounding(
             retry_actions, payload,
         ):
-            actions = retry_actions
-            grounded = True
+            return retry_actions
+        return None
 
-    if actions is None or not grounded:
-        return _FALLBACK_RECOMMENDED_ACTIONS
+    # Synthetic/no-cache path: a render without a refresh_run_id can't
+    # cache anything, so skip the lock and call the LLM directly.
+    if refresh_run_id is None:
+        actions = _run_llm_with_retry()
+        return actions if actions is not None else _FALLBACK_RECOMMENDED_ACTIONS
 
-    # Cache the successful generation so subsequent page loads skip
-    # the LLM call. Cache write is fire-and-forget.
-    if refresh_run_id is not None and subject_id is not None:
-        _recommended_actions_cache_write(
-            refresh_run_id, subject_id, payload, actions, warning=None,
-        )
+    # Cached + locked path. Everything from the cache re-check to the
+    # cache write runs inside one transaction holding the advisory lock,
+    # so concurrent renders for the same refresh_run_id serialize:
+    # second render blocks → first finishes & writes → second wakes
+    # up, finds the cached row, skips its LLM call.
+    try:
+        with get_cursor(commit=True) as cur:
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(%s, %s)",
+                (_LOCK_CLASS_RECOMMENDED_ACTIONS, refresh_run_id),
+            )
 
-    return actions
+            # Re-check cache inside the lock. The row may have been
+            # populated by a concurrent render while we were waiting
+            # on the lock — if so, return its result and skip the
+            # LLM call entirely.
+            cur.execute(
+                """
+                SELECT findings FROM refresh_analyses
+                WHERE refresh_run_id = %s AND analysis_type = %s
+                ORDER BY id DESC LIMIT 1
+                """,
+                (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
+            )
+            row = cur.fetchone()
+            if row is not None:
+                findings = _maybe_json(row[0]) or {}
+                cached_payload = findings.get("payload")
+                if cached_payload == payload:
+                    cached_actions = findings.get("actions")
+                    if isinstance(cached_actions, dict):
+                        out = dict(cached_actions)
+                        if findings.get("warning"):
+                            out["warning"] = findings["warning"]
+                        return out
+
+            # Cache miss inside the lock → we're the first/only writer
+            # for this (refresh, payload). Fire the LLM call.
+            actions = _run_llm_with_retry()
+            if actions is None:
+                return _FALLBACK_RECOMMENDED_ACTIONS
+
+            # Write the cache row inside the same transaction. DELETE
+            # any stale row (different payload-shape from an earlier
+            # render); INSERT the fresh one. Both under the lock so
+            # no other writer can interleave.
+            if subject_id is not None:
+                cur.execute(
+                    """
+                    SELECT id FROM analysis_runs
+                    WHERE refresh_run_id = %s
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (refresh_run_id,),
+                )
+                ar_row = cur.fetchone()
+                if ar_row is not None:
+                    analysis_run_id = ar_row[0]
+                    cur.execute(
+                        """
+                        DELETE FROM refresh_analyses
+                        WHERE refresh_run_id = %s AND analysis_type = %s
+                        """,
+                        (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO refresh_analyses (
+                            analysis_run_id, refresh_run_id, subject_id,
+                            analysis_type, findings, methodology_version
+                        ) VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            analysis_run_id,
+                            refresh_run_id,
+                            subject_id,
+                            _RECOMMENDED_ACTIONS_TYPE,
+                            Json({
+                                "payload": payload,
+                                "actions": actions,
+                                "warning": None,
+                            }),
+                            _RECOMMENDED_ACTIONS_TYPE,
+                        ),
+                    )
+
+            return actions
+    except Exception:
+        # If the DB layer fails (connection error, lock acquisition
+        # timeout, etc.), fall back to a naked LLM call without cache.
+        # Better to pay for an extra LLM call than break the page.
+        actions = _run_llm_with_retry()
+        return actions if actions is not None else _FALLBACK_RECOMMENDED_ACTIONS
 
 
 # ─── executive synthesis (Phase 3 wiring) ──────────────────────────────
