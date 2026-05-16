@@ -9,7 +9,6 @@
  *     used by the action bar (trigger-refresh button + history
  *     disclosure).
  */
-import { Fragment } from "react";
 import Link from "next/link";
 import {
   TrendingUp,
@@ -1670,101 +1669,6 @@ export default async function SubjectOverviewPage({
               </Card>
             </section>
           )}
-
-          {/* COVERAGE — combined: prompt-topic breakdown + AI-platform
-              breakdown. Both are denominators of AI Mention Rate
-              (topic dimension and platform dimension respectively),
-              so they belong in one analytical view rather than two
-              separate sections. */}
-          <section>
-            <SectionTitle
-              eyebrow="Analysis Scope"
-              title="What this snapshot includes"
-              description="The topics, platforms, and caveats behind this AI narrative snapshot."
-            />
-            <Card className="p-5 md:p-6">
-              <div className="grid lg:grid-cols-2 gap-8 lg:gap-12">
-                {/* LEFT: topics */}
-                {data.topic_coverage.length > 0 && (
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55 mb-3">
-                      Topics covered
-                    </div>
-                    {/* Single grid wraps both the header row and all
-                        data rows, with fixed column widths so each
-                        cell aligns under the corresponding header.
-                        Share/Mention columns sized to fit their
-                        uppercase + tracked headers on one line — too
-                        narrow and "SHARE OF PROMPTS" wraps awkwardly
-                        below "MENTION RATE", breaking the column
-                        rhythm even though the cell alignment is
-                        technically correct. */}
-                    <div className="grid grid-cols-[1fr_132px_104px_64px] items-baseline gap-x-3">
-                      <span className="text-[10px] uppercase tracking-wider text-foreground/65 pb-2 border-b border-border/60">
-                        Topic
-                      </span>
-                      <span className="text-[10px] uppercase tracking-wider text-foreground/65 text-right pb-2 border-b border-border/60">
-                        Share of prompts
-                      </span>
-                      <span className="text-[10px] uppercase tracking-wider text-foreground/65 text-right pb-2 border-b border-border/60">
-                        Mention rate
-                      </span>
-                      {/* Bar column has no header text and no
-                          underline rule — the rule would visually
-                          extend the "Mention rate" underline into
-                          the bar area and read as one wide column
-                          header rather than a separate sparkline
-                          column. */}
-                      <span className="pb-2"></span>
-
-                      {data.topic_coverage.map((t, i) => {
-                        const recallPct = t.ai_recall === null ? null : t.ai_recall * 100;
-                        const isLast = i === data.topic_coverage.length - 1;
-                        const borderClass = isLast ? "" : "border-b border-border/30";
-                        return (
-                          <Fragment key={t.label}>
-                            <span
-                              className={`font-medium text-foreground/85 truncate text-sm py-3 ${borderClass}`}
-                              title={`${t.n_unique_slots} prompt slot${t.n_unique_slots === 1 ? "" : "s"} × ${t.n_responses / t.n_unique_slots} model${t.n_unique_slots === 1 ? "" : "s"} = ${t.n_responses} responses · source: ${t.source_field}`}
-                            >
-                              {capitalizeFirst(t.label)}
-                            </span>
-                            <span className={`text-foreground/70 tabular-nums text-right text-sm py-3 ${borderClass}`}>
-                              {(t.share_of_set * 100).toFixed(0)}%
-                            </span>
-                            <span className={`font-mono tabular-nums text-foreground/80 text-right text-sm py-3 ${borderClass}`}>
-                              {recallPct === null ? "—" : `${recallPct.toFixed(0)}%`}
-                            </span>
-                            <div className={`py-3 flex items-center ${borderClass}`}>
-                              <div className="h-1 w-full bg-border rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-primary/70"
-                                  style={{ width: `${recallPct ?? 0}%` }}
-                                />
-                              </div>
-                            </div>
-                          </Fragment>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                {/* RIGHT: platforms */}
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55 mb-3">
-                    Platforms included
-                  </div>
-                  <PlatformRecallStrip platforms={data.platform_recall} />
-                </div>
-              </div>
-              <p className="mt-5 text-[11.5px] text-foreground/65 leading-relaxed">
-                Mention rate is measured only on prompts where the subject
-                could reasonably appear. Prompts where the subject was not
-                a valid answer are excluded. N/A means a platform was not
-                included in this snapshot.
-              </p>
-            </Card>
-          </section>
 
           {/* EVIDENCE — Phase 3c wiring */}
           {data.evidence_cards.length > 0 && (
