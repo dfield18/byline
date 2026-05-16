@@ -1409,6 +1409,39 @@ def _build_recommended_actions_payload(
     }
 
 
+_GROUNDING_HYPHEN_SPACE_CLASS = r"[\s\-]+"
+"""Regex character class used inside grounding patterns to make
+hyphens and whitespace interchangeable. See `_grounding_pattern_for`
+for context."""
+
+
+def _grounding_pattern_for(entity: str) -> str:
+    """Build a word-boundary regex pattern for one grounding entity.
+
+    Behavior:
+    - Word boundary (`\\b`) on both ends — entity must appear as a
+      standalone token, not as a fragment ("trade" doesn't match
+      "trade-off").
+    - Hyphens and whitespace inside the entity become
+      `[\\s\\-]+` so the LLM's hyphen/space normalization doesn't
+      cause spurious grounding failures. "post-presidency" matches
+      both "post-presidency" and "post presidency"; "US foreign
+      policy" matches both that and "US-foreign-policy".
+    - Other punctuation (periods, ampersands, apostrophes, etc.)
+      stays strict via re.escape — easier to fix at the prompt
+      level if specific cases come up than to risk over-matching.
+    """
+    escaped = re.escape(entity)
+    # re.escape escapes both `-` and space (space is escaped on
+    # Python 3.7+ for safety). Replace both escaped forms with the
+    # flexible separator class.
+    flexible = escaped.replace(r"\-", _GROUNDING_HYPHEN_SPACE_CLASS)
+    flexible = flexible.replace(r"\ ", _GROUNDING_HYPHEN_SPACE_CLASS)
+    # Older Python re.escape didn't escape space; cover that too.
+    flexible = flexible.replace(" ", _GROUNDING_HYPHEN_SPACE_CLASS)
+    return r"\b" + flexible + r"\b"
+
+
 _GROUNDING_MIN_ENTITY_LEN = 3
 """Minimum character length for an entity to count toward the
 grounding check. Below this threshold (e.g. acronyms like 'AI',
@@ -1474,8 +1507,16 @@ def _validate_actions_grounding(
 
     # Compile boundary-match patterns once. re.escape handles
     # entities containing periods, hyphens, ampersands, etc.
+    # Post-escape, we relax hyphens and spaces to mean "either a
+    # hyphen or whitespace" so the LLM's frequent normalization
+    # ("post-presidency" ↔ "post presidency", "US foreign policy" ↔
+    # "US-foreign-policy") doesn't trigger spurious grounding
+    # failures + retries. Entities WITHOUT a hyphen or space stay
+    # strict — e.g., "trade" still rejects "trade-off" via the word
+    # boundary, since the entity's pattern is just `\btrade\b` with
+    # no flexible separator.
     patterns = [
-        re.compile(r"\b" + re.escape(ent) + r"\b", re.IGNORECASE)
+        re.compile(_grounding_pattern_for(ent), re.IGNORECASE)
         for ent in valid_entities
     ]
 
