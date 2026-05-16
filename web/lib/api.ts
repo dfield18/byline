@@ -245,8 +245,8 @@ export type SubjectOverview = {
   bottom_line: string | null;
   recommended_focus: string | null;
   recommended_actions: {
-    primary: { label: string; action: string };
-    secondary: { label: string; action: string }[];
+    primary: { label: string; action: string; why: string };
+    secondary: { label: string; action: string; why: string }[];
     warning?: string | null;
   };
   narrative_clusters: {

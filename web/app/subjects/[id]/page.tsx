@@ -872,21 +872,29 @@ function TopicRecallChart({
 }
 
 function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajectory"] }) {
-  const metrics: { title: string; values: (number | null)[]; format: (v: number | null) => string }[] = [
+  const metrics: {
+    title: string;
+    values: (number | null)[];
+    format: (v: number | null) => string;
+    tooltip: string;
+  }[] = [
     {
       title: "AI Mention Rate",
       values: trajectory.ai_recall,
       format: (v) => formatPct(v, 0),
+      tooltip: "Share of AI answers that mention this subject on topic-area questions (where the prompt doesn't name them directly), plotted across each weekly snapshot. Higher is better. Rising means AI is more reliably surfacing the subject when asked about their topic areas.",
     },
     {
       title: "Average Tone",
       values: trajectory.avg_sentiment,
       format: (v) => formatTonePct(v),
+      tooltip: "Average tone of AI answers about this subject across each weekly snapshot. Range −100% (most negative) to +100% (most positive); 0% is neutral. Sustained shifts here reflect changes in how AI characterizes the subject — favorable or critical.",
     },
     {
       title: "Citation Rate",
       values: trajectory.citation_rate,
       format: (v) => formatPct(v, 0),
+      tooltip: "Share of AI answers that cite the subject's canonical website (e.g., campaign homepage or org domain), plotted across each weekly snapshot. Higher is better. Subjects without a canonical URL configured will show 0% throughout.",
     },
   ];
 
@@ -894,8 +902,11 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
     <div className="grid md:grid-cols-3 gap-4">
       {metrics.map((m) => (
         <Card key={m.title} className="p-5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-            {m.title}
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              {m.title}
+            </div>
+            <KpiTooltipIcon text={m.tooltip} align="right" />
           </div>
           <div className="mt-1 text-2xl font-semibold tracking-tight">
             {m.format(m.values[m.values.length - 1] ?? null)}

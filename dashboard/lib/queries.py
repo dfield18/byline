@@ -1089,7 +1089,11 @@ def _polish_executive_summary(
 # v2: added subject role + recent_news + audience to payload; filtered
 #     out "Current events" bucket from topics; added prompt guardrails
 #     against assuming subject's role.
-_RECOMMENDED_ACTIONS_TYPE = "recommended_actions_v2"
+# v3: banned named publications/podcasts/journalists/conferences/
+#     locations as pitch surfaces (Wikipedia still allowed); added
+#     `why` field to every recommendation (short rationale tying the
+#     action back to the data).
+_RECOMMENDED_ACTIONS_TYPE = "recommended_actions_v3"
 
 _RECOMMENDED_ACTIONS_SCHEMA = {
     "type": "OBJECT",
@@ -1099,8 +1103,9 @@ _RECOMMENDED_ACTIONS_SCHEMA = {
             "properties": {
                 "label": {"type": "STRING"},
                 "action": {"type": "STRING"},
+                "why": {"type": "STRING"},
             },
-            "required": ["label", "action"],
+            "required": ["label", "action", "why"],
         },
         "secondary": {
             "type": "ARRAY",
@@ -1109,8 +1114,9 @@ _RECOMMENDED_ACTIONS_SCHEMA = {
                 "properties": {
                     "label": {"type": "STRING"},
                     "action": {"type": "STRING"},
+                    "why": {"type": "STRING"},
                 },
-                "required": ["label", "action"],
+                "required": ["label", "action", "why"],
             },
         },
     },
@@ -1126,38 +1132,76 @@ something a person could put on a calendar, hand to a junior staffer, or
 write into a project plan.
 
 For each recommendation, specify:
-  1. A SURFACE — where the action lands. Examples: an op-ed in a named
-     publication, a Wikipedia edit, a journalist briefing at a named
-     outlet, a podcast booking on a named show, a paid placement in a
-     named channel, an SEO update on the subject's own website, a panel
-     pitch to a named conference, a research-firm briefing, a backgrounder
-     to a beat reporter.
+  1. A SURFACE — where the action lands. ALLOWED surfaces include:
+       - Wikipedia edits (the subject's own page, related entries, or
+         pages on topics the subject is associated with). Wikipedia is
+         the ONLY named outlet you may pitch directly.
+       - An op-ed authored by the subject or their office, generically
+         described ("an op-ed in a major foreign-policy publication,"
+         "an op-ed in a national outlet covering immigration policy")
+         — DO NOT name the publication.
+       - A backgrounder, briefing memo, or talking points prepared for
+         journalists covering a topic, generically described ("a
+         backgrounder for reporters covering Latin America policy") —
+         DO NOT name the journalist or outlet.
+       - A statement, press release, or policy memo the subject's
+         office could publish under its own banner.
+       - An SEO / content update on the subject's own canonical
+         website.
+       - An issue brief or framing document for the subject's audience.
+       - A FOIA-style information request, public-records publication,
+         or congressional testimony preparation when role-appropriate.
+     BANNED surfaces:
+       - Specific publication names (e.g., The Guardian, PBS NewsHour,
+         Foreign Affairs, Reuters, the Washington Post, the Atlantic,
+         Politico, Axios, etc.). Use a generic category instead.
+       - Specific podcast or radio show names.
+       - Specific named journalists or hosts.
+       - Specific conferences, panels, or events.
+       - Specific geographic locations to "petition," "visit," or
+         "lobby" (no "petition the Iowa State Capitol" or "host an
+         event in Manchester, NH").
+       - Specific paid ad placements or campaign-style buys.
+       - Wikipedia is the SOLE exception to the named-outlet ban.
   2. AN ANGLE — the specific message or framing the surface delivers.
   3. A LEVERAGED ENTITY — at least one specific item from the input
-     payload: a source domain, a tracked topic name, the dominant
-     narrative cluster name, or a specific KPI value. Reference it by
-     name in the action sentence.
+     payload: a tracked topic name, the dominant narrative cluster
+     name, a recent_news event, or Wikipedia. Reference it by name in
+     the action sentence. (Source domains in `top_sources` are
+     analytical context — you may reference them as "cited
+     frequently by AI" or similar, but DO NOT pitch to them as
+     publication targets.)
+
+Each recommendation must also include a WHY — one sentence explaining
+the reasoning for this specific move, anchored in the snapshot data
+("AI rarely surfaces the subject on X," "the dominant narrative
+cluster is Y," "the recent news event Z creates an opening," etc.).
+The why explains the strategic logic; it should NOT just paraphrase
+the action.
 
 Hard constraints:
 - Every action sentence must reference at least one specific entity by
-  name from the input payload. Generic verbs without named entities
-  (e.g. "improve messaging," "build presence," "amplify the narrative")
-  fail this rule.
-- BANNED phrases: "messaging," "alignment," "positioning," "narrative
-  connection," "brand presence," "thought leadership," "awareness
-  building," "value proposition," "key stakeholder." If you find
-  yourself reaching for these, you're describing the data instead of
-  prescribing an action.
+  name from the input payload (or Wikipedia). Generic verbs without
+  named entities ("improve messaging," "build presence," "amplify the
+  narrative") fail this rule.
+- BANNED phrases anywhere in the action or why: "messaging,"
+  "alignment," "positioning," "narrative connection," "brand
+  presence," "thought leadership," "awareness building," "value
+  proposition," "key stakeholder." If you find yourself reaching for
+  these, you're describing the data instead of prescribing an action.
 - BANNED pattern: restating the visibility gap as the recommendation.
-  "Close the gap on {{topic}}" is not an action. "Pitch a {{publication}}
-  op-ed on {{topic}} that cites {{source}}" is an action.
+  "Close the gap on {{topic}}" is not an action. "Edit Wikipedia's
+  {{topic}} page to add citations to {{recent_news_event}}" is an
+  action.
 - BANNED pattern: hedging verbs like "consider," "explore," "look
-  into," "potentially." Use direct imperatives: pitch, brief, draft,
-  publish, edit, schedule, book, file, request, meet with.
-- One sentence per recommendation. Under 30 words.
+  into," "potentially." Use direct imperatives: edit, draft, publish,
+  brief, file, prepare, update, send, request.
+- One sentence per `action`. Under 30 words. The `why` is also one
+  sentence, under 30 words.
 - Output exactly 1 primary + 2 secondary. The primary should be the
-  single highest-leverage move given this snapshot's signals; secondaries
-  are alternative angles, not lower-priority versions of the primary.
+  single highest-leverage move given this snapshot's signals;
+  secondaries are alternative angles, not lower-priority versions of
+  the primary.
 
 CRITICAL — grounding in subject's actual context:
 - The input payload includes `current_role` and `recent_news` describing
@@ -1179,10 +1223,14 @@ CRITICAL — grounding in subject's actual context:
 
 Output JSON only, matching this schema:
 {{
-  "primary":   {{"label": "3-5 word action label", "action": "one-sentence specific recommendation"}},
+  "primary": {{
+    "label":  "3-5 word action label",
+    "action": "one-sentence specific recommendation",
+    "why":    "one-sentence rationale anchored in the snapshot data"
+  }},
   "secondary": [
-    {{"label": "...", "action": "..."}},
-    {{"label": "...", "action": "..."}}
+    {{"label": "...", "action": "...", "why": "..."}},
+    {{"label": "...", "action": "...", "why": "..."}}
   ]
 }}
 
@@ -1194,15 +1242,18 @@ _FALLBACK_RECOMMENDED_ACTIONS = {
     "primary": {
         "label": "Review snapshot signals",
         "action": "Review the per-topic recall chart and Sources panel below to identify the strongest moves for this snapshot.",
+        "why": "Automated recommendations were unavailable, so the next-best step is a manual scan of the dashboard's structured signals.",
     },
     "secondary": [
         {
             "label": "Audit source mix",
             "action": "Audit the Sources Shaping AI Answers section for outlets where presence could be increased.",
+            "why": "Source mix shows which domains AI is drawing from and points to the venues where added content is most likely to surface.",
         },
         {
             "label": "Cross-check narrative",
             "action": "Cross-check the Dominant Narrative panel against your current public-affairs strategy.",
+            "why": "The dominant narrative captures how AI is currently characterizing the subject; alignment gaps surface drift early.",
         },
     ],
     "warning": "Recommendations could not be generated for this snapshot — showing generic guidance.",
@@ -1355,7 +1406,7 @@ def _validate_actions_grounding(
 
 def _shape_actions(parsed: Any) -> dict[str, Any] | None:
     """Coerce parsed JSON to the expected shape: 1 primary +
-    exactly 2 secondary, all four label+action strings non-empty.
+    exactly 2 secondary, with non-empty label/action/why on each.
     Returns None on shape mismatch."""
     if not isinstance(parsed, dict):
         return None
@@ -1370,15 +1421,24 @@ def _shape_actions(parsed: Any) -> dict[str, Any] | None:
             isinstance(a, dict)
             and isinstance(a.get("label"), str) and a["label"].strip()
             and isinstance(a.get("action"), str) and a["action"].strip()
+            and isinstance(a.get("why"), str) and a["why"].strip()
         )
     if not _ok(primary):
         return None
     if not all(_ok(s) for s in secondary):
         return None
     return {
-        "primary": {"label": primary["label"].strip(), "action": primary["action"].strip()},
+        "primary": {
+            "label":  primary["label"].strip(),
+            "action": primary["action"].strip(),
+            "why":    primary["why"].strip(),
+        },
         "secondary": [
-            {"label": s["label"].strip(), "action": s["action"].strip()}
+            {
+                "label":  s["label"].strip(),
+                "action": s["action"].strip(),
+                "why":    s["why"].strip(),
+            }
             for s in secondary
         ],
     }
