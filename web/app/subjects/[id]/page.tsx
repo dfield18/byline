@@ -302,13 +302,24 @@ function getKpiValueColor(
   }
 }
 
+// Predicate used by every consumer of topic_coverage to filter out
+// non-finite recall values. `!== null` alone lets NaN / Infinity
+// through; once they enter the math (Math.abs, Math.round, average,
+// epsilon compare) they propagate to the UI as "NaN%" or break tie
+// detection. Strict isFinite check stops that at the boundary.
+function _hasFiniteRecall(
+  t: SubjectOverview["topic_coverage"][number],
+): boolean {
+  return t.ai_recall !== null && Number.isFinite(t.ai_recall);
+}
+
 // Lowest-recall topic in this snapshot, or null when no topic has a
-// non-null ai_recall value. Drives the Weakest Topic Recall hero tile
+// finite ai_recall value. Drives the Weakest Topic Recall hero tile
 // and the warning-color bar in the Topic Recall chart.
 function findWeakestTopic(
   topics: SubjectOverview["topic_coverage"],
 ): SubjectOverview["topic_coverage"][number] | null {
-  const withRecall = topics.filter((t) => t.ai_recall !== null);
+  const withRecall = topics.filter(_hasFiniteRecall);
   if (!withRecall.length) return null;
   return withRecall.reduce((min, t) =>
     (t.ai_recall ?? 1) < (min.ai_recall ?? 1) ? t : min,
@@ -320,7 +331,7 @@ function findWeakestTopic(
 function findStrongestTopic(
   topics: SubjectOverview["topic_coverage"],
 ): SubjectOverview["topic_coverage"][number] | null {
-  const withRecall = topics.filter((t) => t.ai_recall !== null);
+  const withRecall = topics.filter(_hasFiniteRecall);
   if (!withRecall.length) return null;
   return withRecall.reduce((max, t) =>
     (t.ai_recall ?? 0) > (max.ai_recall ?? 0) ? t : max,
@@ -348,7 +359,7 @@ function buildGapBottomLine(
   subjectName: string,
   topics: SubjectOverview["topic_coverage"],
 ): string | null {
-  const withRecall = topics.filter((t) => t.ai_recall !== null);
+  const withRecall = topics.filter(_hasFiniteRecall);
   if (withRecall.length < 2) return null;
   const weakest = findWeakestTopic(withRecall)!;
   const others = withRecall.filter((t) => t !== weakest);
@@ -833,7 +844,7 @@ function TopicRecallChart({
   topics: SubjectOverview["topic_coverage"];
 }) {
   const sorted = topics
-    .filter((t) => t.ai_recall !== null)
+    .filter(_hasFiniteRecall)
     .slice()
     .sort((a, b) => (b.ai_recall ?? 0) - (a.ai_recall ?? 0));
   if (sorted.length === 0) return null;
@@ -1034,13 +1045,25 @@ function MiniSpark({
   const yFor = (v: number | null) =>
     v === null ? null : h - pad - ((v - min) / range) * (h - pad * 2);
 
-  // Build path; break at null points
+  // Build path; emit M (move) instead of L (line-to) after a null
+  // so the line breaks at gaps. Prior implementation only skipped
+  // nulls — which connected the surrounding non-null points
+  // directly, visually drawing a line THROUGH points that should
+  // be gaps (e.g., a snapshot whose analyzer crashed and produced
+  // a null reading). The break makes "no measurement here" read
+  // as discontinuity.
   const path: string[] = [];
+  let lastWasNull = false;
   values.forEach((v, i) => {
     const y = yFor(v);
-    if (y === null) return;
+    if (y === null) {
+      lastWasNull = true;
+      return;
+    }
     const x = pad + i * step;
-    path.push(path.length === 0 ? `M${x},${y}` : `L${x},${y}`);
+    const needsMove = path.length === 0 || lastWasNull;
+    path.push(needsMove ? `M${x},${y}` : `L${x},${y}`);
+    lastWasNull = false;
   });
 
   // Axis labels live as HTML overlays (not SVG <text>) because the

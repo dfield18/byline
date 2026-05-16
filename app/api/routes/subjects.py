@@ -15,11 +15,11 @@ from pydantic import BaseModel, Field
 from app.api.auth import User, current_user
 from app.db import get_cursor
 from dashboard.lib.queries import (
+    _LOCK_CLASS_RECOMMENDED_ACTIONS,
     _RECOMMENDED_ACTIONS_TYPE,
     create_subject,
     get_subject,
     get_subject_overview,
-    invalidate_recommended_actions_cache,
     list_subjects,
 )
 
@@ -255,6 +255,16 @@ async def regenerate_recommended_actions(
     Rate limit: refuses with 429 if the current cache row is younger
     than _REGENERATE_COOLDOWN_SECONDS so spam-clicking can't burn paid
     LLM calls.
+
+    Concurrency: the DELETE runs inside the SAME advisory lock as the
+    render-time read/write, so a Regenerate fired during an in-flight
+    render waits for the render to finish, then deletes the
+    freshly-written row, then commits. The next page render sees no
+    cache row and fires a fresh LLM call. Without the lock, the DELETE
+    would race past the in-flight render: it would find no row (render
+    hadn't written yet), no-op, and the user would receive the
+    stale-from-the-in-flight-render result on next reload — defeating
+    the Regenerate intent entirely.
     """
     org_id = _require_org(user)
 
@@ -262,6 +272,8 @@ async def regenerate_recommended_actions(
     if not s:
         raise HTTPException(status_code=404, detail=f"subject {subject_id} not found")
 
+    # Lookup latest refresh outside the locked transaction so a missing
+    # refresh fails fast (no need to grab a lock for nothing).
     with get_cursor(commit=False) as cur:
         cur.execute(
             """
@@ -273,18 +285,31 @@ async def regenerate_recommended_actions(
         )
         row = cur.fetchone()
 
-        if row is None:
-            # No snapshots yet — nothing to regenerate. 204 (no-op)
-            # instead of 404 since the request itself was well-formed.
-            return None
+    if row is None:
+        # No snapshots yet — nothing to regenerate. 204 (no-op)
+        # instead of 404 since the request itself was well-formed.
+        return None
 
-        refresh_run_id = row[0]
+    refresh_run_id = row[0]
 
-        # Cooldown check: how old is the current cache row? If it's
-        # within the cooldown window, refuse. Reads from the
-        # refresh_analyses row this regenerate would delete; if the
-        # row doesn't exist (already deleted, or never written), we
-        # allow the regenerate to proceed without enforcement.
+    # Locked transaction: lock acquisition + cooldown check + DELETE
+    # all serialize against any concurrent render holding the same
+    # advisory lock. If a render is mid-LLM call, this transaction
+    # blocks at the pg_advisory_xact_lock call until that render
+    # commits, then proceeds with the cooldown check + DELETE on
+    # the freshly-written row.
+    cooldown_violation: int | None = None
+    with get_cursor(commit=True) as cur:
+        cur.execute("SET LOCAL lock_timeout = '30s'")
+        cur.execute("SET LOCAL statement_timeout = '60s'")
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(%s, %s)",
+            (_LOCK_CLASS_RECOMMENDED_ACTIONS, refresh_run_id),
+        )
+
+        # Cooldown check inside the lock: how old is the current cache
+        # row (which may have just been written by the render we
+        # waited on)? If younger than the cooldown, refuse.
         cur.execute(
             """
             SELECT EXTRACT(EPOCH FROM (NOW() - created_at))::int AS age_s
@@ -295,21 +320,36 @@ async def regenerate_recommended_actions(
             (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
         )
         age_row = cur.fetchone()
-
-    if age_row is not None and age_row[0] is not None:
-        age_s = int(age_row[0])
-        if age_s < _REGENERATE_COOLDOWN_SECONDS:
-            wait_s = max(1, _REGENERATE_COOLDOWN_SECONDS - age_s)
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"Recommendations were just generated for this "
-                    f"snapshot. Try again in ~{wait_s} seconds (per-"
-                    f"subject Regenerate cooldown is "
-                    f"{_REGENERATE_COOLDOWN_SECONDS} seconds)."
-                ),
-                headers={"Retry-After": str(wait_s)},
+        if age_row is not None and age_row[0] is not None:
+            age_s = int(age_row[0])
+            if age_s < _REGENERATE_COOLDOWN_SECONDS:
+                # Record the violation; raise outside the with so the
+                # transaction commits cleanly (releasing the lock)
+                # before the HTTPException propagates.
+                cooldown_violation = age_s
+        if cooldown_violation is None:
+            # Delete the cache row inside the lock so the next page
+            # render is guaranteed to see no row and fire a fresh LLM
+            # call — even if the render races against this commit.
+            cur.execute(
+                """
+                DELETE FROM refresh_analyses
+                WHERE refresh_run_id = %s AND analysis_type = %s
+                """,
+                (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
             )
 
-    invalidate_recommended_actions_cache(refresh_run_id)
+    if cooldown_violation is not None:
+        wait_s = max(1, _REGENERATE_COOLDOWN_SECONDS - cooldown_violation)
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Recommendations were just generated for this "
+                f"snapshot. Try again in ~{wait_s} seconds (per-"
+                f"subject Regenerate cooldown is "
+                f"{_REGENERATE_COOLDOWN_SECONDS} seconds)."
+            ),
+            headers={"Retry-After": str(wait_s)},
+        )
+
     return None

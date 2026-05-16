@@ -1720,7 +1720,17 @@ def _compute_recommended_actions(
 
     def _call(prompt: str) -> dict[str, Any] | None:
         try:
-            client = genai.Client(api_key=api_key)
+            # http_options.timeout is in milliseconds. 45s gives the
+            # 2048-thinking-budget call enough headroom (typical
+            # latency is 5-15s; tail can stretch to 20-30s under
+            # quota pressure) while still failing fast on a hung
+            # connection — which is the failure mode the advisory
+            # lock around this call cannot tolerate (held lock +
+            # held DB connection if the call never returns).
+            client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=45_000),
+            )
             response = client.models.generate_content(
                 model="gemini-2.5-pro",
                 contents=prompt,
@@ -1767,6 +1777,25 @@ def _compute_recommended_actions(
     # up, finds the cached row, skips its LLM call.
     try:
         with get_cursor(commit=True) as cur:
+            # Session-level timeouts before the lock acquisition:
+            #
+            #   lock_timeout       — cap the time we'll wait at the
+            #                        `pg_advisory_xact_lock` call below.
+            #                        Without this, a wedged peer holding
+            #                        the lock could make us wait
+            #                        indefinitely.
+            #   statement_timeout  — cap individual SQL statements.
+            #                        Doesn't cancel the Python-side LLM
+            #                        call (that's bounded by the
+            #                        HttpOptions(timeout=...) in
+            #                        genai.Client), but does cancel any
+            #                        SQL within this transaction that
+            #                        runs longer than expected.
+            #
+            # Both are SET LOCAL so they revert at transaction end and
+            # don't affect other code paths sharing the connection.
+            cur.execute("SET LOCAL lock_timeout = '30s'")
+            cur.execute("SET LOCAL statement_timeout = '60s'")
             cur.execute(
                 "SELECT pg_advisory_xact_lock(%s, %s)",
                 (_LOCK_CLASS_RECOMMENDED_ACTIONS, refresh_run_id),
