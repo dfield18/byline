@@ -1,11 +1,14 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-15 (Recommended
+> A pulse-check of where the project sits **as of 2026-05-16 (full
+> project QA pass + remediation — 7 commits closing runtime safety
+> gaps, concurrency races, validation false positives, and assorted
+> visual correctness issues. Plus the earlier 2026-05-15 Recommended
 > Actions LLM refactor, role-grounding fix, KPI-card layout iteration,
-> Citation Rate KPI tile, plus the earlier Hero refactor / topic-gap
-> headline / Wikipedia source merging / Risk Frame Rate credibility
-> fix)**. Read this first if you're a fresh Claude Code session picking
-> up work. Update when state shifts meaningfully.
+> Citation Rate KPI tile, Hero refactor / topic-gap headline /
+> Wikipedia source merging / Risk Frame Rate credibility fix)**.
+> Read this first if you're a fresh Claude Code session picking up
+> work. Update when state shifts meaningfully.
 
 ---
 
@@ -832,6 +835,251 @@ hallucination):*
   button currently has no rate limit. If a user spam-clicks it, it
   will spam the LLM. Add a per-subject cooldown similar to the
   refresh button.
+
+**Full project QA pass + remediation — shipped this session (2026-05-16):**
+
+A structured audit across the whole Recommended Actions pipeline +
+recent UI changes (Hero KPIs, TopicRecallChart, Visibility Trends,
+Sources donut). Audit performed via parallel subagents covering
+backend edge cases and frontend rendering edge cases, plus direct DB
+inspection of subject diversity. Audit found 1 high-severity + 4
+medium-severity + 4 low-severity items plus an unnumbered float-
+equality issue. All 10 issues are now closed across 7 commits.
+
+*Commit chain (oldest → newest):*
+
+1. **`f77a8c1`** — Dashboard polish bundle + first batch of runtime
+   safety fixes (Sources donut chart, Visibility Trends coloring +
+   tooltips, Recommended Actions runtime safety).
+2. **`e9adc66`** — QA commit 2: visual correctness (TopicRecallChart
+   no-real-gap suppression, hero/chart tiebreak consistency, Citation
+   Rate not-measured distinction, MiniSpark format prop).
+3. **`2e74300`** — QA commit 3: donut polish (touch support +
+   stale-hover reset).
+4. **`6bc98ef`** — MED 9 fix: Postgres advisory lock around the
+   Recommended Actions read → LLM → write window.
+5. **`e3f846c`** — MED 12 fix: word-boundary grounding validation.
+6. **`a4a5316`** — QA lows: source palette overflow, MiniSpark
+   flat-line axis, Regenerate cooldown, float-epsilon tie detection,
+   cleaner API error UX.
+7. **`a79f116`** — Piece 1: partial unique index on
+   `recommended_actions_*` rows + upsert cache write.
+
+*Runtime safety & cost containment (commit f77a8c1)*
+- `SubjectOverview.recommended_actions` typed nullable; client
+  component short-circuits with a null guard before destructure.
+  Prevents a `TypeError` crash on API contract regression or
+  deployment skew.
+- `_top_sources_for_refresh` SQL now uses `ORDER BY n_citations DESC,
+  domain ASC`. Without the tiebreaker, tied source counts flipped
+  row order between calls and caused cache misses on every page
+  render (each miss = paid Gemini 2.5 Pro call). Likely-significant
+  cost vector closed.
+- Added `canonical_url` to the LLM payload and gated the "subject's
+  own canonical website" surface in the prompt on its presence.
+  Without this, the LLM cheerfully recommended SEO updates to
+  websites that don't exist for issue/policy/event subjects.
+- Added explicit null-`current_role` branch to the prompt with
+  per-category surface guidance (organizations, issues, policies,
+  events). 5 of 12 subjects in the DB are non-person categories
+  with no `role` field; the prompt now instructs the model to NOT
+  invent fictitious offices/leadership and to lean on
+  subject_category + topic names + recent_news instead.
+- Cache version bumped recommended_actions_v3 → v4.
+
+*Visual correctness (commit e9adc66)*
+- TopicRecallChart only marks a warning-orange bar when there's a
+  real gap (>1 topic AND not all tied within float epsilon). Prior
+  behavior: a single-topic snapshot at 100% rendered with that lone
+  bar in warning orange (contradicts the value); all-tied snapshots
+  arbitrarily highlighted the last-input topic.
+- Tiebreak now consistent between Hero's Weakest Topic Recall
+  subtitle and TopicRecallChart's warning-orange bar. Both use
+  `findWeakestTopic` (first-wins). Prior inconsistency could show
+  topic A in the hero subtitle while highlighting topic B in the
+  chart on tied data.
+- Citation Rate sparkline distinguishes "not measured" from "need
+  more snapshots." For subjects without a canonical_url, every
+  snapshot's value is null; tile now shows "—" in muted foreground
+  + body says "Not measured for this subject" + footer says "This
+  metric isn't measured for this subject." Previously showed the
+  misleading "Need more snapshots for a trend line" — taking more
+  snapshots wouldn't have fixed it.
+- MiniSpark tooltip uses the passed `format` callback. Previously
+  showed raw floats (`2026-04-15: 0.234`); now shows the metric's
+  natural units (`2026-04-15: 23%` or `+12% positive`).
+
+*Donut polish (commit 2e74300)*
+- Touch support: each donut segment + each legend row gained an
+  `onClick` toggle. Mobile/iPad users can now tap to highlight +
+  populate the center label; tap again to clear; tap another to
+  switch. Desktop hover unchanged.
+- Stale-hover reset: `hovered` is an integer index into segments;
+  added a `useEffect` keyed on a derived `dataKey` (`type:name`
+  joins memoized over `sources`) to reset to null when the data
+  shape changes. Prevents the legend dimming the wrong row after
+  Regenerate adds/removes a category.
+
+*Advisory lock — concurrent LLM cost (commit 6bc98ef, MED 9)*
+- Two concurrent renders for the same subject (multiple browser
+  tabs, collaborators, fast page reloads) could both miss cache
+  and both fire paid Gemini 2.5 Pro calls ($0.05 + 5-15s each),
+  discarding one result. Worst case under N concurrent loads:
+  N paid calls instead of 1.
+- New `_LOCK_CLASS_RECOMMENDED_ACTIONS = 1` namespace constant.
+  `_compute_recommended_actions` refactored to hold a single
+  transaction across read → LLM call → write, with
+  `pg_advisory_xact_lock(class, refresh_run_id)` at the top.
+  Second concurrent render blocks on the lock, wakes up after
+  the first commits, re-checks cache inside the lock, finds the
+  freshly-written row, returns it without firing a second
+  (paid) LLM call.
+- LLM call (5-15s) happens with DB connection open + lock held.
+  Acceptable for typical render volume. If connection-pool
+  pressure becomes a problem under load, the natural next step
+  is precomputing actions in the worker when a refresh completes
+  (decoupling generation from page render entirely).
+- Verified live: concurrency smoke test on the dev DB confirmed
+  Worker A holds lock 2s, Worker B starting 0.3s later waited
+  exactly 1.70s for A's commit before acquiring.
+
+*Word-boundary grounding validation (commit e3f846c, MED 12)*
+- Previous substring matcher in `_validate_actions_grounding`
+  produced false positives: topic "Trade" matched "trade-off",
+  source "ap.org" matched "map" or "snap", topic "Policy" passed
+  virtually any policy-adjacent sentence.
+- Switched to `re.compile(r"\b" + re.escape(ent) + r"\b",
+  re.IGNORECASE)`. `re.escape` handles entities with periods /
+  hyphens / ampersands; word boundary forces the entity to appear
+  as a standalone token.
+- New `_GROUNDING_MIN_ENTITY_LEN = 3` cutoff. Acronyms like "AI",
+  "US", "EU" are dropped from the valid-entity list — too generic
+  to ground reliably even with boundary matching.
+- Side benefit: false-positive grounding failures now correctly
+  trigger the existing stricter-retry path. Bad outputs get a
+  real second chance instead of silently slipping through.
+- Verified with 8 unit-test-style scenarios covering false
+  positives, true positives, multi-word entities, domains with
+  periods, empty-payload edge case, and the short-entity filter.
+
+*Low-severity lots batch (commit a4a5316)*
+- **LOW 16** Sources donut: when source-type count exceeds the
+  palette size (7), collapses the tail into a single "Other
+  (N more)" bucket using the bottom palette slot. Top
+  (palette.length − 1) categories each still get their own color.
+  More honest than silently aliasing colors.
+- **LOW 17** MiniSpark flat-line: when min === max (all snapshot
+  values identical), renders a single vertically-centered axis
+  label instead of two stacked identical labels.
+- **LOW 19** Regenerate cooldown: new `_REGENERATE_COOLDOWN_SECONDS
+  = 30` enforced server-side. The endpoint reads the age of the
+  current `recommended_actions_v4` cache row before invalidating;
+  refuses with HTTP 429 + a Retry-After header + a human-readable
+  detail message when the row is younger than 30s. Spam-clicking
+  Regenerate can no longer burn back-to-back paid LLM calls.
+- **LOW float-epsilon** `buildGapBottomLine` tie detection: replaced
+  strict float equality with `Math.abs(diff) < TIE_EPSILON`
+  (0.001). DB-aggregation micro-differences no longer cause bogus
+  "AI underweights X" lines to render when there's no real gap.
+  Matches the pattern already in TopicRecallChart.
+- **Bonus** API error UX: `apiPostNoContent` extracts FastAPI's
+  `{detail: "..."}` field on non-OK responses. The Regenerate
+  cooldown's user-facing error now reads as a sentence instead
+  of a wrapped HTTP status string.
+
+*Schema defense (commit a79f116, Piece 1)*
+- **Migration `011_recommended_actions_unique.sql`** — new partial
+  unique index `idx_recommended_actions_unique` on
+  `(refresh_run_id, analysis_type) WHERE analysis_type LIKE
+  'recommended_actions_%'`. Partial-and-predicate-scoped so it
+  doesn't constrain other analyzers (`asymmetry`,
+  `share_of_voice` write multiple per-model rows per refresh).
+  LIKE-prefix predicate covers all future cache version bumps
+  (v4 → v5 → …) automatically.
+- Cache write switched from `DELETE` + `INSERT` to `INSERT ... ON
+  CONFLICT (refresh_run_id, analysis_type) WHERE analysis_type
+  LIKE 'recommended_actions_%%' DO UPDATE`. Same row id preserved
+  across writes; no churn on the primary-key sequence.
+- `created_at = NOW()` set in the DO UPDATE clause so the
+  Regenerate cooldown's age check measures time since latest write
+  (matching prior DELETE+INSERT semantics; otherwise upsert would
+  freeze `created_at` at the first write and break the cooldown).
+- Verified live against the dev DB: plain duplicate INSERT now
+  rejected with `duplicate key value violates unique constraint`;
+  upsert succeeds, preserves row id, refreshes `created_at`.
+
+*The Recommended Actions pipeline as it stands today (post-QA)*
+
+Three independent layers of defense against the original concurrent-
+write race, each operating at a different level:
+
+1. **Application-level** — `pg_advisory_xact_lock(class=1,
+   refresh_run_id)` in `_compute_recommended_actions` serializes
+   concurrent writers. Second render blocks → first finishes &
+   writes → second wakes up, finds cached row, skips its LLM call.
+2. **Validation-level** — word-boundary regex grounding (with
+   3-char minimum entity length) catches LLM hallucinations that
+   would silently pass the prior substring matcher. Failures
+   trigger one stricter retry; if that also fails, the request
+   falls through to the subject-agnostic generic fallback.
+3. **Schema-level** — partial unique index makes duplicate
+   `(refresh_run_id, recommended_actions_*)` rows physically
+   impossible. Upsert path writes idempotently. If a future code
+   path forgets the lock or a manual SQL write happens, the
+   constraint still holds.
+
+Full read → write flow on a cache miss (single render):
+
+```
+1. _build_recommended_actions_payload(...)
+   ├─ filter "Current events" topic (internal bucket, not a real area)
+   ├─ extract setup_inputs.role / audience / recent_news / canonical_url
+   └─ assemble structured payload (returns None if too thin to recommend on)
+
+2. Acquire pg_advisory_xact_lock(1, refresh_run_id)
+
+3. SELECT findings FROM refresh_analyses WHERE ... ORDER BY id DESC
+   ├─ If row exists AND cached_payload == current_payload: return cached
+   └─ Otherwise: proceed
+
+4. Gemini 2.5 Pro call (thinking_budget=2048)
+   ├─ Validate shape (1 primary + 2 secondary, all label/action/why non-empty)
+   ├─ Validate grounding (every action references ≥1 entity by name)
+   └─ On failure: one stricter retry, then fallback
+
+5. INSERT ... ON CONFLICT DO UPDATE (with created_at = NOW())
+
+6. Transaction commit → lock released → next render's cache read finds row
+```
+
+Regenerate flow (separate endpoint):
+
+```
+1. POST /api/subjects/{id}/recommended-actions/regenerate
+2. Lookup latest refresh_run_id for subject
+3. Read current cache row's created_at; if <30s old, refuse with 429
+4. Otherwise: DELETE the cache row → next page render fires fresh LLM call
+```
+
+*Cleanup notes — orphaned helpers*
+
+- `_recommended_actions_cache_read` and `_recommended_actions_cache_write`
+  in queries.py are now unused (the orchestrator inlines the SQL inside
+  the locked transaction). Left in place as documentation of the cache
+  row shape; safe to delete in a future cleanup pass.
+
+*Follow-ups identified but not addressed (low priority)*
+
+- **Cache warming via worker** — precompute actions when a refresh
+  completes so the first page render doesn't pay the 5-15s LLM
+  latency cost. Decouples generation from render entirely.
+- **Source palette extension** — could extend `SOURCE_TYPE_COLORS`
+  beyond 7 entries to support 8+ distinct categories without the
+  "Other" collapse. Current "Other" bucket is more honest about
+  chart legibility but loses some detail.
+- **STATE.md long-tail** — this file is now ~2000 lines. Worth
+  rolling old session entries into a separate `STATE_archive.md`
+  once it's clear no fresh session will need them.
 
 **Known issues / followups from the 2026-05-12 QA pass (none blocking):**
 
