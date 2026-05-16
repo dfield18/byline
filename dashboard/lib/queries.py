@@ -9,6 +9,7 @@ Reads from the same Postgres connection as `app/db.py`.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from psycopg.types.json import Json
@@ -1408,35 +1409,82 @@ def _build_recommended_actions_payload(
     }
 
 
+_GROUNDING_MIN_ENTITY_LEN = 3
+"""Minimum character length for an entity to count toward the
+grounding check. Below this threshold (e.g. acronyms like 'AI',
+'US', or stop-word topic names like 'a', 'to') the entity would
+trivially appear in unrelated text and produce false positives even
+under word-boundary matching, so we exclude them rather than rely on
+them as grounding signals."""
+
+
 def _validate_actions_grounding(
     actions: dict[str, Any], payload: dict[str, Any],
 ) -> bool:
     """Check that every action sentence references at least one
-    specific entity by name from the payload (substring match,
-    case-insensitive). Catches hallucinated sources / topics and
-    actions that ducked the named-entity requirement."""
-    valid_entities: list[str] = []
+    specific entity by name from the payload using a word-boundary
+    regex match (case-insensitive).
+
+    Word-boundary matching (not bare substring) prevents false
+    positives that the prior implementation accepted:
+      - "trade" entity matching "trade-off" in unrelated text
+      - "ap.org" entity matching "map" or "snap"
+      - "Policy" topic name passing virtually any policy-adjacent
+        sentence (now it must appear as a standalone word)
+
+    Entities shorter than `_GROUNDING_MIN_ENTITY_LEN` chars are
+    dropped — too generic to ground reliably even with boundary
+    matching ("AI", "US", "EU" would still trivially appear in any
+    serious comms recommendation).
+
+    Returns True when there are no valid entities to ground against
+    (extremely sparse payload) — the action sentences pass trivially
+    rather than getting rejected for an issue that isn't the LLM's
+    fault. Otherwise: every action sentence must contain at least
+    one valid entity as a whole word/phrase."""
+    raw_entities: list[str] = []
     weakest = payload.get("weakest_topic") or {}
     if weakest.get("name"):
-        valid_entities.append(weakest["name"].lower())
+        raw_entities.append(str(weakest["name"]).strip())
     for t in payload.get("strongest_topics") or []:
         if t.get("name"):
-            valid_entities.append(t["name"].lower())
+            raw_entities.append(str(t["name"]).strip())
     cluster = payload.get("dominant_narrative_cluster") or {}
     if cluster.get("name"):
-        valid_entities.append(cluster["name"].lower())
+        raw_entities.append(str(cluster["name"]).strip())
     for s in payload.get("top_sources") or []:
         if s.get("domain"):
-            valid_entities.append(s["domain"].lower())
+            raw_entities.append(str(s["domain"]).strip())
+
+    # Length filter + dedupe (case-insensitive) so duplicate entities
+    # don't slow the matching loop.
+    seen: set[str] = set()
+    valid_entities: list[str] = []
+    for ent in raw_entities:
+        if len(ent) < _GROUNDING_MIN_ENTITY_LEN:
+            continue
+        key = ent.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        valid_entities.append(ent)
+
     if not valid_entities:
         return True  # nothing to ground against; pass
+
+    # Compile boundary-match patterns once. re.escape handles
+    # entities containing periods, hyphens, ampersands, etc.
+    patterns = [
+        re.compile(r"\b" + re.escape(ent) + r"\b", re.IGNORECASE)
+        for ent in valid_entities
+    ]
 
     actions_to_check = [actions.get("primary") or {}] + list(
         actions.get("secondary") or []
     )
     for a in actions_to_check:
-        text = (a.get("action") or "").lower()
-        if not any(ent in text for ent in valid_entities):
+        text = a.get("action") or ""
+        if not any(p.search(text) for p in patterns):
             return False
     return True
 
