@@ -40,6 +40,7 @@ import {
 } from "@/lib/api";
 import { RefreshButton } from "./refresh-button";
 import { RecommendedActionsBlock } from "./recommended-actions";
+import { SourcesTypeMix } from "./sources-type-mix";
 
 export const dynamic = "force-dynamic";
 
@@ -877,54 +878,65 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
     values: (number | null)[];
     format: (v: number | null) => string;
     tooltip: string;
+    // `kind` drives the conditional value coloring via getKpiValueColor.
+    // Uses the same thresholds the Hero KPI tiles use, so the same
+    // metric carries identical color semantics across both surfaces.
+    colorKind: "mention_rate" | "avg_tone" | "citation_rate";
   }[] = [
     {
       title: "AI Mention Rate",
       values: trajectory.ai_recall,
       format: (v) => formatPct(v, 0),
       tooltip: "Share of AI answers that mention this subject on topic-area questions (where the prompt doesn't name them directly), plotted across each weekly snapshot. Higher is better. Rising means AI is more reliably surfacing the subject when asked about their topic areas.",
+      colorKind: "mention_rate",
     },
     {
       title: "Average Tone",
       values: trajectory.avg_sentiment,
       format: (v) => formatTonePct(v),
       tooltip: "Average tone of AI answers about this subject across each weekly snapshot. Range −100% (most negative) to +100% (most positive); 0% is neutral. Sustained shifts here reflect changes in how AI characterizes the subject — favorable or critical.",
+      colorKind: "avg_tone",
     },
     {
       title: "Citation Rate",
       values: trajectory.citation_rate,
       format: (v) => formatPct(v, 0),
       tooltip: "Share of AI answers that cite the subject's canonical website (e.g., campaign homepage or org domain), plotted across each weekly snapshot. Higher is better. Subjects without a canonical URL configured will show 0% throughout.",
+      colorKind: "citation_rate",
     },
   ];
 
   return (
     <div className="grid md:grid-cols-3 gap-4">
-      {metrics.map((m) => (
-        <Card key={m.title} className="p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              {m.title}
+      {metrics.map((m) => {
+        const latestValue = m.values[m.values.length - 1] ?? null;
+        const valueColor = getKpiValueColor(m.colorKind, latestValue);
+        return (
+          <Card key={m.title} className="p-5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                {m.title}
+              </div>
+              <KpiTooltipIcon text={m.tooltip} align="right" />
             </div>
-            <KpiTooltipIcon text={m.tooltip} align="right" />
-          </div>
-          <div className="mt-1 text-2xl font-semibold tracking-tight">
-            {m.format(m.values[m.values.length - 1] ?? null)}
-          </div>
-          <div className="mt-3">
-            <MiniSpark
-              values={m.values}
-              isHistorical={trajectory.is_historical}
-              labels={trajectory.weeks}
-              format={m.format}
-            />
-          </div>
-          <div className="mt-3 pt-3 border-t border-border text-xs text-foreground/70 leading-relaxed">
-            {trajectory.weeks.length} weekly snapshot{trajectory.weeks.length === 1 ? "" : "s"};
-            most recent is {formatRefreshKind(trajectory.is_historical[trajectory.is_historical.length - 1] ?? false)}.
-          </div>
-        </Card>
-      ))}
+            <div className={`mt-1 text-2xl font-semibold tracking-tight ${valueColor}`}>
+              {m.format(latestValue)}
+            </div>
+            <div className="mt-3">
+              <MiniSpark
+                values={m.values}
+                isHistorical={trajectory.is_historical}
+                labels={trajectory.weeks}
+                format={m.format}
+              />
+            </div>
+            <div className="mt-3 pt-3 border-t border-border text-xs text-foreground/70 leading-relaxed">
+              {trajectory.weeks.length} weekly snapshot{trajectory.weeks.length === 1 ? "" : "s"};
+              most recent is {formatRefreshKind(trajectory.is_historical[trajectory.is_historical.length - 1] ?? false)}.
+            </div>
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -1218,92 +1230,10 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
 // High-contrast monochromatic blue gradient used inside the stacked
 // bar and matching legend dots so the two visualizations stay
 // visually unified.
-const SOURCE_TYPE_COLORS = [
-  "oklch(0.28 0.16 245)",
-  "oklch(0.45 0.16 245)",
-  "oklch(0.60 0.14 245)",
-  "oklch(0.74 0.11 245)",
-  "oklch(0.85 0.07 245)",
-  "oklch(0.91 0.04 245)",
-  "oklch(0.95 0.02 245)",
-];
-
-function SourcesTypeMix({ sources }: { sources: SubjectOverview["sources"] }) {
-  if (!sources.length) return null;
-
-  // Roll up by type, summing influence scores. Sort desc so heavier
-  // categories appear first in both the bar segments and the legend.
-  const byType = new Map<string, number>();
-  for (const s of sources) {
-    byType.set(s.type, (byType.get(s.type) || 0) + s.score);
-  }
-  const aggregated = Array.from(byType.entries())
-    .map(([name, score]) => ({ name, score }))
-    .sort((a, b) => b.score - a.score);
-  const total = aggregated.reduce((acc, x) => acc + x.score, 0) || 1;
-
-  // Horizontal stacked bar replaces the donut chart — supports the
-  // source-mix readout rather than dominating the card. The legend
-  // below carries the actual labels and percentages; the bar is just
-  // a visual aid for proportions at a glance.
-  return (
-    <div className="lg:border-l lg:border-border/60 lg:pl-8 pt-1">
-      <div className="text-[11px] uppercase tracking-wider text-foreground/65 mb-3">
-        By category
-      </div>
-
-      {/* Horizontal stacked bar — single 10px tall row, segments
-          proportional to each category's share of total influence.
-          Each segment has a styled tooltip on hover (CSS-only, group/
-          peer pattern); first/last segments get rounded ends
-          individually so the bar still reads as one continuous shape
-          even though the parent allows overflow for tooltip escape. */}
-      <div className="flex h-2.5 w-full">
-        {aggregated.map((t, i) => {
-          const pct = (t.score / total) * 100;
-          const isFirst = i === 0;
-          const isLast = i === aggregated.length - 1;
-          return (
-            <div
-              key={t.name}
-              className={`group relative cursor-default ${isFirst ? "rounded-l-sm" : ""} ${isLast ? "rounded-r-sm" : ""}`}
-              style={{
-                width: `${pct}%`,
-                backgroundColor: SOURCE_TYPE_COLORS[i % SOURCE_TYPE_COLORS.length],
-              }}
-            >
-              <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 whitespace-nowrap rounded-md border border-border bg-popover px-2.5 py-1.5 text-[11px] font-medium text-popover-foreground opacity-0 group-hover:opacity-100 transition-opacity z-30 shadow-lg">
-                {t.name} — {Math.round(pct)}%
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Legend with full category names + percentages. This is the
-          primary read; the bar is decorative reinforcement. */}
-      <ul className="mt-4 space-y-2">
-        {aggregated.map((t, i) => (
-          <li
-            key={t.name}
-            className="flex items-center justify-between gap-2 text-[13px]"
-          >
-            <span className="flex items-center gap-2 min-w-0">
-              <span
-                className="h-2 w-2 rounded-sm shrink-0"
-                style={{ backgroundColor: SOURCE_TYPE_COLORS[i % SOURCE_TYPE_COLORS.length] }}
-              />
-              <span className="truncate text-foreground/85">{t.name}</span>
-            </span>
-            <span className="tabular-nums font-medium text-foreground/70">
-              {Math.round((t.score / total) * 100)}%
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+// SourcesTypeMix is a client component (interactive hover state on
+// the donut segments); imported from ./sources-type-mix at the top
+// of this file. The SOURCE_TYPE_COLORS palette lives in that file
+// since it's the sole consumer.
 
 // ── Placeholder section for Phase 2/3 methodology gaps ──────────────
 

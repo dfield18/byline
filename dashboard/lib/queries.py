@@ -1093,7 +1093,11 @@ def _polish_executive_summary(
 #     locations as pitch surfaces (Wikipedia still allowed); added
 #     `why` field to every recommendation (short rationale tying the
 #     action back to the data).
-_RECOMMENDED_ACTIONS_TYPE = "recommended_actions_v3"
+# v4: added canonical_url to the payload (gates the "own website"
+#     surface); added explicit null-current_role branch to the prompt
+#     so non-person subjects (organizations, issues, policies, events)
+#     don't trigger fictitious-office hallucinations.
+_RECOMMENDED_ACTIONS_TYPE = "recommended_actions_v4"
 
 _RECOMMENDED_ACTIONS_SCHEMA = {
     "type": "OBJECT",
@@ -1221,6 +1225,34 @@ CRITICAL — grounding in subject's actual context:
   do NOT treat it as a real topic area to act on. Recommend on the
   named substantive topics instead.
 
+CRITICAL — when `current_role` is null:
+- A null `current_role` means the subject is NOT a person — it's an
+  organization, issue, policy, or event (look at `subject_category`).
+- Do NOT invent a fictitious role, office, spokesperson, or leadership
+  position for the subject. Do not say "Secretary Foundation" or
+  "Director of Inflation Reduction Act."
+- Instead, treat `subject_category` + `subject_name` as the subject's
+  identity, and lean entirely on tracked topic names + recent_news to
+  ground recommendations.
+- Surface choices for non-person subjects should fit the category:
+    - organization: op-eds authored by its leadership (generically),
+      statements published under its banner, Wikipedia edits to the
+      organization's page.
+    - issue: explainer briefs for journalists covering the issue,
+      Wikipedia edits to the issue's page, expert commentary.
+    - policy: analyst briefings on policy implementation, Wikipedia
+      edits to the policy's page, FAQ updates if the subject has a
+      canonical site.
+    - event: backgrounders for journalists covering the event,
+      Wikipedia edits to the event's page, retrospective commentary
+      tied to anniversaries.
+
+CRITICAL — when `canonical_url` is null:
+- The subject does not have an owned canonical website. Do NOT
+  recommend "SEO updates," "content updates on the subject's website,"
+  or any action that requires controlling a website. Pick a different
+  surface from the allowed list.
+
 Output JSON only, matching this schema:
 {{
   "primary": {{
@@ -1337,6 +1369,11 @@ def _build_recommended_actions_payload(
         "subject_category": subject_category,
         "current_role": setup_inputs.get("role") or None,
         "audience": setup_inputs.get("audience") or None,
+        # Gates the "SEO update on the subject's own canonical website"
+        # surface in the prompt. When null, prompt forbids site-update
+        # recommendations (otherwise the LLM cheerfully suggests
+        # updating a site the subject doesn't own).
+        "canonical_url": setup_inputs.get("canonical_url") or None,
         "recent_news": recent_news,
         "weakest_topic": {
             "name": weakest["label"],
@@ -2787,7 +2824,14 @@ def _top_sources_for_refresh(
         )
         SELECT domain, source_type, n_citations
         FROM counts
-        ORDER BY n_citations DESC
+        -- Tiebreak by domain ASC so the row order is fully deterministic.
+        -- Without this, two domains tied on citation count flip
+        -- positions arbitrarily between calls — fine for display but
+        -- catastrophic for the Recommended Actions cache key, which
+        -- includes the full payload (incl. top_sources) via JSON
+        -- equality. Order flips → JSON mismatch → cache miss → paid
+        -- Gemini 2.5 Pro call on every page render.
+        ORDER BY n_citations DESC, domain ASC
         """,
         (refresh_run_id,),
     )

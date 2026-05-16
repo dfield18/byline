@@ -16,7 +16,7 @@ export function RecommendedActionsBlock({
   actions,
   subjectId,
 }: {
-  actions: RecommendedActions;
+  actions: RecommendedActions | null | undefined;
   subjectId: number;
 }) {
   const [pending, startTransition] = useTransition();
@@ -29,6 +29,11 @@ export function RecommendedActionsBlock({
       if (!result.ok) setError(result.error);
     });
   }
+
+  // Defensive: backend always returns at least the fallback shape, but
+  // if the API contract regresses or a stale deployment serves a null,
+  // skip rendering entirely rather than crashing on destructure.
+  if (!actions || !actions.primary) return null;
 
   const { primary, secondary, warning } = actions;
 

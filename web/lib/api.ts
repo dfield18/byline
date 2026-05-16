@@ -244,11 +244,15 @@ export type SubjectOverview = {
   }[];
   bottom_line: string | null;
   recommended_focus: string | null;
+  // Always populated by the backend (even on LLM failure it returns the
+  // generic fallback shape), but marked nullable defensively so a
+  // deployment skew or API contract regression can't crash the
+  // dashboard via a destructure on undefined.
   recommended_actions: {
     primary: { label: string; action: string; why: string };
     secondary: { label: string; action: string; why: string }[];
     warning?: string | null;
-  };
+  } | null;
   narrative_clusters: {
     name: string;
     description: string;
