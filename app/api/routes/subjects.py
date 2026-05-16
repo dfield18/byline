@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.api.auth import User, current_user
 from app.db import get_cursor
 from dashboard.lib.queries import (
+    _RECOMMENDED_ACTIONS_TYPE,
     create_subject,
     get_subject,
     get_subject_overview,
@@ -36,6 +37,13 @@ _VALID_CATEGORIES = {"person", "organization", "issue", "policy", "event"}
 # Numbers are deliberately generous; tune later as we see real usage.
 _REFRESH_PER_SUBJECT_COOLDOWN_MINUTES = 5
 _REFRESH_PER_ORG_HOURLY_LIMIT = 20
+
+# Cooldown between Regenerate clicks on the Recommended Actions for
+# the same subject. Prevents spam-clicking the Regenerate button from
+# firing back-to-back paid Gemini 2.5 Pro calls (~$0.05 each). The
+# advisory lock around the LLM call serializes concurrent renders but
+# does NOT bound rapid sequential clicks from a single user.
+_REGENERATE_COOLDOWN_SECONDS = 30
 
 
 class CreateSubjectRequest(BaseModel):
@@ -243,6 +251,10 @@ async def regenerate_recommended_actions(
     """Drop the cached LLM recommendations for this subject's latest
     snapshot. The next page render will re-call the LLM and produce a
     fresh set of recommendations. Org-scoped; cross-org access 404s.
+
+    Rate limit: refuses with 429 if the current cache row is younger
+    than _REGENERATE_COOLDOWN_SECONDS so spam-clicking can't burn paid
+    LLM calls.
     """
     org_id = _require_org(user)
 
@@ -261,10 +273,43 @@ async def regenerate_recommended_actions(
         )
         row = cur.fetchone()
 
-    if row is None:
-        # No snapshots yet — nothing to regenerate. 204 (no-op) instead
-        # of 404 since the request itself was well-formed.
-        return None
+        if row is None:
+            # No snapshots yet — nothing to regenerate. 204 (no-op)
+            # instead of 404 since the request itself was well-formed.
+            return None
 
-    invalidate_recommended_actions_cache(row[0])
+        refresh_run_id = row[0]
+
+        # Cooldown check: how old is the current cache row? If it's
+        # within the cooldown window, refuse. Reads from the
+        # refresh_analyses row this regenerate would delete; if the
+        # row doesn't exist (already deleted, or never written), we
+        # allow the regenerate to proceed without enforcement.
+        cur.execute(
+            """
+            SELECT EXTRACT(EPOCH FROM (NOW() - created_at))::int AS age_s
+            FROM refresh_analyses
+            WHERE refresh_run_id = %s AND analysis_type = %s
+            ORDER BY id DESC LIMIT 1
+            """,
+            (refresh_run_id, _RECOMMENDED_ACTIONS_TYPE),
+        )
+        age_row = cur.fetchone()
+
+    if age_row is not None and age_row[0] is not None:
+        age_s = int(age_row[0])
+        if age_s < _REGENERATE_COOLDOWN_SECONDS:
+            wait_s = max(1, _REGENERATE_COOLDOWN_SECONDS - age_s)
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Recommendations were just generated for this "
+                    f"snapshot. Try again in ~{wait_s} seconds (per-"
+                    f"subject Regenerate cooldown is "
+                    f"{_REGENERATE_COOLDOWN_SECONDS} seconds)."
+                ),
+                headers={"Retry-After": str(wait_s)},
+            )
+
+    invalidate_recommended_actions_cache(refresh_run_id)
     return None

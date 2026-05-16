@@ -61,6 +61,9 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 // POST that doesn't expect a JSON response body (e.g., 204 No Content).
+// On error, extracts FastAPI's `{detail: "..."}` field when present so
+// the thrown Error message is human-readable (matters for rate-limit
+// 429s and validation errors that surface inline in the UI).
 async function apiPostNoContent(path: string, body: unknown = {}): Promise<void> {
   const token = await bearerToken();
   const res = await fetch(`${API_URL}${path}`, {
@@ -74,9 +77,16 @@ async function apiPostNoContent(path: string, body: unknown = {}): Promise<void>
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(
-      `byline API POST ${path} → HTTP ${res.status}: ${text.slice(0, 300)}`
-    );
+    let message = text.slice(0, 300);
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      if (typeof parsed?.detail === "string") {
+        message = parsed.detail;
+      }
+    } catch {
+      // Body wasn't JSON; fall through with the raw text.
+    }
+    throw new Error(message);
   }
 }
 

@@ -353,8 +353,18 @@ function buildGapBottomLine(
   const weakest = findWeakestTopic(withRecall)!;
   const others = withRecall.filter((t) => t !== weakest);
   // If the weakest's rate ties with every other topic's, there's no
-  // gap to surface — defer to the server bottom_line instead.
-  if (others.every((t) => (t.ai_recall ?? 0) === (weakest.ai_recall ?? 0))) {
+  // gap to surface — defer to the server bottom_line instead. Use
+  // float epsilon so DB-aggregation micro-differences (0.6666666 vs
+  // 0.6666667) don't bypass the tie check. Matches the TIE_EPSILON
+  // used in TopicRecallChart for consistency.
+  const TIE_EPSILON = 0.001;
+  if (
+    others.every(
+      (t) =>
+        Math.abs((t.ai_recall ?? 0) - (weakest.ai_recall ?? 0)) <
+        TIE_EPSILON,
+    )
+  ) {
     return null;
   }
   const weakestPct = Math.round((weakest.ai_recall ?? 0) * 100);
@@ -1039,14 +1049,27 @@ function MiniSpark({
   // padding (pl-9) so the SVG plot area visually starts to the right
   // of the axis labels; the SVG itself still renders edge-to-edge
   // within the remaining width.
+  // When every numeric value is identical (e.g. flat 100% recall
+  // across all snapshots), min === max and both axis labels would
+  // render the same text stacked. Show a single vertically-centered
+  // label instead — clearer about what's being depicted.
+  const flatLine = min === max;
   return (
     <div className="relative h-[120px] pl-9">
-      <span className="absolute left-0 top-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
-        {format(max)}
-      </span>
-      <span className="absolute left-0 bottom-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
-        {format(min)}
-      </span>
+      {flatLine ? (
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
+          {format(max)}
+        </span>
+      ) : (
+        <>
+          <span className="absolute left-0 top-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
+            {format(max)}
+          </span>
+          <span className="absolute left-0 bottom-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
+            {format(min)}
+          </span>
+        </>
+      )}
       <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-full w-full">
         {/* Subtle top/bottom gridlines anchor the line to the axis
             labels' values. Dashed + faint so they read as guidance

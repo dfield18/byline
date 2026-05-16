@@ -47,9 +47,29 @@ export function SourcesTypeMix({
   for (const s of sources) {
     byType.set(s.type, (byType.get(s.type) || 0) + s.score);
   }
-  const aggregated = Array.from(byType.entries())
+  const allAggregated = Array.from(byType.entries())
     .map(([name, score]) => ({ name, score }))
     .sort((a, b) => b.score - a.score);
+
+  // Color palette has 7 slots. When more than 7 distinct categories
+  // exist, the modulo wrap makes two categories share the same hue —
+  // indistinguishable in both the donut and the legend. Collapse the
+  // tail into a single "Other (N more)" bucket instead. Reserve one
+  // palette slot for "Other" so the top (palette.length - 1) named
+  // categories each still get their own color.
+  const PALETTE_NAMED_SLOTS = SOURCE_TYPE_COLORS.length - 1;
+  let aggregated: { name: string; score: number }[];
+  if (allAggregated.length > SOURCE_TYPE_COLORS.length) {
+    const top = allAggregated.slice(0, PALETTE_NAMED_SLOTS);
+    const rest = allAggregated.slice(PALETTE_NAMED_SLOTS);
+    const otherScore = rest.reduce((acc, x) => acc + x.score, 0);
+    aggregated = [
+      ...top,
+      { name: `Other (${rest.length} more)`, score: otherScore },
+    ];
+  } else {
+    aggregated = allAggregated;
+  }
   const total = aggregated.reduce((acc, x) => acc + x.score, 0) || 1;
 
   const size = 144;
