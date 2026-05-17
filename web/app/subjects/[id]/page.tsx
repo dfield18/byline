@@ -1091,8 +1091,23 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
             <span className="text-[10px] text-muted-foreground tabular-nums w-4">
               {String(idx + 1).padStart(2, "0")}
             </span>
-            <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="truncate font-medium">{s.name}</span>
+            {/* Source name + icon are a single anchor target — clicking
+                either opens the source's homepage in a new tab. The
+                domain is already normalized by `_canonical_domain`
+                (no `www.` prefix, no Wikipedia subdomain), so a bare
+                `https://${s.name}` resolves correctly for all
+                real-world sources we surface. `group-hover` keeps the
+                icon and the text in visual sync on hover. */}
+            <a
+              href={`https://${s.name}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group inline-flex items-center gap-2 min-w-0 hover:text-primary transition-colors"
+              title={`Open ${s.name} in a new tab`}
+            >
+              <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0 group-hover:text-primary transition-colors" />
+              <span className="truncate font-medium">{s.name}</span>
+            </a>
           </div>
           <div className="col-span-3 text-right">
             <div className="inline-flex items-center gap-1.5">
