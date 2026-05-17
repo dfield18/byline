@@ -5,14 +5,22 @@ import type { SubjectOverview } from "@/lib/api";
 
 // Mirror of the page-level constant so the donut + legend share one
 // color ladder. Update both if the palette changes.
+// Sequential blue ramp (hue 245) used by the donut + legend swatches.
+// Lightness is spread roughly evenly from 0.28 → 0.97 so adjacent
+// slices have visible contrast (the prior ramp compressed the light
+// end — only 0.04 lightness between the last two stops). Chroma fades
+// from 0.16 at the darkest to 0.025 at the lightest, which is the
+// most blue you can hold at near-white lightness while still reading
+// as "blue tint" rather than gray. Darkest stop (0.28 0.16 245)
+// unchanged so the largest category keeps its current weight.
 const SOURCE_TYPE_COLORS = [
   "oklch(0.28 0.16 245)",
-  "oklch(0.45 0.16 245)",
-  "oklch(0.60 0.14 245)",
-  "oklch(0.74 0.11 245)",
-  "oklch(0.85 0.07 245)",
-  "oklch(0.91 0.04 245)",
-  "oklch(0.95 0.02 245)",
+  "oklch(0.40 0.16 245)",
+  "oklch(0.52 0.15 245)",
+  "oklch(0.64 0.13 245)",
+  "oklch(0.76 0.10 245)",
+  "oklch(0.87 0.06 245)",
+  "oklch(0.97 0.025 245)",
 ];
 
 export function SourcesTypeMix({
