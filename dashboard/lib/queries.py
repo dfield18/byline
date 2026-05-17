@@ -3067,6 +3067,14 @@ def _canonical_domain(domain: str) -> str:
     if not domain:
         return domain
     d = domain.lower()
+    # Strip leading `www.` so `pbs.org` and `www.pbs.org` aren't
+    # treated as two distinct sources. AI assistants cite the same
+    # underlying site with/without the prefix interchangeably; from
+    # the dashboard reader's standpoint they're one source. Done
+    # before the Wikimedia checks so a `www.wikipedia.org` (rare but
+    # possible) is normalized too.
+    if d.startswith("www."):
+        d = d[4:]
     if d == "wikipedia.org" or d.endswith(".wikipedia.org"):
         return "wikipedia.org"
     if d == "wikimedia.org" or d.endswith(".wikimedia.org"):
