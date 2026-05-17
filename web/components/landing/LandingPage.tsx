@@ -18,13 +18,6 @@ const DEMO_SUBJECT_DISPLAY = DEMO_SUBJECT.startsWith("[")
   ? "Senator Maya Reyes"
   : DEMO_SUBJECT;
 
-const SUBJECT_LIMITS =
-  "Up to 25 subjects per organization on the standard plan.";
-const SNAPSHOT_DETAILS =
-  "Each subject runs roughly 13 prompts per cycle across ChatGPT, Claude, Gemini, and Perplexity — refreshed weekly.";
-const INTEGRATION_LIST =
-  "Export to CSV, share snapshots via link, or send a weekly brief by email.";
-
 const WHO_IT_IS_FOR: { title: string; description: string }[] = [
   {
     title: "Public-affairs firms",
@@ -96,7 +89,7 @@ function Positioning() {
   return (
     <section className="border-b border-border/80">
       <div className="mx-auto max-w-[900px] px-6 py-8 text-center">
-        <p className="text-[15.5px] leading-relaxed text-foreground/80">
+        <p className="text-[16px] leading-relaxed text-foreground/85">
           <span className="font-semibold text-foreground">byline</span> monitors
           AI-generated answers the way media teams monitor press coverage.
         </p>
@@ -192,7 +185,7 @@ function Hero() {
             <h1 className="font-display text-[40px] font-semibold leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[52px] md:text-[60px]">
               The most influential editor in politics has no byline.
             </h1>
-            <p className="mt-6 max-w-2xl text-[17px] leading-relaxed text-foreground/80">
+            <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
               Track how ChatGPT, Claude, Gemini, and Perplexity describe your
               candidate, issue, or organization &mdash; and see where your
               narrative is gaining or losing ground.
@@ -241,19 +234,19 @@ function HeroVisual() {
       />
       <div className="relative">
         <div className="flex items-center justify-between">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/70">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/80">
             Topic recall
           </div>
-          <div className="text-[10px] text-foreground/65">Last 30 days</div>
+          <div className="text-[10.5px] font-medium text-foreground/75">Last 30 days</div>
         </div>
         <div className="mt-5 space-y-3.5">
           {topics.map((t) => (
             <div key={t.label}>
               <div className="mb-1.5 flex items-baseline justify-between">
-                <span className="text-[12.5px] text-foreground/85">{t.label}</span>
+                <span className="text-[13px] text-foreground/90">{t.label}</span>
                 <span
-                  className={`text-[12px] font-semibold ${
-                    t.low ? "text-warning" : "text-foreground/80"
+                  className={`text-[12.5px] font-semibold tabular-nums ${
+                    t.low ? "text-warning" : "text-foreground/85"
                   }`}
                 >
                   {t.pct}%
@@ -292,7 +285,7 @@ function Problem() {
           <div className="font-display text-[64px] font-semibold leading-none tracking-[-0.03em] text-primary sm:text-[88px]">
             50%
           </div>
-          <div className="mt-3 max-w-md text-[15px] leading-relaxed text-foreground/85">
+          <div className="mt-3 max-w-md text-[15.5px] leading-relaxed text-foreground/85">
             of US consumers now intentionally seek out AI-powered search.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
@@ -341,7 +334,7 @@ function ProductPreview() {
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
             A live read on how AI is framing {DEMO_SUBJECT_DISPLAY}.
           </h2>
-          <p className="mt-4 text-[16px] leading-relaxed text-foreground/80">
+          <p className="mt-4 text-[16px] leading-relaxed text-foreground/85">
             Every snapshot pairs the AI&rsquo;s actual framing with the gap that
             matters, the sources driving it, and the move you can make this week.
           </p>
@@ -361,14 +354,14 @@ function ProductPreview() {
             {/* Top row: subject + period */}
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 border-b border-border/80 pb-5">
               <div>
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/70">
+                <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-foreground/80">
                   AI Visibility Snapshot
                 </div>
                 <div className="font-display text-[20px] font-semibold tracking-[-0.01em] text-foreground">
                   {DEMO_SUBJECT_DISPLAY}
                 </div>
               </div>
-              <div className="text-[11px] text-foreground/65">
+              <div className="text-[11.5px] font-medium text-foreground/75">
                 Last 7 days · 4 platforms
               </div>
             </div>
@@ -384,14 +377,14 @@ function ProductPreview() {
                   key={kpi.label}
                   className="rounded-md border border-border/80 bg-background/60 p-4"
                 >
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/70">
+                  <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/80">
                     {kpi.label}
                   </div>
                   <div className="mt-1.5 flex items-baseline gap-2">
                     <span className="font-display text-[24px] font-semibold tabular-nums tracking-[-0.02em] text-foreground">
                       {kpi.value}
                     </span>
-                    <span className="text-[11px] font-medium text-success">
+                    <span className="text-[11.5px] font-semibold text-success">
                       {kpi.trend === "up" ? "▲" : "▼"} {kpi.delta}
                     </span>
                   </div>
@@ -401,7 +394,7 @@ function ProductPreview() {
 
             {/* Narrative mix */}
             <div className="mt-8">
-              <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
+              <div className="mb-3 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground/80">
                 Dominant narrative
               </div>
               <div className="space-y-2.5">
@@ -412,7 +405,7 @@ function ProductPreview() {
                   { label: "Other", pct: 12, tone: "muted" as const },
                 ].map((n) => (
                   <div key={n.label} className="flex items-center gap-3">
-                    <div className="w-40 shrink-0 text-[12.5px] text-foreground/80">
+                    <div className="w-40 shrink-0 text-[13px] text-foreground/85">
                       {n.label}
                     </div>
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
@@ -429,7 +422,7 @@ function ProductPreview() {
                         }}
                       />
                     </div>
-                    <div className="w-10 shrink-0 text-right text-[12px] font-semibold tabular-nums text-foreground/80">
+                    <div className="w-10 shrink-0 text-right text-[12.5px] font-semibold tabular-nums text-foreground/85">
                       {n.pct}%
                     </div>
                   </div>
@@ -441,15 +434,15 @@ function ProductPreview() {
             <div className="mt-7 rounded-md border border-primary/30 bg-primary/[0.05] p-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                  <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-primary">
                     Recommended move
                   </div>
-                  <div className="text-[13.5px] leading-relaxed text-foreground/85">
+                  <div className="text-[14px] leading-relaxed text-foreground/90">
                     Seed independent sources on housing affordability &mdash;
                     the largest unowned gap in this snapshot.
                   </div>
                 </div>
-                <div className="shrink-0 whitespace-nowrap pt-1 text-[11px] font-medium text-primary">
+                <div className="shrink-0 whitespace-nowrap pt-1 text-[11.5px] font-semibold text-primary">
                   Read brief →
                 </div>
               </div>
@@ -490,7 +483,7 @@ function Capabilities() {
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
             Built for narrative, not brand mentions.
           </h2>
-          <p className="mt-4 text-[16px] leading-relaxed text-foreground/80">
+          <p className="mt-4 text-[16px] leading-relaxed text-foreground/85">
             Most AI visibility tools count mentions. byline explains the story
             AI is telling &mdash; what answer engines actually say about your
             candidate, issue, or organization, and where the framing is
@@ -503,7 +496,7 @@ function Capabilities() {
               <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
                 {item.title}
               </h3>
-              <p className="mt-2 text-[14px] leading-relaxed text-foreground/80">
+              <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/85">
                 {item.body}
               </p>
             </Card>
@@ -515,26 +508,22 @@ function Capabilities() {
 }
 
 function HowItWorks() {
-  const steps: { title: string; body: string; detail: string | null }[] = [
+  const steps: { title: string; body: string }[] = [
     {
       title: "Choose the race, issue, or organization.",
-      body: "Pick the candidates, policy debates, or organizations you want to track. byline handles the prompt design.",
-      detail: SUBJECT_LIMITS,
+      body: "Add the candidates, issues, or organizations you want to track.",
     },
     {
       title: "Ask the questions voters, journalists, and stakeholders are asking.",
-      body: "We run those questions across ChatGPT, Claude, Gemini, and Perplexity — the same way real audiences encounter the topic.",
-      detail: SNAPSHOT_DETAILS,
+      body: "We query ChatGPT, Claude, Gemini, and Perplexity the way real audiences do.",
     },
     {
       title: "Track how AI answers frame the subject.",
-      body: "Each snapshot surfaces the dominant narrative, where you’re strongest or weakest, and the sources driving the answer.",
-      detail: null,
+      body: "Each snapshot shows the dominant narrative and the sources shaping it.",
     },
     {
       title: "Turn narrative gaps into comms strategy.",
-      body: "Headline gaps, evidence quotes, and concrete next-week moves — what to brief, where to pre-empt, which surfaces to seed.",
-      detail: INTEGRATION_LIST,
+      body: "Get specific next-week moves — what to brief, where to pre-empt, what to seed.",
     },
   ];
   return (
@@ -548,23 +537,20 @@ function HowItWorks() {
             From subjects to action in four steps.
           </h2>
         </div>
-        <ol className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <ol className="grid gap-7 md:grid-cols-2 lg:grid-cols-4">
           {steps.map((step, i) => (
-            <li key={step.title} className="relative">
-              <div className="mb-4 flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-[12px] font-semibold tabular-nums text-primary">
-                {i + 1}
-              </div>
-              <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
-                {step.title}
-              </h3>
-              <p className="mt-2 text-[14px] leading-relaxed text-foreground/80">
-                {step.body}
-              </p>
-              {step.detail && (
-                <p className="mt-3 text-[12.5px] leading-relaxed text-foreground/65">
-                  {step.detail}
+            <li key={step.title}>
+              <Card className="h-full p-6 md:p-7">
+                <div className="mb-5 flex h-9 w-9 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-[13px] font-semibold tabular-nums text-primary">
+                  {i + 1}
+                </div>
+                <h3 className="text-[16px] font-semibold leading-snug tracking-tight text-foreground">
+                  {step.title}
+                </h3>
+                <p className="mt-3 text-[14.5px] leading-relaxed text-foreground/85">
+                  {step.body}
                 </p>
-              )}
+              </Card>
             </li>
           ))}
         </ol>
@@ -591,7 +577,7 @@ function WhoItsFor() {
               <h3 className="text-[15.5px] font-semibold tracking-tight text-foreground">
                 {seg.title}
               </h3>
-              <p className="mt-2 text-[14px] leading-relaxed text-foreground/80">
+              <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/85">
                 {seg.description}
               </p>
             </Card>
@@ -609,7 +595,7 @@ function ClosingCTA() {
         <h2 className="font-display text-[36px] font-semibold leading-[1.1] tracking-[-0.025em] text-foreground sm:text-[48px]">
           Find out what AI is saying about your issue.
         </h2>
-        <p className="mx-auto mt-5 max-w-xl text-[16.5px] leading-relaxed text-foreground/80">
+        <p className="mx-auto mt-5 max-w-xl text-[17px] leading-relaxed text-foreground/85">
           See the briefing AI is already giving your audience.
         </p>
         <div className="mt-10 flex flex-col items-center gap-3">
