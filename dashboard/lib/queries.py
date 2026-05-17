@@ -727,6 +727,14 @@ def _compute_strategic_takeaways(
                 f"of {strong['label']} prompts with {sent_label} overall "
                 f"sentiment."
             ),
+            # Per-topic recall + mean sentiment, surfaced as structured
+            # fields so downstream consumers (e.g., _compute_bottom_line)
+            # can quote them without re-querying or regex-parsing the
+            # body string. Specific to this topic — distinct from the
+            # overall kpis["ai_recall"] / ["avg_sentiment"] which
+            # aggregate across the full response set.
+            "recall": strong["recall"],
+            "mean_sentiment": strong["mean_sentiment"],
         })
 
     # Display order for the dashboard: Strongest Asset on the left
@@ -2052,8 +2060,22 @@ def _compute_bottom_line(
             f"but underweights {gap_topic}."
         )
     if strong_topic:
-        recall = kpis.get("ai_recall", {}).get("value")
-        sent = kpis.get("avg_sentiment", {}).get("value")
+        # Quote the PER-TOPIC recall + sentiment from the strongest_asset
+        # takeaway (those values pertain to `strong_topic` specifically),
+        # NOT the overall kpis["ai_recall"] / ["avg_sentiment"] (which
+        # aggregate across the full response set). Using the overall
+        # numbers here produced sentences like "AI strongly associates
+        # X with TOPIC (90% mention rate)" where 90% was the cross-topic
+        # average — a reader naturally parses the % as the rate on the
+        # named topic, which it isn't. Falls back to the overall recall
+        # only if the takeaway didn't carry a structured value (older
+        # cached strongest_asset rows without the `recall` field).
+        recall = strong.get("recall")
+        if recall is None:
+            recall = kpis.get("ai_recall", {}).get("value")
+        sent = strong.get("mean_sentiment")
+        if sent is None:
+            sent = kpis.get("avg_sentiment", {}).get("value")
         sent_label = (
             "favorable" if (sent or 0) > 0.1
             else "critical" if (sent or 0) < -0.1

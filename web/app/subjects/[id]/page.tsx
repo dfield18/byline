@@ -280,12 +280,33 @@ function HeroKpis({
 }: {
   kpis: SubjectOverview["kpis"];
   // Per-topic mention rates from the same snapshot. Used to populate
-  // the Weakest Topic Recall tile (value + topic-name subtitle). The
-  // full per-topic breakdown also renders below the hero in
+  // the Weakest Topic Visibility tile (value + topic-name subtitle).
+  // The full per-topic breakdown also renders below the hero in
   // TopicRecallChart — same source, two different surfacings.
   topics: SubjectOverview["topic_coverage"];
 }) {
   const weakest = findWeakestTopic(topics);
+
+  // Mirror of the backend's `min_recall_gap_pp` threshold (15pp). When
+  // the weakest topic's recall isn't materially below the mean of the
+  // other tracked topics, there's no actionable "gap" — pointing the
+  // tile at a specific topic would mislead a reader into thinking that
+  // topic is a weakness when really all topics are clustered together.
+  // The tile keeps showing the value (the weakest IS still the weakest,
+  // even if everything's at 100%), but the subtitle swaps to a neutral
+  // signal so the reader doesn't chase a non-issue.
+  const MIN_GAP_PP = 15;
+  const withRecall = topics.filter(_hasFiniteRecall);
+  const others = weakest
+    ? withRecall.filter((t) => t !== weakest)
+    : [];
+  const hasMeaningfulGap = (() => {
+    if (!weakest || !others.length) return false;
+    const meanOthers =
+      others.reduce((s, t) => s + (t.ai_recall ?? 0), 0) / others.length;
+    const gapPP = (meanOthers - (weakest.ai_recall ?? 0)) * 100;
+    return gapPP >= MIN_GAP_PP;
+  })();
 
   const tiles: {
     // Plain-English title. Was previously the metric's official name
@@ -325,9 +346,18 @@ function HeroKpis({
       goodDirection: "up",
     },
     {
-      title: "Biggest visibility gap",
-      subtitle: weakest ? capitalizeFirst(weakest.label) : null,
-      tooltip: "Weakest Topic Recall — lowest topic-level mention rate in this snapshot. Highlights the largest gap in how AI associates the subject with its tracked topics. Same data feeds the Topic Recall chart below.",
+      title: "Weakest topic visibility",
+      // Subtitle names the weakest topic when there's a meaningful gap
+      // vs the other tracked topics; otherwise it signals that all
+      // tracked topics are clustered together so a reader doesn't
+      // misread the topic name as a weakness. Threshold mirrors the
+      // backend's Message Gap rule (15pp).
+      subtitle: weakest
+        ? hasMeaningfulGap
+          ? capitalizeFirst(weakest.label)
+          : "No material gap across tracked topics"
+        : null,
+      tooltip: "Weakest Topic Recall — lowest topic-level mention rate in this snapshot. Same data feeds the Topic Recall chart below. The subtitle names the topic only when its recall is at least 15pp below the average of the other tracked topics.",
       value: formatPct(weakest?.ai_recall ?? null),
       valueColor: getKpiValueColor("weakest_topic_recall", weakest?.ai_recall ?? null),
       // Per-topic deltas aren't tracked in the current API (trajectory
@@ -396,9 +426,10 @@ function HeroKpis({
               {/* Subtitle slot — reserved with min-h even when empty
                   so the bottom edge of every card sits at the same
                   vertical position regardless of whether this tile
-                  carries a subtitle. Only the Biggest Visibility Gap
+                  carries a subtitle. Only the Weakest Topic Visibility
                   tile populates this today (with the weakest topic
-                  name); the others render an empty placeholder. */}
+                  name, or a "no material gap" signal when topics are
+                  clustered); the others render an empty placeholder. */}
               <div
                 className="text-[11px] text-muted-foreground truncate min-h-[14px]"
                 title={t.subtitle ?? undefined}
@@ -1337,11 +1368,11 @@ export default async function SubjectOverviewPage({
                 />
               </div>
               {/* KPI strip: Unprompted mentions · Positive vs negative ·
-                  Biggest visibility gap · % citing own site. Risk
+                  Weakest topic visibility · % citing own site. Risk
                   Frame / Unprompted Criticism Rate was promoted out
                   of the hero in favor of the gap metric — it lives in
                   TopicRecallChart's data feed. Passing topic_coverage
-                  so the Biggest Visibility Gap tile can show the
+                  so the Weakest Topic Visibility tile can show the
                   weakest topic name as a subtitle. */}
               <HeroKpis kpis={data.kpis} topics={data.topic_coverage} />
             </Card>
