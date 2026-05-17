@@ -12,6 +12,11 @@ const SAMPLE_REPORT_URL = "[SAMPLE_REPORT_URL_PLACEHOLDER]";
 const CONTACT_EMAIL = "[CONTACT_EMAIL_PLACEHOLDER]";
 
 const DEMO_SUBJECT = "[DEMO_SUBJECT_PLACEHOLDER]";
+// Fallback name rendered in the UI until DEMO_SUBJECT is set to a real value.
+// Keeps the page from showing the literal `[..._PLACEHOLDER]` string.
+const DEMO_SUBJECT_DISPLAY = DEMO_SUBJECT.startsWith("[")
+  ? "Senator Maya Reyes"
+  : DEMO_SUBJECT;
 
 const SUBJECT_LIMITS =
   "Up to 25 subjects per organization on the standard plan.";
@@ -171,12 +176,12 @@ function Hero() {
               AI Narrative Intelligence
             </div>
             <h1 className="font-display text-[40px] font-semibold leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[52px] md:text-[60px]">
-              The most influential editor in politics doesn&rsquo;t have a byline.
+              The most influential editor in politics has no byline.
             </h1>
             <p className="mt-6 max-w-2xl text-[17px] leading-relaxed text-foreground/70">
-              Millions of Americans turn to AI for answers about politics, policy,
-              and the people shaping it. See how AI is framing your issue &mdash;
-              and shape the story before your opponents do.
+              Millions of Americans now turn to AI for answers &mdash; including
+              about politics, policy, and the people shaping it. See how AI is
+              framing your issue, and shape the story before your opponents do.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-5">
               <a
@@ -206,10 +211,10 @@ function Hero() {
 
 function HeroVisual() {
   const topics = [
-    { label: "Consumer protection", pct: 84 },
-    { label: "Banking regulation", pct: 71 },
-    { label: "Housing affordability", pct: 22, low: true },
-    { label: "Corporate power", pct: 66 },
+    { label: "Climate policy", pct: 84 },
+    { label: "Immigration", pct: 71 },
+    { label: "Voting rights", pct: 22, low: true },
+    { label: "Healthcare access", pct: 66 },
   ];
   return (
     <Card className="relative overflow-hidden p-6">
@@ -287,17 +292,21 @@ function Problem() {
             </a>
           </div>
         </div>
-        <p className="mx-auto mt-12 max-w-2xl text-[16.5px] leading-relaxed text-foreground/75">
-          AI has quietly become the front door to the internet. Half of
-          Americans now intentionally seek out AI search — ChatGPT, Gemini,
-          Claude, or Google&apos;s AI features — to research candidates,
-          policies, and the organizations shaping them. Among those who&apos;ve
-          tried it, 44% say it&apos;s already their primary source, beating
-          Google&apos;s traditional results (31%). The AI doesn&apos;t link
-          your audience to your press release, your op-ed, or your fact sheet.
-          It gives them an answer. Most communications teams have no idea
-          what that answer says.
-        </p>
+        <div className="mx-auto mt-12 max-w-2xl space-y-5 text-[16.5px] leading-relaxed text-foreground/75">
+          <p>
+            Half of consumers now intentionally use AI-powered search. Among
+            those who&apos;ve tried it, 44% say it&apos;s already their primary
+            source, beating traditional search at 31%.
+          </p>
+          <p>
+            Voters ask ChatGPT, Gemini, Claude, and Google&apos;s AI features
+            the same questions they used to type into Google — about
+            candidates, records, policies, and the organizations shaping them.
+            The AI doesn&apos;t link them to your press release, your op-ed,
+            or your fact sheet. It gives them an answer. Most communications
+            teams have no idea what that answer says.
+          </p>
+        </div>
       </div>
     </section>
   );
@@ -312,7 +321,7 @@ function ProductPreview() {
             What you see
           </div>
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
-            A live read on how AI is framing {DEMO_SUBJECT}.
+            A live read on how AI is framing {DEMO_SUBJECT_DISPLAY}.
           </h2>
           <p className="mt-4 text-[16px] leading-relaxed text-foreground/70">
             Every snapshot pairs the AI&rsquo;s actual framing with the gap that
@@ -338,7 +347,7 @@ function ProductPreview() {
                   AI Visibility Snapshot
                 </div>
                 <div className="font-display text-[20px] font-semibold tracking-[-0.01em] text-foreground">
-                  {DEMO_SUBJECT}
+                  {DEMO_SUBJECT_DISPLAY}
                 </div>
               </div>
               <div className="text-[11px] text-muted-foreground">
@@ -574,11 +583,10 @@ function ClosingCTA() {
     <section className="border-b border-border/60">
       <div className="mx-auto max-w-[800px] px-6 py-28 text-center">
         <h2 className="font-display text-[36px] font-semibold leading-[1.1] tracking-[-0.025em] text-foreground sm:text-[48px]">
-          AI is already shaping the conversation about your issue &mdash; find out what it&apos;s saying.
+          Find out what AI is saying about your issue.
         </h2>
         <p className="mx-auto mt-5 max-w-xl text-[16.5px] leading-relaxed text-foreground/70">
-          [CLOSING_SUBHEAD_PLACEHOLDER] &mdash; one sentence reinforcing
-          urgency.
+          See the briefing AI is already giving your audience.
         </p>
         <div className="mt-10 flex flex-col items-center gap-3">
           <a
