@@ -645,11 +645,13 @@ def _compute_strategic_takeaways(
             lowest_pct = round(lowest["recall"] * 100)
             # 1 other: compare directly by name (avoids the awkward
             #          "average across other topic areas" phrasing).
-            # 2-4 others: name them inline with an Oxford-comma list
-            #          so the reader knows what the baseline contains.
-            # 5+ others: fall back to count phrasing — at that point
-            #          the named list pushes the sentence past
-            #          comfortable reading length.
+            # 2+ others: hand off to _format_comparator, which names
+            #          short labels inline and buckets long labels
+            #          (e.g. "figures shaping the current Republican
+            #          administration") into "and N more" so a single
+            #          verbose topic name doesn't blow up the sentence.
+            #          Falls back to a pure count when no labels are
+            #          short enough.
             if len(others) == 1:
                 other = others[0]
                 body = (
@@ -658,19 +660,12 @@ def _compute_strategic_takeaways(
                     f"{round(other['recall'] * 100)}% on "
                     f"{other['label']} prompts."
                 )
-            elif len(others) <= 4:
-                others_named = _format_list([t["label"] for t in others])
+            else:
+                others_named = _format_comparator([t["label"] for t in others])
                 body = (
                     f"AI surfaces {subj_inline} in {lowest_pct}% of "
                     f"{lowest['label']} prompts. Recall averages "
                     f"{round(other_mean * 100)}% across {others_named}."
-                )
-            else:
-                body = (
-                    f"AI surfaces {subj_inline} in {lowest_pct}% of "
-                    f"{lowest['label']} prompts. Recall averages "
-                    f"{round(other_mean * 100)}% across the other "
-                    f"{len(others)} tracked topic areas."
                 )
             takeaways.append({
                 "kind": "message_gap",
@@ -783,6 +778,36 @@ def _format_list(labels: list[str]) -> str:
     if len(labels) == 2:
         return f"{labels[0]} and {labels[1]}"
     return ", ".join(labels[:-1]) + f", and {labels[-1]}"
+
+
+# Topic labels above this length are bucketed into "and N more"
+# rather than listed inline — keeps gap-sentence length readable
+# when a topic name runs long (e.g. "figures shaping the current
+# Republican administration", 54 chars).
+_MAX_INLINE_LABEL_CHARS = 40
+_MAX_INLINE_LABELS = 4
+
+
+def _format_comparator(labels: list[str]) -> str:
+    """Build the comparator phrase for a gap-led Bottom Line / Message
+    Gap takeaway body. Names topics inline when their labels are
+    short enough, buckets long labels into "and N more", and falls
+    back to a pure count when inline naming would produce an
+    unreadable sentence. Mirrors the TS `formatComparator` helper."""
+    short = [l for l in labels if len(l) <= _MAX_INLINE_LABEL_CHARS]
+    long_count = len(labels) - len(short)
+
+    # No short labels, or too many topics to name even if short.
+    if not short or len(short) > _MAX_INLINE_LABELS:
+        return f"{len(labels)} other tracked topics"
+    # All short and within the inline cap — name them all.
+    if long_count == 0:
+        return _format_list(short)
+    # Mix: name the short ones, bucket the long ones.
+    tail = f"and {long_count} more"
+    if len(short) == 1:
+        return f"{short[0]} {tail}"
+    return f"{', '.join(short)}, {tail}"
 
 
 # ─── LLM polish for executive summary (Phase 3a refinement) ────────────

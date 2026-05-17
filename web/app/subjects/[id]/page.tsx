@@ -271,24 +271,52 @@ function buildGapBottomLine(
   const meanOthersPct = Math.round(
     (others.reduce((sum, t) => sum + (t.ai_recall ?? 0), 0) / others.length) * 100,
   );
-  // 2-4 others: name them inline with an Oxford-comma list so a
-  // reader knows what the comparison baseline actually contains.
-  // 5+: fall back to the count phrasing — at that point the named
-  // list pushes the sentence past comfortable reading length.
-  const comparator =
-    others.length <= 4
-      ? joinList(others.map((t) => t.label))
-      : `${others.length} other tracked topics`;
+  // Comparator phrasing tries to name the topics inline so a reader
+  // knows what the baseline contains. Topic labels can run long
+  // ("figures shaping the current Republican administration"), so a
+  // single verbose name in the list can blow up the sentence even
+  // when the others are short. Strategy: keep labels ≤40 chars
+  // inline; bucket longer ones into "and N more". Fall back to a
+  // pure count when nothing's short enough, or when there are too
+  // many total to list cleanly.
+  const comparator = formatComparator(others.map((t) => t.label));
   return `AI underweights ${subjectName} on ${weakest.label} — ${weakestPct}% mention rate vs ${meanOthersPct}% average across ${comparator}.`;
 }
 
 // Plain-English list joiner: "A", "A and B", "A, B, and C", etc.
-// Used by buildGapBottomLine to name the comparator topics inline.
+const MAX_INLINE_LABEL_CHARS = 40;
+const MAX_INLINE_LABELS = 4;
+
 function joinList(labels: string[]): string {
   if (labels.length === 0) return "";
   if (labels.length === 1) return labels[0];
   if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
+// Builds the "comparator" phrase for the gap Bottom Line. Names
+// topics inline when their labels are short enough, buckets long
+// labels into "and N more", and falls back to a pure count when
+// inline naming would produce an unreadable sentence.
+function formatComparator(labels: string[]): string {
+  const shortLabels = labels.filter(
+    (l) => l.length <= MAX_INLINE_LABEL_CHARS,
+  );
+  const longCount = labels.length - shortLabels.length;
+
+  // No short labels, or too many topics overall — pure count.
+  if (shortLabels.length === 0 || shortLabels.length > MAX_INLINE_LABELS) {
+    return `${labels.length} other tracked topics`;
+  }
+  // All short and within the inline cap — name them all.
+  if (longCount === 0) {
+    return joinList(shortLabels);
+  }
+  // Mix: name the short ones, bucket the long ones.
+  const tail = `and ${longCount} more`;
+  return shortLabels.length === 1
+    ? `${shortLabels[0]} ${tail}`
+    : `${shortLabels.join(", ")}, ${tail}`;
 }
 
 function HeroKpis({
