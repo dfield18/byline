@@ -68,10 +68,10 @@ export function LandingPage() {
 function PlatformsStrip() {
   const platforms = ["ChatGPT", "Claude", "Gemini", "Perplexity"];
   return (
-    <section className="border-b border-border/60 bg-card/30">
+    <section className="border-b border-border/80 bg-card/30">
       <div className="mx-auto max-w-[1200px] px-6 py-7">
         <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-8">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/70">
             Platforms monitored
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13.5px] font-medium text-foreground/80">
@@ -94,9 +94,9 @@ function PlatformsStrip() {
 
 function Positioning() {
   return (
-    <section className="border-b border-border/60">
-      <div className="mx-auto max-w-[900px] px-6 py-10 text-center">
-        <p className="text-[15.5px] leading-relaxed text-foreground/70">
+    <section className="border-b border-border/80">
+      <div className="mx-auto max-w-[900px] px-6 py-8 text-center">
+        <p className="text-[15.5px] leading-relaxed text-foreground/80">
           <span className="font-semibold text-foreground">byline</span> monitors
           AI-generated answers the way media teams monitor press coverage.
         </p>
@@ -107,8 +107,8 @@ function Positioning() {
 
 function MidPageCTA() {
   return (
-    <section className="border-b border-border/60">
-      <div className="mx-auto max-w-[1200px] px-6 py-14">
+    <section className="border-b border-border/80">
+      <div className="mx-auto max-w-[1200px] px-6 py-12">
         <div className="flex flex-col items-center justify-center gap-5 text-center sm:flex-row sm:gap-8 sm:text-left">
           <div className="text-[17px] font-medium tracking-tight text-foreground">
             See it on your own subject.
@@ -147,7 +147,7 @@ function MarketingNav() {
           </span>
         </Link>
 
-        <nav className="ml-8 hidden gap-6 text-sm text-foreground/70 md:flex">
+        <nav className="ml-8 hidden gap-6 text-sm text-foreground/80 md:flex">
           <Link href="#how-it-works" className="hover:text-foreground transition-colors">
             How it works
           </Link>
@@ -164,7 +164,7 @@ function MarketingNav() {
               signed-out visitors to the Clerk sign-in flow. */}
           <Link
             href="/subjects"
-            className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-foreground/75 hover:text-foreground sm:inline-flex"
+            className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-foreground/85 hover:text-foreground sm:inline-flex"
           >
             Sign in
           </Link>
@@ -182,17 +182,17 @@ function MarketingNav() {
 
 function Hero() {
   return (
-    <section className="border-b border-border/60">
+    <section className="border-b border-border/80">
       <div className="mx-auto max-w-[1200px] px-6 py-20 md:py-28">
         <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-16">
           <div className="lg:col-span-7">
-            <div className="mb-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary/80">
+            <div className="mb-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
               AI Narrative Intelligence
             </div>
             <h1 className="font-display text-[40px] font-semibold leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[52px] md:text-[60px]">
               The most influential editor in politics has no byline.
             </h1>
-            <p className="mt-6 max-w-2xl text-[17px] leading-relaxed text-foreground/70">
+            <p className="mt-6 max-w-2xl text-[17px] leading-relaxed text-foreground/80">
               Track how ChatGPT, Claude, Gemini, and Perplexity describe your
               candidate, issue, or organization &mdash; and see where your
               narrative is gaining or losing ground.
@@ -241,10 +241,10 @@ function HeroVisual() {
       />
       <div className="relative">
         <div className="flex items-center justify-between">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/70">
             Topic recall
           </div>
-          <div className="text-[10px] text-muted-foreground">Last 30 days</div>
+          <div className="text-[10px] text-foreground/65">Last 30 days</div>
         </div>
         <div className="mt-5 space-y-3.5">
           {topics.map((t) => (
@@ -280,9 +280,9 @@ function HeroVisual() {
 
 function Problem() {
   return (
-    <section className="border-b border-border/60 bg-card/40">
-      <div className="mx-auto max-w-[900px] px-6 py-24 text-center">
-        <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary/80">
+    <section className="border-b border-border/80 bg-card/40">
+      <div className="mx-auto max-w-[900px] px-6 py-20 text-center">
+        <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
           The problem
         </div>
         <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
@@ -292,7 +292,7 @@ function Problem() {
           <div className="font-display text-[64px] font-semibold leading-none tracking-[-0.03em] text-primary sm:text-[88px]">
             50%
           </div>
-          <div className="mt-3 max-w-md text-[15px] leading-relaxed text-foreground/75">
+          <div className="mt-3 max-w-md text-[15px] leading-relaxed text-foreground/85">
             of US consumers now intentionally seek out AI-powered search.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
@@ -306,7 +306,7 @@ function Problem() {
             </a>
           </div>
         </div>
-        <div className="mx-auto mt-12 max-w-2xl space-y-5 text-[16.5px] leading-relaxed text-foreground/75">
+        <div className="mx-auto mt-12 max-w-2xl space-y-5 text-[16.5px] leading-relaxed text-foreground/85">
           <p>
             Half of consumers now intentionally use AI-powered search. Among
             those who&apos;ve tried it, 44% say it&apos;s already their primary
@@ -332,16 +332,16 @@ function Problem() {
 
 function ProductPreview() {
   return (
-    <section className="border-b border-border/60">
-      <div className="mx-auto max-w-[1200px] px-6 py-24">
+    <section className="border-b border-border/80">
+      <div className="mx-auto max-w-[1200px] px-6 py-20">
         <div className="mb-10 max-w-2xl">
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary/80">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
             What you see
           </div>
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
             A live read on how AI is framing {DEMO_SUBJECT_DISPLAY}.
           </h2>
-          <p className="mt-4 text-[16px] leading-relaxed text-foreground/70">
+          <p className="mt-4 text-[16px] leading-relaxed text-foreground/80">
             Every snapshot pairs the AI&rsquo;s actual framing with the gap that
             matters, the sources driving it, and the move you can make this week.
           </p>
@@ -359,16 +359,16 @@ function ProductPreview() {
           />
           <div className="relative">
             {/* Top row: subject + period */}
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 border-b border-border/60 pb-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 border-b border-border/80 pb-5">
               <div>
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/70">
                   AI Visibility Snapshot
                 </div>
                 <div className="font-display text-[20px] font-semibold tracking-[-0.01em] text-foreground">
                   {DEMO_SUBJECT_DISPLAY}
                 </div>
               </div>
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-[11px] text-foreground/65">
                 Last 7 days · 4 platforms
               </div>
             </div>
@@ -382,9 +382,9 @@ function ProductPreview() {
               ].map((kpi) => (
                 <div
                   key={kpi.label}
-                  className="rounded-md border border-border/60 bg-background/60 p-4"
+                  className="rounded-md border border-border/80 bg-background/60 p-4"
                 >
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/70">
                     {kpi.label}
                   </div>
                   <div className="mt-1.5 flex items-baseline gap-2">
@@ -401,7 +401,7 @@ function ProductPreview() {
 
             {/* Narrative mix */}
             <div className="mt-8">
-              <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
                 Dominant narrative
               </div>
               <div className="space-y-2.5">
@@ -425,7 +425,7 @@ function ProductPreview() {
                               ? "var(--primary)"
                               : n.tone === "warning"
                                 ? "var(--warning)"
-                                : "color-mix(in oklab, var(--muted-foreground) 55%, transparent)",
+                                : "color-mix(in oklab, var(--muted-foreground) 75%, transparent)",
                         }}
                       />
                     </div>
@@ -481,16 +481,16 @@ function Capabilities() {
     },
   ];
   return (
-    <section id="capabilities" className="border-b border-border/60 bg-card/40">
-      <div className="mx-auto max-w-[1200px] px-6 py-24">
-        <div className="mb-12 max-w-2xl">
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary/80">
+    <section id="capabilities" className="border-b border-border/80 bg-card/40">
+      <div className="mx-auto max-w-[1200px] px-6 py-20">
+        <div className="mb-10 max-w-2xl">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
             What it does
           </div>
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
             Built for narrative, not brand mentions.
           </h2>
-          <p className="mt-4 text-[16px] leading-relaxed text-foreground/70">
+          <p className="mt-4 text-[16px] leading-relaxed text-foreground/80">
             Most AI visibility tools count mentions. byline explains the story
             AI is telling &mdash; what answer engines actually say about your
             candidate, issue, or organization, and where the framing is
@@ -503,7 +503,7 @@ function Capabilities() {
               <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
                 {item.title}
               </h3>
-              <p className="mt-2 text-[14px] leading-relaxed text-foreground/70">
+              <p className="mt-2 text-[14px] leading-relaxed text-foreground/80">
                 {item.body}
               </p>
             </Card>
@@ -538,10 +538,10 @@ function HowItWorks() {
     },
   ];
   return (
-    <section id="how-it-works" className="border-b border-border/60">
-      <div className="mx-auto max-w-[1200px] px-6 py-24">
-        <div className="mb-12 max-w-2xl">
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary/80">
+    <section id="how-it-works" className="border-b border-border/80">
+      <div className="mx-auto max-w-[1200px] px-6 py-20">
+        <div className="mb-10 max-w-2xl">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
             How it works
           </div>
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
@@ -557,11 +557,11 @@ function HowItWorks() {
               <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
                 {step.title}
               </h3>
-              <p className="mt-2 text-[14px] leading-relaxed text-foreground/70">
+              <p className="mt-2 text-[14px] leading-relaxed text-foreground/80">
                 {step.body}
               </p>
               {step.detail && (
-                <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
+                <p className="mt-3 text-[12.5px] leading-relaxed text-foreground/65">
                   {step.detail}
                 </p>
               )}
@@ -575,10 +575,10 @@ function HowItWorks() {
 
 function WhoItsFor() {
   return (
-    <section id="audience" className="border-b border-border/60 bg-card/40">
-      <div className="mx-auto max-w-[1200px] px-6 py-24">
-        <div className="mb-12 max-w-2xl">
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary/80">
+    <section id="audience" className="border-b border-border/80 bg-card/40">
+      <div className="mx-auto max-w-[1200px] px-6 py-20">
+        <div className="mb-10 max-w-2xl">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
             Who it&rsquo;s for
           </div>
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
@@ -591,7 +591,7 @@ function WhoItsFor() {
               <h3 className="text-[15.5px] font-semibold tracking-tight text-foreground">
                 {seg.title}
               </h3>
-              <p className="mt-2 text-[14px] leading-relaxed text-foreground/70">
+              <p className="mt-2 text-[14px] leading-relaxed text-foreground/80">
                 {seg.description}
               </p>
             </Card>
@@ -604,12 +604,12 @@ function WhoItsFor() {
 
 function ClosingCTA() {
   return (
-    <section className="border-b border-border/60">
-      <div className="mx-auto max-w-[800px] px-6 py-28 text-center">
+    <section className="border-b border-border/80">
+      <div className="mx-auto max-w-[800px] px-6 py-24 text-center">
         <h2 className="font-display text-[36px] font-semibold leading-[1.1] tracking-[-0.025em] text-foreground sm:text-[48px]">
           Find out what AI is saying about your issue.
         </h2>
-        <p className="mx-auto mt-5 max-w-xl text-[16.5px] leading-relaxed text-foreground/70">
+        <p className="mx-auto mt-5 max-w-xl text-[16.5px] leading-relaxed text-foreground/80">
           See the briefing AI is already giving your audience.
         </p>
         <div className="mt-10 flex flex-col items-center gap-3">
@@ -619,7 +619,7 @@ function ClosingCTA() {
           >
             Book a demo
           </a>
-          <div className="text-[13.5px] text-foreground/65">
+          <div className="text-[13.5px] text-foreground/75">
             or email us at{" "}
             <a
               href={`mailto:${CONTACT_EMAIL}`}
