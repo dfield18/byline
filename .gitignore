@@ -14,3 +14,4 @@ dist/
 
 # Local-only analytical artifacts (kept on disk, not in git)
 findings/
+.claude/
