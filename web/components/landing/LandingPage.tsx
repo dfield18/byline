@@ -244,8 +244,7 @@ function Hero() {
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
               Track how ChatGPT, Claude, Gemini, and Perplexity describe what
-              you care about &mdash; and see where your narrative is gaining
-              or losing ground.
+              you care about &mdash; and see where your narrative is shifting.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-5">
               <a
