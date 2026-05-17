@@ -1,16 +1,18 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-16 (two full
-> QA pass cycles + remediation in one day — 13 commits total closing
-> runtime safety gaps, concurrency races, validation false positives,
-> visual correctness issues, then a secondary audit closing four more
-> real bugs the first pass missed and porting the LLM precompute off
-> the request path. Plus the earlier 2026-05-15 Recommended Actions
-> LLM refactor, role-grounding fix, KPI-card layout iteration, Citation
-> Rate KPI tile, Hero refactor / topic-gap headline / Wikipedia source
-> merging / Risk Frame Rate credibility fix)**. Read this first if
-> you're a fresh Claude Code session picking up work. Update when state
-> shifts meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-17
+> (Recommended Actions split into Overview primary-card + dedicated
+> /recommendations spoke; Analysis Scope section removed from Overview;
+> ~360 lines of dead code from page.tsx; landing page initial scaffold
+> shipped from a parallel Claude Code session at `/`. Builds on the
+> 2026-05-16 dual QA pass cycles — 13 commits closing runtime safety
+> gaps, concurrency races, validation false positives, visual
+> correctness — and the 2026-05-15 Recommended Actions LLM refactor,
+> role-grounding fix, KPI-card layout iteration, Citation Rate KPI
+> tile, Hero refactor / topic-gap headline / Wikipedia source merging /
+> Risk Frame Rate credibility fix)**. Read this first if you're a fresh
+> Claude Code session picking up work. Update when state shifts
+> meaningfully.
 
 ---
 
@@ -1295,6 +1297,144 @@ hadn't fired in production yet (good catches):*
   Phase B, schema-driven new-subject form, historical
   retrospective) could split into `STATE_archive.md` to keep
   the active section focused. Not urgent.
+
+**Hub-and-spokes start + landing page + page.tsx cleanup — shipped
+this session (2026-05-16 evening → 2026-05-17):**
+
+Two work streams ran in parallel after the QA passes landed: continued
+Summary-tab polish in this session, and the landing page (`/`) built
+from scratch in a separate Claude Code session. Both shipped to `main`
+without conflicts via clear off-limits file lists.
+
+*Commit chain (oldest → newest):*
+
+14. **`8c9ce74`** — Recommended Actions: trim Overview to primary-only
+    + add dedicated `/recommendations` spoke (first hub-and-spokes
+    spoke wired up).
+15. **`1af6ba5`** — Landing page initial scaffold (parallel session).
+16. **`b480630`** — Remove Analysis Scope / "What this snapshot
+    includes" section from Overview.
+17. **`6d18de7`** — Delete orphaned `PlatformRecallStrip` + related
+    dead code (209-line cleanup after b480630).
+18. **`6a3efce`** — Landing: rewrite closing CTA headline + drop
+    "What it isn't" section.
+19. **`40d812e`** — Landing: finalize the Problem section copy
+    (McKinsey citation link, 50% stat, body paragraph).
+
+*First hub-and-spokes spoke: `/subjects/[id]/recommendations` (commit 8c9ce74)*
+- Per the planned IA in STATE.md ("Next-priority items: hub-and-spokes
+  with distinct URLs per spoke"), Recommendations is now its own page
+  at `web/app/subjects/[id]/recommendations/page.tsx`.
+- Overview tab's Recommended Actions card now renders ONLY the primary
+  action + a "View all recommendations →" link below it. The two
+  secondary actions move to the spoke so the briefing tab stays
+  focused on the headline next-step.
+- `RecommendedActionsBlock` component gained a `variant: "full" |
+  "primary-only"` prop (defaults to `"full"` so the spoke works
+  without explicit configuration). Primary-only gates the secondary
+  list and renders the spoke link.
+- Spoke uses the same data-fetch pattern as Overview (parallel
+  `getSubjectOverview` + `getSubject` + `listSubjects`, `force-dynamic`,
+  async `params` per Next.js 16). Reuses Sidebar + Header chrome.
+  Back-to-Overview link in both Header and page body.
+- Spoke link only renders when `secondary.length > 0` — no point
+  linking to "more" when there isn't more.
+
+*Why a new spoke rather than wiring an existing one* — per STATE.md's
+planned IA list (Narrative, Visibility, Competition, Topics, Sources,
+Prompts, Reports, Settings), Recommendations wasn't on the list — but
+it fits the same pattern, carries its own data (the LLM-generated
+recommendations), and has natural future expansion (history of
+regenerations, export, etc.). Added as a peer spoke.
+
+*Note on Sidebar links* — Sidebar's static placeholder `href="#"`
+links still aren't wired to real URLs. Wiring is part of the deferred
+Phase D hub-and-spokes IA work; not in scope of these commits. The
+"View all recommendations" link on the Overview is the navigation
+path to the new spoke for now.
+
+*Analysis Scope section removed + dead code purge (commits b480630, 6d18de7)*
+- The "Analysis Scope / What this snapshot includes" section between
+  Strategic Takeaways and Evidence is gone. It was the
+  topic-coverage + platforms-coverage audit view; the headline
+  visibility data lives in the Hero KPIs and Topic Recall chart
+  already, so the audit view was redundant.
+- Follow-on cleanup removed 209 lines of now-orphaned code from
+  `page.tsx`: `PlatformRecallStrip` function (~150 lines),
+  `PlatformRow` type, `emptyPlatformRow` helper, `CANONICAL_PLATFORMS`
+  constant, `TrendBadge` function, `formatDelta` helper, and the
+  `Fragment` import.
+- `data.platform_recall` API field unchanged — a future Platforms
+  spoke can rebuild from it. The removed component geometry is
+  reachable via `git show 6d18de7^:web/app/subjects/[id]/page.tsx`.
+- Net `page.tsx` size: 1916 → 1707 lines.
+
+*Landing page (parallel session, commits 1af6ba5, 6a3efce, 40d812e)*
+- New file `web/components/landing/LandingPage.tsx` (~480 lines after
+  edits): full marketing landing composed of MarketingNav + Hero +
+  Problem + ProductPreview + Capabilities + HowItWorks + WhoItsFor +
+  ClosingCTA + MarketingFooter sections. Uses the dashboard's
+  existing oklch design tokens; matches the executive-briefing tone.
+- `web/app/page.tsx` now dispatches by auth state via Clerk's
+  `auth()` server helper: signed-out → `<LandingPage />`, signed-in
+  → existing subjects-list dashboard (unchanged).
+- `web/proxy.ts` updated: `/` added to a public-routes matcher via
+  `createRouteMatcher`. Every other route still requires auth +
+  redirects to Clerk's hosted sign-in.
+- Iterative copy edits since initial scaffold: dropped the "What it
+  isn't" Differentiation section, rewrote the closing CTA headline
+  to lead with present-tense urgency, finalized the Problem section
+  copy with a real McKinsey citation link (`target="_blank"`,
+  `rel="noopener noreferrer"`, italicized report title).
+
+*Landing page placeholders STILL outstanding:*
+The landing renders without crashing but shows literal `[…PLACEHOLDER]`
+strings in several spots. Easy way to find them all:
+```bash
+grep -n "PLACEHOLDER" web/components/landing/LandingPage.tsx
+```
+Remaining: `CTA_URL_PLACEHOLDER`, `SAMPLE_REPORT_URL_PLACEHOLDER`,
+`CONTACT_EMAIL_PLACEHOLDER`, `DEMO_SUBJECT_PLACEHOLDER`,
+`SUBJECT_LIMITS_PLACEHOLDER`, `SNAPSHOT_DETAILS_PLACEHOLDER`,
+`INTEGRATION_LIST_PLACEHOLDER`, `SEGMENT_*_PLACEHOLDER`. The Problem
+section and Closing CTA copy are now final; everything else is
+structurally correct but content-pending.
+
+*Parallel-session coordination — what worked*
+- Off-limits file lists (provided in the landing session's initial
+  prompt) prevented either session from touching the other's active
+  files. Zero merge conflicts across the parallel work.
+- "No commit/push without explicit user green light" gating in the
+  landing session's prompt meant this session could commit its own
+  work first; the landing session's local changes were inspected
+  and committed from this session per user request after review.
+- STATE.md updates centralized in this session per the off-limits
+  list; the landing session was told to leave STATE.md alone.
+
+*Going forward — recommended pattern for parallel work*
+- Sidebar (`web/components/dashboard/Sidebar.tsx`) is the most
+  natural next-up shared chrome change as more spokes get built.
+  When that work starts, mark Sidebar as actively-edited in
+  whichever session has it and off-limits in the other.
+- The hub-and-spokes layout (`web/app/subjects/[id]/layout.tsx`,
+  planned in the IA but not yet created) would be a natural
+  parallel-work candidate IF coordinated up-front: one session
+  builds the shared layout, the other waits to start spoke pages
+  until the layout API is stable.
+
+*Things left after this session*
+- **Sidebar wiring** — currently all `href="#"`. Spokes that exist
+  (`/recommendations`) and spokes that will exist (`/visibility`,
+  `/narrative`, etc.) all need real hrefs threaded through with
+  `subjectId`.
+- **Landing placeholders** — see grep above. Most are content (copy,
+  URLs, demo subject reference); none require code changes.
+- **Other planned spokes** — Narrative, Visibility, Competition,
+  Topics, Sources, Prompts, Reports, Settings. None built yet.
+- **STATE.md long-tail** — now 2380+ lines. Older Phase A2 / Phase B
+  / historical-retrospective entries could split into a
+  `STATE_archive.md` to keep the active section focused. Not urgent;
+  becomes more so as more session entries accumulate.
 
 **Known issues / followups from the 2026-05-12 QA pass (none blocking):**
 
