@@ -38,7 +38,6 @@ import {
   type KpiValue,
 } from "@/lib/api";
 import { RefreshButton } from "./refresh-button";
-import { RecommendedActionsBlock } from "./recommended-actions";
 import { SourcesTypeMix } from "./sources-type-mix";
 
 export const dynamic = "force-dynamic";
@@ -1384,18 +1383,17 @@ export default async function SubjectOverviewPage({
                       );
                     })}
 
-                  {/* Recommended Actions — LLM-generated concrete moves.
-                      Primary recommendation in a prominent block (same
-                      visual weight as the prior Recommended Focus slot,
-                      now action-oriented), followed by two secondary
-                      recommendations in a compact 2-column grid below.
-                      Header has a Regenerate button to bust the cache
-                      and re-call the LLM. */}
-                  <RecommendedActionsBlock
-                    actions={data.recommended_actions}
-                    subjectId={subjectId}
-                    variant="primary-only"
-                  />
+                  {/* Recommended Actions block removed from the
+                      Overview per user request — the LLM-generated
+                      primary action + "View all" link used to live
+                      here between the takeaway callouts and the
+                      fallback. The /subjects/[id]/recommendations
+                      spoke still renders the full set; the backend
+                      pipeline (advisory lock, upsert, worker
+                      precompute, cache versioning) all stays in
+                      place untouched. Re-add by restoring
+                      <RecommendedActionsBlock variant="primary-only" />
+                      here when the surface is wanted back. */}
 
                   {/* Fallback when no Bottom Line could be synthesized */}
                   {!effectiveBottomLine && (
