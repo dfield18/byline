@@ -1342,6 +1342,48 @@ export default async function SubjectOverviewPage({
                     </div>
                   )}
 
+                  {/* Strategic-takeaway callouts inline with the hero
+                      brief. Surfaces the genuinely-new signals
+                      (strongest_asset = what's working, opposition_frame
+                      = critical framing AI volunteers) without the
+                      standalone "Strategic Takeaways" section that used
+                      to live below Topic Recall. `message_gap` is
+                      filtered out because the Bottom Line above already
+                      surfaces the gap — keeping both was the
+                      redundancy. Compact treatment: left-border accent
+                      + small uppercase eyebrow + body sentence, no
+                      card containers. */}
+                  {data.strategic_takeaways
+                    .filter((item) => item.kind !== "message_gap")
+                    .map((item) => {
+                      const accent =
+                        item.tone === "warning" ? "border-l-warning"
+                        : item.tone === "primary" ? "border-l-primary"
+                        : "border-l-foreground/30";
+                      const eyebrowColor =
+                        item.tone === "warning" ? "text-warning"
+                        : item.tone === "primary" ? "text-primary"
+                        : "text-foreground/55";
+                      return (
+                        <div
+                          key={item.kind}
+                          className={`mt-4 pl-3.5 border-l-2 ${accent}`}
+                        >
+                          <div
+                            className={`text-[10.5px] font-semibold uppercase tracking-[0.06em] ${eyebrowColor}`}
+                          >
+                            {item.eyebrow}
+                          </div>
+                          <div className="mt-0.5 text-[13.5px] font-semibold text-foreground leading-snug">
+                            {item.title}
+                          </div>
+                          <p className="mt-1 text-[13px] text-foreground/70 leading-relaxed">
+                            {item.body}
+                          </p>
+                        </div>
+                      );
+                    })}
+
                   {/* Recommended Actions — LLM-generated concrete moves.
                       Primary recommendation in a prominent block (same
                       visual weight as the prior Recommended Focus slot,
@@ -1396,70 +1438,6 @@ export default async function SubjectOverviewPage({
               audit-style topics table in Analysis Scope below
               remains unchanged. */}
           <TopicRecallChart topics={data.topic_coverage} />
-
-          {/* STRATEGIC TAKEAWAYS — Phase 2 wiring.
-              Extra top spacing (mt-12 = 48px, overrides the parent
-              space-y-8's 32px default) so the transition from the
-              executive topline (AI Narrative Brief card above) to
-              the strategic interpretation feels deliberate — a clean
-              visual pause, not two sections stacked back-to-back. */}
-          {data.strategic_takeaways.length > 0 && (
-            <section className="mt-12">
-              <SectionTitle
-                eyebrow="Strategic Takeaways"
-                title="What stands out right now"
-                description="The action-oriented interpretation — what to notice or do because of the current AI narrative."
-                className="mb-3"
-              />
-              <Card className="p-5 md:p-6">
-                {/* Insight cards — message_gap + strongest_asset (and
-                    opposition_frame when present). Each renders with a
-                    left-border accent: orange for risks/gaps, blue for
-                    assets/opportunities, muted gray otherwise.
-                    Two-column grid on md+, stacks on smaller
-                    viewports. The "Recommended Action" lead callout
-                    that previously sat above this grid was removed —
-                    it duplicated the Hero's Recommended Focus block
-                    (same source string, just reframed). */}
-                <div
-                  className={`grid gap-4 ${
-                    data.strategic_takeaways.length === 1
-                      ? "grid-cols-1"
-                      : "grid-cols-1 md:grid-cols-2"
-                  }`}
-                >
-                  {data.strategic_takeaways.map((item) => {
-                    const accent =
-                      item.tone === "warning" ? "border-l-warning"
-                      : item.tone === "primary" ? "border-l-primary"
-                      : "border-l-foreground/30";
-                    const eyebrowColor =
-                      item.tone === "warning" ? "text-warning"
-                      : item.tone === "primary" ? "text-primary"
-                      : "text-foreground/55";
-                    return (
-                      <div
-                        key={item.kind}
-                        className={`rounded-lg border border-border/60 bg-muted/30 p-4 border-l-2 ${accent}`}
-                      >
-                        <div
-                          className={`text-xs font-semibold uppercase tracking-wide ${eyebrowColor}`}
-                        >
-                          {item.eyebrow}
-                        </div>
-                        <div className="mt-1.5 text-sm font-semibold text-foreground leading-snug">
-                          {item.title}
-                        </div>
-                        <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
-                          {item.body}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Card>
-            </section>
-          )}
 
           {/* EVIDENCE — Phase 3c wiring */}
           {data.evidence_cards.length > 0 && (
