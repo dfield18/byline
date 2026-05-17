@@ -243,9 +243,9 @@ function Hero() {
               The most influential editor in politics has no byline.
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
-              Track how ChatGPT, Claude, Gemini, and Perplexity describe your
-              candidate, issue, or organization &mdash; and see where your
-              narrative is gaining or losing ground.
+              Track how ChatGPT, Claude, Gemini, and Perplexity describe what
+              you care about &mdash; and see where your narrative is gaining
+              or losing ground.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-5">
               <a
@@ -553,9 +553,8 @@ function Capabilities() {
           </h2>
           <p className="mt-4 text-[16px] leading-relaxed text-foreground/85">
             Most AI visibility tools count mentions. byline explains the story
-            AI is telling &mdash; what answer engines actually say about your
-            candidate, issue, or organization, and where the framing is
-            shifting.
+            AI is telling about what you care about &mdash; and where the
+            framing is shifting.
           </p>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -584,7 +583,7 @@ function Capabilities() {
 function HowItWorks() {
   const steps: { title: string; body: string }[] = [
     {
-      title: "Choose the race, issue, or organization.",
+      title: "Choose what you care about.",
       body: "Add the candidates, issues, or organizations you want to track.",
     },
     {
