@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { SubjectOverview } from "@/lib/api";
 
 // Mirror of the page-level constant so the donut + legend share one
@@ -42,6 +42,42 @@ const SOURCE_TYPE_COLORS = [
   "oklch(0.97 0.025 245)",
 ];
 
+type DonutSegment = {
+  color: string;
+  dashArray: string;
+  dashOffset: number;
+  name: string;
+  pct: number;
+};
+
+// Pure helper kept outside the component so the running-sum mutation
+// (`cumOffset += dashLength`) sits in plain JS rather than inside a
+// React render closure — satisfies react-hooks/immutability without
+// forcing an O(n²) reduce-and-spread dance for a ≤7-element array.
+function computeDonutSegments(
+  aggregated: { name: string; score: number }[],
+  total: number,
+  circumference: number,
+  paletteIndices: number[],
+): DonutSegment[] {
+  let cumOffset = 0;
+  return aggregated.map((t, i) => {
+    const pct = (t.score / total) * 100;
+    const dashLength = (pct / 100) * circumference;
+    const seg: DonutSegment = {
+      color: SOURCE_TYPE_COLORS[paletteIndices[i]],
+      dashArray: `${dashLength} ${circumference - dashLength}`,
+      // Negative offset advances the start point by the cumulative
+      // length already drawn by prior segments.
+      dashOffset: -cumOffset,
+      name: t.name,
+      pct: Math.round(pct),
+    };
+    cumOffset += dashLength;
+    return seg;
+  });
+}
+
 export function SourcesTypeMix({
   sources,
 }: {
@@ -56,15 +92,22 @@ export function SourcesTypeMix({
   // this, a stale `hovered` after a Regenerate that adds/removes a
   // category could highlight the wrong segment, or point out of
   // bounds. Stable identity key derived from category names so the
-  // effect only fires on meaningful changes (not on parent re-renders
+  // reset only fires on meaningful changes (not on parent re-renders
   // that pass a fresh-reference but identical array).
+  //
+  // Uses the React-recommended "adjusting state during render" pattern
+  // (https://react.dev/reference/react/useState#storing-information-from-previous-renders)
+  // rather than useEffect — avoids the wasted commit + brief flash of
+  // stale highlighting that an effect-based reset produces.
   const dataKey = useMemo(
     () => sources.map((s) => `${s.type}:${s.name}`).join("|"),
     [sources],
   );
-  useEffect(() => {
+  const [prevDataKey, setPrevDataKey] = useState(dataKey);
+  if (dataKey !== prevDataKey) {
+    setPrevDataKey(dataKey);
     setHovered(null);
-  }, [dataKey]);
+  }
 
   if (!sources.length) return null;
 
@@ -115,22 +158,12 @@ export function SourcesTypeMix({
   const strokeWidth = 26;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  let cumOffset = 0;
-  const segments = aggregated.map((t, i) => {
-    const pct = (t.score / total) * 100;
-    const dashLength = (pct / 100) * circumference;
-    const seg = {
-      color: SOURCE_TYPE_COLORS[paletteIndices[i]],
-      dashArray: `${dashLength} ${circumference - dashLength}`,
-      // Negative offset advances the start point by the cumulative
-      // length already drawn by prior segments.
-      dashOffset: -cumOffset,
-      name: t.name,
-      pct: Math.round(pct),
-    };
-    cumOffset += dashLength;
-    return seg;
-  });
+  const segments = computeDonutSegments(
+    aggregated,
+    total,
+    circumference,
+    paletteIndices,
+  );
 
   const hoveredSeg = hovered !== null ? segments[hovered] : null;
 
