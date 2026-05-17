@@ -5,6 +5,25 @@ import type { SubjectOverview } from "@/lib/api";
 
 // Mirror of the page-level constant so the donut + legend share one
 // color ladder. Update both if the palette changes.
+// Returns N indices evenly distributed across [0, paletteLen - 1].
+// Used to pick which slots of the 7-stop blue ramp to assign to a
+// donut with N slices so the slices span the full dark→light range
+// instead of stacking at the dark end. Examples (paletteLen=7):
+//   N=1 → [0]
+//   N=2 → [0, 6]
+//   N=3 → [0, 3, 6]
+//   N=4 → [0, 2, 4, 6]
+//   N=7 → [0, 1, 2, 3, 4, 5, 6]
+function pickPaletteIndices(n: number, paletteLen: number): number[] {
+  if (n <= 1) return [0];
+  if (n >= paletteLen) {
+    return Array.from({ length: paletteLen }, (_, i) => i);
+  }
+  return Array.from({ length: n }, (_, i) =>
+    Math.round((i * (paletteLen - 1)) / (n - 1)),
+  );
+}
+
 // Sequential blue ramp (hue 245) used by the donut + legend swatches.
 // Lightness is spread roughly evenly from 0.28 → 0.97 so adjacent
 // slices have visible contrast (the prior ramp compressed the light
@@ -80,6 +99,18 @@ export function SourcesTypeMix({
   }
   const total = aggregated.reduce((acc, x) => acc + x.score, 0) || 1;
 
+  // Pick N evenly-spaced indices from the 7-stop blue ramp instead
+  // of taking the first N. With 3 categories the prior approach used
+  // indices 0, 1, 2 — three dark blues that read nearly identical;
+  // the spread approach uses 0, 3, 6 (dark → medium → light) so each
+  // slice gets a visually distinct shade. Same idea for 2 / 4 / 5 /
+  // 6 categories: stretch across the full palette range rather than
+  // clustering at the dark end.
+  const paletteIndices = pickPaletteIndices(
+    aggregated.length,
+    SOURCE_TYPE_COLORS.length,
+  );
+
   const size = 144;
   const strokeWidth = 26;
   const radius = (size - strokeWidth) / 2;
@@ -89,7 +120,7 @@ export function SourcesTypeMix({
     const pct = (t.score / total) * 100;
     const dashLength = (pct / 100) * circumference;
     const seg = {
-      color: SOURCE_TYPE_COLORS[i % SOURCE_TYPE_COLORS.length],
+      color: SOURCE_TYPE_COLORS[paletteIndices[i]],
       dashArray: `${dashLength} ${circumference - dashLength}`,
       // Negative offset advances the start point by the cumulative
       // length already drawn by prior segments.
@@ -213,7 +244,7 @@ export function SourcesTypeMix({
                   className="h-2 w-2 rounded-sm shrink-0"
                   style={{
                     backgroundColor:
-                      SOURCE_TYPE_COLORS[i % SOURCE_TYPE_COLORS.length],
+                      SOURCE_TYPE_COLORS[paletteIndices[i]],
                   }}
                 />
                 <span className="truncate text-foreground/85">{t.name}</span>
