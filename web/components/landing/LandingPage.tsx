@@ -29,17 +29,17 @@ const WHO_IT_IS_FOR: { title: string; description: string }[] = [
   {
     title: "Public-affairs firms",
     description:
-      "Brief principals and clients on how AI is framing their issues, which sources are driving the answer, and where to push next.",
+      "Brief principals and clients on how AI is framing the issues, reputations, and narratives they care about — with the sources driving each answer and where to push next.",
   },
   {
     title: "Advocacy organizations",
     description:
-      "Track how AI characterizes your cause and your opponents’ — and see which surfaces to seed to move the narrative.",
+      "Track how AI describes your cause and your opponents’ — and see which surfaces to seed to move the narrative.",
   },
   {
     title: "Political campaigns",
     description:
-      "Monitor how AI describes your candidate, your record, and your contrast with the field, with recommended moves each week.",
+      "Monitor how AI describes your candidate, your record, your contrast with the field, and emerging vulnerabilities — with recommended moves each week.",
   },
 ];
 
@@ -51,6 +51,7 @@ export function LandingPage() {
       <main>
         <Hero />
         <PlatformsStrip />
+        <Positioning />
         <Problem />
         <ProductPreview />
         <Capabilities />
@@ -86,6 +87,19 @@ function PlatformsStrip() {
             ))}
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function Positioning() {
+  return (
+    <section className="border-b border-border/60">
+      <div className="mx-auto max-w-[900px] px-6 py-10 text-center">
+        <p className="text-[15.5px] leading-relaxed text-foreground/70">
+          <span className="font-semibold text-foreground">byline</span> monitors
+          AI-generated answers the way media teams monitor press coverage.
+        </p>
       </div>
     </section>
   );
@@ -179,9 +193,9 @@ function Hero() {
               The most influential editor in politics has no byline.
             </h1>
             <p className="mt-6 max-w-2xl text-[17px] leading-relaxed text-foreground/70">
-              Millions of Americans now turn to AI for answers &mdash; including
-              about politics, policy, and the people shaping it. See how AI is
-              framing your issue, and shape the story before your opponents do.
+              Track how ChatGPT, Claude, Gemini, and Perplexity describe your
+              candidate, issue, or organization &mdash; and see where your
+              narrative is gaining or losing ground.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-5">
               <a
@@ -306,6 +320,10 @@ function Problem() {
             or your fact sheet. It gives them an answer. Most communications
             teams have no idea what that answer says.
           </p>
+        </div>
+        <div className="mx-auto mt-10 max-w-2xl rounded-md border-l-2 border-primary/60 bg-card/60 px-5 py-4 text-left text-[15px] leading-relaxed text-foreground/85">
+          AI search is becoming a persuasion channel. Most campaigns and
+          advocacy teams are not monitoring it yet.
         </div>
       </div>
     </section>
@@ -472,6 +490,12 @@ function Capabilities() {
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
             Built for narrative, not brand mentions.
           </h2>
+          <p className="mt-4 text-[16px] leading-relaxed text-foreground/70">
+            Most AI visibility tools count mentions. byline explains the story
+            AI is telling &mdash; what answer engines actually say about your
+            candidate, issue, or organization, and where the framing is
+            shifting.
+          </p>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {items.map((item) => (
@@ -491,25 +515,25 @@ function Capabilities() {
 }
 
 function HowItWorks() {
-  const steps = [
+  const steps: { title: string; body: string; detail: string | null }[] = [
     {
-      title: "Define your subjects.",
-      body: "Add the candidates, issues, organizations, or entities you want to track.",
+      title: "Choose the race, issue, or organization.",
+      body: "Pick the candidates, policy debates, or organizations you want to track. byline handles the prompt design.",
       detail: SUBJECT_LIMITS,
     },
     {
-      title: "We run weekly snapshots.",
-      body: "Each snapshot queries major AI assistants across your topic areas.",
+      title: "Ask the questions voters, journalists, and stakeholders are asking.",
+      body: "We run those questions across ChatGPT, Claude, Gemini, and Perplexity — the same way real audiences encounter the topic.",
       detail: SNAPSHOT_DETAILS,
     },
     {
-      title: "You get a structured brief.",
-      body: "Headline gaps, evidence quotes, source attribution, and recommended actions — delivered in-app and via weekly email.",
+      title: "Track how AI answers frame the subject.",
+      body: "Each snapshot surfaces the dominant narrative, where you’re strongest or weakest, and the sources driving the answer.",
       detail: null,
     },
     {
-      title: "Take action with your team.",
-      body: "Export findings, share snapshots with stakeholders, integrate with your existing comms workflows.",
+      title: "Turn narrative gaps into comms strategy.",
+      body: "Headline gaps, evidence quotes, and concrete next-week moves — what to brief, where to pre-empt, which surfaces to seed.",
       detail: INTEGRATION_LIST,
     },
   ];
