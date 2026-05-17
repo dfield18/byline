@@ -239,7 +239,7 @@ function Hero() {
             <div className="mb-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
               AI Narrative Intelligence
             </div>
-            <h1 className="font-display text-[40px] font-semibold leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[52px] md:text-[60px]">
+            <h1 className="font-display text-[36px] font-semibold leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[46px] md:text-[54px]">
               The most influential editor in politics has no byline.
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
