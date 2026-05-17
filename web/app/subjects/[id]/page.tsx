@@ -9,17 +9,12 @@
  *     used by the action bar (trigger-refresh button + history
  *     disclosure).
  */
-import Link from "next/link";
 import {
   TrendingUp,
   TrendingDown,
   Minus,
   ExternalLink,
   Info,
-  ArrowRight,
-  AlertOctagon,
-  Compass,
-  Megaphone,
   ChevronRight,
   Sparkles,
 } from "lucide-react";
@@ -79,52 +74,6 @@ function capitalizeFirst(s: string): string {
   if (!s) return s;
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
-// Category-aware short reference for very long subject names.
-// Subject names over ~40 chars (event/policy/issue descriptors like
-// "the November 2023 firing of Sam Altman by the OpenAI board") cause
-// subtitle lines to balloon to 3+ wraps in narrow columns. For those
-// cases we substitute a short category noun ("this event" / "this
-// policy" / "this issue") in mid-sentence references; the full name
-// still appears in the hero title and body copy where width allows.
-function formatSubjectInline(name: string, category: string): string {
-  if (name.length <= 40) return name;
-  const shortForms: Record<string, string> = {
-    event: "this event",
-    policy: "this policy",
-    issue: "this issue",
-    organization: "this organization",
-    person: name, // person names are rarely this long; fall back to full
-  };
-  return shortForms[category] ?? name;
-}
-
-// Self-contained subtitle for AI Mention Rate that names both the
-// denominator (topic-area responses) and the numerator (responses
-// that mention the subject) inline, so a reader gets the metric
-// definition without needing the tooltip. Returns null when there
-// are no tracked topics — UI hides the line in that case.
-function formatTopicScope(
-  topics: SubjectOverview["topic_coverage"],
-  subjectName: string,
-  category: string,
-): string | null {
-  if (!topics.length) return null;
-  const labels = topics.map((t) => t.label);
-  let topicPhrase: string;
-  if (labels.length === 1) {
-    topicPhrase = labels[0];
-  } else if (labels.length === 2) {
-    topicPhrase = `${labels[0]} and ${labels[1]}`;
-  } else if (labels.length === 3) {
-    topicPhrase = `${labels[0]}, ${labels[1]}, and ${labels[2]}`;
-  } else {
-    // 4+: name two, summarize the rest so the line doesn't sprawl
-    topicPhrase = `${labels[0]}, ${labels[1]}, and ${labels.length - 2} more`;
-  }
-  const subjectRef = formatSubjectInline(subjectName, category);
-  return `percent of AI responses about ${topicPhrase} that mention ${subjectRef}`;
-}
-
 // Tone value formatter — by default appends "positive"/"negative"/"neutral"
 // so a reader doesn't have to interpret what the sign means.
 // 0.20 → "+20% positive", -0.30 → "−30% negative", 0 → "Neutral".
@@ -268,18 +217,6 @@ function findWeakestTopic(
   if (!withRecall.length) return null;
   return withRecall.reduce((min, t) =>
     (t.ai_recall ?? 1) < (min.ai_recall ?? 1) ? t : min,
-  );
-}
-
-// Highest-recall topic — partner to findWeakestTopic, used by the gap-
-// led Bottom Line template.
-function findStrongestTopic(
-  topics: SubjectOverview["topic_coverage"],
-): SubjectOverview["topic_coverage"][number] | null {
-  const withRecall = topics.filter(_hasFiniteRecall);
-  if (!withRecall.length) return null;
-  return withRecall.reduce((max, t) =>
-    (t.ai_recall ?? 0) > (max.ai_recall ?? 0) ? t : max,
   );
 }
 
@@ -530,15 +467,8 @@ function getKpiChangeDisplay(
 
 function DominantNarrativePanel({
   clusters,
-  subjectName,
-  category,
 }: {
   clusters: SubjectOverview["narrative_clusters"];
-  subjectName: string;
-  // Subject category — used to swap in a short reference ("this event"
-  // / "this policy") when subject_name is too long to fit in the
-  // narrow right-column subtitle without 3-line wrapping.
-  category: string;
 }) {
   if (clusters.length === 0) {
     return (
@@ -554,7 +484,6 @@ function DominantNarrativePanel({
     );
   }
   const top = clusters[0];
-  const topShare = top.share || 0;
   // Heuristic semantic coloring: negative-framing cluster names get the
   // warning treatment so the panel reads as "this is a risk frame", not
   // "this is just another bucket". Falls back to position-based opacity
@@ -1134,26 +1063,6 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
 // of this file. The SOURCE_TYPE_COLORS palette lives in that file
 // since it's the sole consumer.
 
-// ── Placeholder section for Phase 2/3 methodology gaps ──────────────
-
-function PhasePlaceholder({ title, phase, what }: { title: string; phase: string; what: string }) {
-  return (
-    <Card className="p-5 border-dashed">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/55">
-            {title}
-          </div>
-          <p className="mt-1.5 text-sm text-foreground/65 leading-relaxed max-w-2xl">
-            {what}
-          </p>
-        </div>
-        <Pill tone="neutral">{phase}</Pill>
-      </div>
-    </Card>
-  );
-}
-
 // ── Page ────────────────────────────────────────────────────────────
 
 export default async function SubjectOverviewPage({
@@ -1186,17 +1095,8 @@ export default async function SubjectOverviewPage({
     throw e;
   }
 
-  const updated = data.meta.last_refresh_at
-    ? new Date(data.meta.last_refresh_at).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        timeZone: "UTC",
-      })
-    : "—";
-  // Shorter date for the sticky header meta line — drops the year so
+  // Short date for the sticky header meta line — drops the year so
   // the line stays tight ("Updated May 8" vs "Updated May 8, 2026").
-  // The hero card carries the full date with year for archival clarity.
   const updatedShort = data.meta.last_refresh_at
     ? new Date(data.meta.last_refresh_at).toLocaleDateString("en-US", {
         month: "short",
@@ -1434,8 +1334,6 @@ export default async function SubjectOverviewPage({
                 {/* RIGHT: Dominant narrative — ranked clusters */}
                 <DominantNarrativePanel
                   clusters={data.narrative_clusters}
-                  subjectName={data.subject_name}
-                  category={data.category}
                 />
               </div>
               {/* KPI strip: Unprompted mentions · Positive vs negative ·
