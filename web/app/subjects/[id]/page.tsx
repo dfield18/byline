@@ -1223,7 +1223,7 @@ export default async function SubjectOverviewPage({
   if (isEmpty) {
     return (
       <div className="flex min-h-screen bg-background text-foreground">
-        <Sidebar />
+        <Sidebar subjectId={subjectId} activeSection="overview" />
         <div className="flex-1 min-w-0 flex flex-col">
           <Header
             subjectName={data.subject_name}
@@ -1294,7 +1294,7 @@ export default async function SubjectOverviewPage({
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      <Sidebar />
+      <Sidebar subjectId={subjectId} activeSection="overview" />
 
       <div className="flex-1 min-w-0 flex flex-col">
         <Header

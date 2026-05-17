@@ -1,18 +1,32 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-17
-> (Recommended Actions split into Overview primary-card + dedicated
-> /recommendations spoke; Analysis Scope section removed from Overview;
-> ~360 lines of dead code from page.tsx; landing page initial scaffold
-> shipped from a parallel Claude Code session at `/`. Builds on the
-> 2026-05-16 dual QA pass cycles — 13 commits closing runtime safety
-> gaps, concurrency races, validation false positives, visual
-> correctness — and the 2026-05-15 Recommended Actions LLM refactor,
-> role-grounding fix, KPI-card layout iteration, Citation Rate KPI
-> tile, Hero refactor / topic-gap headline / Wikipedia source merging /
-> Risk Frame Rate credibility fix)**. Read this first if you're a fresh
-> Claude Code session picking up work. Update when state shifts
-> meaningfully.
+> A pulse-check of where the project sits **as of 2026-05-17 evening**
+> — dashboard polish + landing copy iteration day. The big themes today:
+>
+> - **Overview hero consolidation** — Strategic Takeaways collapsed
+>   inline; Recommended Actions removed from Overview (still rendered
+>   on the /recommendations spoke); Dominant Narrative shrunk and
+>   destrungered; generic subtitle paragraph dropped.
+> - **Sources polish** — `www.` prefix stripped at the canonical-domain
+>   layer; "Unknown" → "Other"; source name + ExternalLink icon now
+>   one clickable target; donut palette widened (lighter top end) and
+>   spread evenly across N slices.
+> - **Hub-and-spokes start** — first spoke wired (`/recommendations`);
+>   Sidebar threaded with `subjectId` + `activeSection` props,
+>   real hrefs for built spokes, "Soon" pill on the rest.
+> - **Landing iteration** — platforms strip + mid-CTA + mock preview
+>   (parallel session); placeholders filled; Problem section split
+>   into two paragraphs; hero headline tightened; closing CTA copy
+>   finalized; Methodology footer link wired to the McKinsey citation.
+>
+> Builds on the 2026-05-16 dual QA pass cycles (13 commits closing
+> runtime safety gaps, concurrency races, validation false positives,
+> visual correctness) and the 2026-05-15 Recommended Actions LLM
+> refactor + role-grounding fix + Hero refactor / topic-gap headline /
+> Wikipedia source merging / Risk Frame Rate credibility fix.
+>
+> Read this first if you're a fresh Claude Code session picking up
+> work. Update when state shifts meaningfully.
 
 ---
 
@@ -1435,6 +1449,176 @@ structurally correct but content-pending.
   / historical-retrospective entries could split into a
   `STATE_archive.md` to keep the active section focused. Not urgent;
   becomes more so as more session entries accumulate.
+
+**Dashboard + landing iteration day — shipped this session (2026-05-17 evening):**
+
+15 commits since the morning STATE.md refresh (`1c4db33`). Two
+parallel threads: continued Overview/Sources polish in this session
++ landing copy iteration in the other Claude Code session. Both
+landed on `main` without conflicts via off-limits file lists.
+
+*Commit chain (oldest → newest):*
+
+- `4516228` — Dashboard horizontal padding bump (`md:px-8 → md:px-12`).
+  Adds 16px breathing room on each side of the Overview content;
+  symmetric so the Sidebar's right edge and the right viewport edge
+  feel balanced. No effect on viewports wider than the `max-w-[1500px]`
+  cap since the centering takes over there.
+- `99a4c65` — Strategic Takeaways collapsed into the AI Narrative
+  Brief hero card. The standalone "What stands out right now"
+  section (which sat between Topic Recall and Evidence with three
+  insight cards) is gone. `strongest_asset` and `opposition_frame`
+  now render as compact left-border callouts inline in the hero,
+  between Bottom Line and Recommended Actions. `message_gap` is
+  filtered out because the Bottom Line already surfaces the gap —
+  rendering both was the redundancy. Net `-22` lines.
+- `9d7baeb` — Recommended Actions block removed from the Overview
+  per user request. The `/recommendations` spoke still renders the
+  full set; the backend pipeline (advisory lock, upsert, worker
+  precompute, regenerate endpoint, cache versioning) all preserved
+  untouched. Re-add by restoring `<RecommendedActionsBlock
+  variant="primary-only" />` in the hero (the comment at the removal
+  site documents the one-line restoration path).
+- `96489fc` — Sources donut palette contrast widened. Prior 7-stop
+  ramp compressed at the light end (only 0.04 lightness between the
+  last two stops); new ramp spreads ~0.12 between each adjacent pair
+  with the lightest stop pushed from 0.95 → 0.97 lightness.
+- `4455a17` — `.claude/` added to `.gitignore` so per-session Claude
+  Code state doesn't surface as untracked.
+- `ae1a480` — Landing iteration from the parallel session: filled
+  product-copy placeholders (`SUBJECT_LIMITS`, `SNAPSHOT_DETAILS`,
+  `INTEGRATION_LIST`, `WHO_IT_IS_FOR`); added `PlatformsStrip`
+  between Hero and Problem; added `MidPageCTA` between Capabilities
+  and HowItWorks; replaced empty product-preview placeholder with a
+  styled mock dashboard; dropped 01–04 card numbering.
+- `96e85f3` — Overview hero declutter (bundle): dropped the
+  redundant "Frames N% of AI responses..." description from
+  DominantNarrativePanel; shrunk the cluster title from
+  `font-display text-[24px]` to `text-[18px]` (it's a cluster LABEL,
+  not a section title); standardized the right-column eyebrow to
+  uppercase + tracked (matching `AI NARRATIVE BRIEF` / `BOTTOM
+  LINE`); dropped the generic "How major AI platforms describe..."
+  subtitle paragraph.
+- `ab7b60c` — Sources: strip leading `www.` in `_canonical_domain`
+  so `pbs.org` and `www.washingtonpost.com` no longer read as
+  inconsistent. Done at the canonical-domain layer so both the
+  Sources list AND the donut category aggregation benefit AND any
+  duplicate entries collapse with summed citation counts.
+- `269aedf` — Donut chart: pick N evenly-spaced palette indices
+  instead of the first N. For 3 categories, the slices were
+  previously 0.28 / 0.40 / 0.52 lightness (three dark blues that
+  read identical); now 0.28 / 0.64 / 0.97 (dark / medium / light).
+  Same logic improves contrast for 4-6 too.
+- `7339216` — Sources: rename uncategorized `source_type` from
+  "Unknown" to "Other" in `_top_sources_for_refresh`. Reads cleaner
+  in both the donut category list and the Sources table type
+  column.
+- `a571786` — Sources list: source name + ExternalLink icon now a
+  single clickable anchor opening the source in a new tab.
+  `group-hover` keeps the icon + text in visual sync. Domain is
+  already normalized by `_canonical_domain`, so bare
+  `https://${s.name}` resolves correctly.
+- `1541fb9` — Landing copy polish (parallel session): new
+  `DEMO_SUBJECT_DISPLAY` fallback const ("Senator Maya Reyes") so
+  the page doesn't show the literal `[..._PLACEHOLDER]` in the UI
+  until the real value is set; hero headline tightened to "...has
+  no byline"; HeroVisual mock topics swapped to broader civic
+  themes; Problem body split into two paragraphs; closing CTA copy
+  finalized.
+- `a059b2a` — Landing: clarify "primary source for online
+  information" (was just "primary source" — ambiguous). McKinsey's
+  exact phrase is "primary and preferred source of insight" per
+  fact-check; user chose accessibility over exactness.
+- **`+ today's commits not yet pushed:`** Sidebar wiring +
+  Methodology footer link to the McKinsey citation + this STATE.md
+  refresh (bundled per user's "items 1, 7, 8" pick).
+
+*Hub-and-spokes IA — actually wired this session*
+
+The Sidebar (`web/components/dashboard/Sidebar.tsx`) was a static
+placeholder with every entry as `href="#"`. Now:
+
+- Accepts `subjectId?: number` and `activeSection?: "overview" |
+  "recommendations"` props. Each page passes its own values.
+- Computes hrefs based on `subjectId` + per-entry `slug` (Overview
+  → `/subjects/{id}`, built spokes → `/subjects/{id}/{slug}`,
+  unbuilt entries → `#`).
+- Renders unbuilt entries with muted text + a small uppercase
+  "Soon" pill on the right edge so users know it's coming but
+  not yet wired. `aria-disabled` + `tabIndex={-1}` for a11y.
+- Active section gets the existing primary-tint treatment + side
+  rail; no JS / no client component (each page tells the Sidebar
+  what's active via a string prop, no `usePathname` needed).
+- Recommendations entry added to the nav (wasn't in the prior
+  list). Lives between Prompts and Reports.
+- Wired into both `app/subjects/[id]/page.tsx` (Overview, passes
+  `activeSection="overview"`) and `app/subjects/[id]/recommendations/page.tsx`
+  (passes `activeSection="recommendations"`).
+- `app/dashboard-preview/page.tsx` still uses bare `<Sidebar />`
+  (static preview, no subject context) — falls back to all entries
+  disabled with default `activeSection="overview"`.
+
+This is the first real hub-and-spokes navigation surface. Future
+spoke pages (Narrative, Visibility, Competition, Topics, Sources,
+Prompts, Reports, Settings) just need to (a) set their `slug` in
+the NAV array, (b) be reachable at `/subjects/{id}/{slug}`, and
+(c) pass their own `activeSection` value from the page.
+
+*Methodology footer link (item 8)*
+
+Landing footer's Methodology link was `[METHODOLOGY_URL_PLACEHOLDER]`
+(broken). Now points at the McKinsey "New Front Door to the
+Internet" report — the same report cited in the Problem section.
+`target="_blank"` + `rel="noopener noreferrer"`. Interim target
+until a dedicated `/methodology` page exists.
+
+*Remaining landing placeholders*
+
+- `CTA_URL` (booking URL)
+- `SAMPLE_REPORT_URL` (page or external link)
+- `CONTACT_EMAIL` (closing CTA email)
+- `DEMO_SUBJECT` (now has the `DEMO_SUBJECT_DISPLAY` fallback to
+  "Senator Maya Reyes" if not filled in — page renders cleanly
+  either way)
+- `PRIVACY_URL`, `TERMS_URL` (footer links)
+
+`grep -n PLACEHOLDER web/components/landing/LandingPage.tsx` for
+the current list anytime.
+
+*Code-cleanliness debt accumulating*
+
+Several helpers are now genuinely orphaned (used to be flagged as
+"safe to delete in a cleanup pass"; today's commits added more):
+
+- `formatTopicScope` (page.tsx ~line 106) — orphaned since the AI
+  Mention Rate subtitle was dropped.
+- `formatSubjectInline` (page.tsx ~line 89) — only consumer was
+  `formatTopicScope`, now also orphaned.
+- `findStrongestTopic` (page.tsx ~line 320) — orphaned since the
+  Bottom Line comparator switched to mean-of-others.
+- `subjectName` and `category` props on DominantNarrativePanel
+  (page.tsx ~line 533) — orphaned by today's `96e85f3` description
+  removal.
+
+A focused cleanup commit would remove these 4 items + the bare
+`<Sidebar />` in `dashboard-preview` (now disabled-looking with
+all-Soon entries — could either accept that or fork into a
+non-interactive preview Sidebar variant). Not urgent; flagged for
+the next cleanup pass.
+
+*Things left from the broader plan*
+
+- More spokes (Sources is the easiest first — data is already on
+  the overview payload). Establishes the hub-and-spokes pattern at
+  scale before committing to all 7-8 entries.
+- Per-topic delta on Weakest Topic Recall hero tile (still shows
+  "no prior data"). Backend follow-up in `queries.py`.
+- Methodology page (real, not a McKinsey link). Customer-credibility
+  ask before any serious demo.
+- Account / `/account` route. Clerk's `<UserProfile />` does most
+  of the work.
+- Landing `CTA_URL` / `SAMPLE_REPORT_URL` / `CONTACT_EMAIL` filling
+  (content, not code).
 
 **Known issues / followups from the 2026-05-12 QA pass (none blocking):**
 

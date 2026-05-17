@@ -632,7 +632,16 @@ function MarketingFooter() {
           <a href="[TERMS_URL_PLACEHOLDER]" className="hover:text-foreground transition-colors">
             Terms
           </a>
-          <a href="[METHODOLOGY_URL_PLACEHOLDER]" className="hover:text-foreground transition-colors">
+          {/* Methodology link points at the McKinsey report cited in
+              the Problem section above as an interim target until a
+              dedicated /methodology page exists. New tab + noopener
+              for the external link. */}
+          <a
+            href="https://www.mckinsey.com/capabilities/growth-marketing-and-sales/our-insights/new-front-door-to-the-internet-winning-in-the-age-of-ai-search"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-foreground transition-colors"
+          >
             Methodology
           </a>
           <span>&copy; {new Date().getFullYear()} byline</span>
