@@ -9,12 +9,14 @@
  *     used by the action bar (trigger-refresh button + history
  *     disclosure).
  */
+import Link from "next/link";
 import {
   TrendingUp,
   TrendingDown,
   Minus,
   ExternalLink,
   Info,
+  ArrowRight,
   ChevronRight,
   Sparkles,
 } from "lucide-react";
@@ -610,7 +612,6 @@ function DominantNarrativePanel({
       </div>
     );
   }
-  const top = clusters[0];
   // Heuristic semantic coloring: negative-framing cluster names get the
   // warning treatment so the panel reads as "this is a risk frame", not
   // "this is just another bucket". Falls back to position-based opacity
@@ -623,23 +624,16 @@ function DominantNarrativePanel({
       {/* Eyebrow standardized to match the left column's
           uppercase + tracked treatment (AI NARRATIVE BRIEF, BOTTOM
           LINE, STRONGEST ASSET) — case inconsistency was a small
-          source of visual noise. */}
+          source of visual noise. The previous H2 that displayed
+          {top.name} above the bars was removed because the same
+          name appears as the first bar at the same percentage,
+          producing a literal duplication. The eyebrow alone names
+          the section; the bars carry the content. */}
       <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
         Dominant narrative
       </div>
 
-      {/* Cluster name shrunk from text-[24px] display to text-[18px]
-          medium. It's a cluster LABEL, not a section title — should
-          read as a finding, not as a header competing visually with
-          "{subject_name}" in the left column. The "Frames N% of AI
-          responses…" prose that used to sit here has been removed
-          because the same percentage is already in the top cluster
-          bar below — pure redundancy. */}
-      <div className="mt-2 text-[18px] leading-snug font-semibold tracking-[-0.015em] text-foreground">
-        {top.name}
-      </div>
-
-      <ul className="mt-12 space-y-8">
+      <ul className="mt-8 space-y-8">
         {clusters.slice(0, 4).map((c, i) => {
           // Bar width = absolute share (0..1 → 0..100%). The remaining
           // track visually represents the share not covered by named
@@ -1421,17 +1415,39 @@ export default async function SubjectOverviewPage({
                       );
                     })}
 
-                  {/* Recommended Actions block removed from the
-                      Overview per user request — the LLM-generated
-                      primary action + "View all" link used to live
-                      here between the takeaway callouts and the
-                      fallback. The /subjects/[id]/recommendations
-                      spoke still renders the full set; the backend
-                      pipeline (advisory lock, upsert, worker
-                      precompute, cache versioning) all stays in
-                      place untouched. Re-add by restoring
-                      <RecommendedActionsBlock variant="primary-only" />
-                      here when the surface is wanted back. */}
+                  {/* Recommended Move — completes the briefing triad
+                      (Bottom Line = what / Strongest Asset = where
+                      you're strong / Recommended Move = what to do).
+                      Uses the same editorial chrome as the other two
+                      takeaways (eyebrow + bold title + regular body +
+                      left-border accent). Full action set + Regenerate
+                      controls live on the /recommendations spoke; this
+                      block surfaces just the primary action with a
+                      "View all" handoff when alternatives exist. */}
+                  {data.recommended_actions?.primary && (
+                    <div className="mt-5 pl-3.5 border-l-2 border-l-primary">
+                      <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-primary">
+                        Recommended move
+                      </div>
+                      <div className="mt-0.5 text-[14px] font-semibold text-foreground leading-snug">
+                        {data.recommended_actions.primary.action}
+                      </div>
+                      {data.recommended_actions.primary.why && (
+                        <p className="mt-1 text-[13px] text-foreground/70 leading-relaxed">
+                          {data.recommended_actions.primary.why}
+                        </p>
+                      )}
+                      {data.recommended_actions.secondary.length > 0 && (
+                        <Link
+                          href={`/subjects/${subjectId}/recommendations`}
+                          className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                        >
+                          View all recommendations
+                          <ArrowRight className="h-3 w-3" aria-hidden />
+                        </Link>
+                      )}
+                    </div>
+                  )}
 
                   {/* Fallback when no Bottom Line could be synthesized */}
                   {!effectiveBottomLine && (
