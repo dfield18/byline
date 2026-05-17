@@ -296,7 +296,7 @@ function Problem() {
           <p>
             Half of consumers now intentionally use AI-powered search. Among
             those who&apos;ve tried it, 44% say it&apos;s already their primary
-            source, beating traditional search at 31%.
+            source for online information, beating traditional search at 31%.
           </p>
           <p>
             Voters ask ChatGPT, Gemini, Claude, and Google&apos;s AI features
