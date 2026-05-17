@@ -1,5 +1,13 @@
 import Link from "next/link";
-import { ArrowRight, Radar } from "lucide-react";
+import {
+  ArrowRight,
+  FileText,
+  Globe,
+  Radar,
+  Search,
+  Target,
+  Zap,
+} from "lucide-react";
 import { Card } from "@/components/dashboard/ui";
 
 // TODO: replace these four placeholders with real values before launch.
@@ -45,6 +53,7 @@ export function LandingPage() {
         <Hero />
         <PlatformsStrip />
         <Positioning />
+        <MethodologyBanner />
         <Problem />
         <ProductPreview />
         <Capabilities />
@@ -93,6 +102,51 @@ function Positioning() {
           <span className="font-semibold text-foreground">byline</span> monitors
           AI-generated answers the way media teams monitor press coverage.
         </p>
+      </div>
+    </section>
+  );
+}
+
+function MethodologyBanner() {
+  const stats: { label: string; value: string }[] = [
+    {
+      label: "Monitored queries",
+      value: "[Placeholder: Monitored queries volume]",
+    },
+    {
+      label: "Sentiment mapping",
+      value: "[Placeholder: Sentiment mapping tech]",
+    },
+    {
+      label: "Update frequency",
+      value: "[Placeholder: Update frequency]",
+    },
+  ];
+  return (
+    <section className="border-b border-border/80 bg-card/50">
+      <div className="mx-auto max-w-[1200px] px-6 py-10">
+        <div className="grid items-start gap-y-8 gap-x-12 lg:grid-cols-[minmax(0,_320px)_1fr]">
+          <div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
+              Methodology
+            </div>
+            <h3 className="font-display text-[19px] font-semibold leading-snug tracking-tight text-foreground sm:text-[20px]">
+              Powered by real-time LLM intelligence.
+            </h3>
+          </div>
+          <dl className="grid gap-x-10 gap-y-5 sm:grid-cols-3">
+            {stats.map((s) => (
+              <div key={s.label} className="border-l-2 border-border/80 pl-4">
+                <dt className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
+                  {s.label}
+                </dt>
+                <dd className="mt-1.5 text-[13.5px] leading-relaxed text-foreground/85">
+                  {s.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
       </div>
     </section>
   );
@@ -199,10 +253,13 @@ function Hero() {
               </a>
               <a
                 href={SAMPLE_REPORT_URL}
-                className="inline-flex items-center gap-1.5 text-[15px] font-medium text-primary hover:text-foreground transition-colors"
+                className="group inline-flex items-center gap-2.5 rounded-md border border-border/80 bg-card/60 px-4 py-2.5 text-[14.5px] font-medium text-foreground/85 transition-colors hover:border-primary/40 hover:bg-card hover:text-foreground"
               >
+                <span className="flex h-7 w-7 items-center justify-center rounded-sm border border-border/80 bg-background/80 text-primary group-hover:border-primary/40">
+                  <FileText className="h-3.5 w-3.5" strokeWidth={1.75} />
+                </span>
                 See a sample report
-                <ArrowRight className="h-4 w-4" />
+                <ArrowRight className="h-3.5 w-3.5 text-foreground/55 transition-colors group-hover:text-primary" />
               </a>
             </div>
           </div>
@@ -455,21 +512,29 @@ function ProductPreview() {
 }
 
 function Capabilities() {
-  const items = [
+  const items: {
+    title: string;
+    body: string;
+    icon: typeof Target;
+  }[] = [
     {
       title: "Narrative tracking",
+      icon: Target,
       body: "See how AI assistants frame your issues, candidates, and organizations across ChatGPT, Claude, and Gemini.",
     },
     {
       title: "Topic-level gaps",
+      icon: Search,
       body: "Identify where AI underweights your strongest assets — and where your opponents are breaking through.",
     },
     {
       title: "Source intelligence",
+      icon: Globe,
       body: "See which publications, sites, and platforms are shaping AI's answers about you.",
     },
     {
       title: "Recommended moves",
+      icon: Zap,
       body: "Get specific, executable actions from every snapshot — which surfaces to seed, where to pre-empt, what to brief.",
     },
   ];
@@ -491,16 +556,22 @@ function Capabilities() {
           </p>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {items.map((item) => (
-            <Card key={item.title} className="p-6">
-              <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
-                {item.title}
-              </h3>
-              <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/85">
-                {item.body}
-              </p>
-            </Card>
-          ))}
+          {items.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Card key={item.title} className="p-6">
+                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md border border-primary/20 bg-primary/[0.08] text-primary">
+                  <Icon className="h-5 w-5" strokeWidth={1.75} />
+                </div>
+                <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
+                  {item.title}
+                </h3>
+                <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/85">
+                  {item.body}
+                </p>
+              </Card>
+            );
+          })}
         </div>
       </div>
     </section>
