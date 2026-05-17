@@ -543,7 +543,7 @@ function DominantNarrativePanel({
   if (clusters.length === 0) {
     return (
       <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12">
-        <div className="text-[12px] font-semibold text-foreground/70">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
           Dominant narrative
         </div>
         <p className="mt-3 text-[13px] text-foreground/55 leading-relaxed">
@@ -564,20 +564,23 @@ function DominantNarrativePanel({
 
   return (
     <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12">
-      <div className="text-[12px] font-semibold text-foreground/70">
+      {/* Eyebrow standardized to match the left column's
+          uppercase + tracked treatment (AI NARRATIVE BRIEF, BOTTOM
+          LINE, STRONGEST ASSET) — case inconsistency was a small
+          source of visual noise. */}
+      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
         Dominant narrative
       </div>
 
-      <div className="mt-2 font-display text-[24px] leading-tight font-semibold tracking-[-0.02em] text-foreground">
+      {/* Cluster name shrunk from text-[24px] display to text-[18px]
+          medium. It's a cluster LABEL, not a section title — should
+          read as a finding, not as a header competing visually with
+          "{subject_name}" in the left column. The "Frames N% of AI
+          responses…" prose that used to sit here has been removed
+          because the same percentage is already in the top cluster
+          bar below — pure redundancy. */}
+      <div className="mt-2 text-[18px] leading-snug font-semibold tracking-[-0.015em] text-foreground">
         {top.name}
-      </div>
-      <div className="mt-1.5 text-[13px] text-foreground/70 leading-snug">
-        Frames{" "}
-        <span className="text-foreground font-semibold">
-          {Math.round(topShare * 100)}%
-        </span>{" "}
-        of AI responses to this snapshot's questions about{" "}
-        {formatSubjectInline(subjectName, category)} and related topic areas.
       </div>
 
       <ul className="mt-12 space-y-8">
@@ -1313,10 +1316,12 @@ export default async function SubjectOverviewPage({
                   <h1 className="font-display text-[28px] md:text-[32px] font-semibold leading-[1.1] tracking-[-0.02em] text-foreground">
                     {data.subject_name}
                   </h1>
-                  <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/70 max-w-xl">
-                    How major AI platforms describe {data.subject_name} across
-                    voter-facing and public-affairs prompts.
-                  </p>
+                  {/* Generic subtitle paragraph removed — "How major
+                      AI platforms describe X across voter-facing and
+                      public-affairs prompts" was boilerplate that
+                      didn't earn its line. The Bottom Line below is
+                      the actual headline; surfacing it sooner makes
+                      the hero punchier. */}
 
                   {/* Bottom Line — diagnostic finding. Sits in the
                       same prominent slot as before, with the primary-
