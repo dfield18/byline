@@ -319,6 +319,57 @@ function formatComparator(labels: string[]): string {
     : `${shortLabels.join(", ")}, ${tail}`;
 }
 
+// Split a Bottom Line string into a bold title clause + a regular
+// elaboration line so the rendered block can mirror the Strongest
+// Asset takeaway's two-line hierarchy. Handles the three sentence
+// shapes our bottom_line generators emit:
+//   1. Em-dash separated:  "claim — supporting metric"
+//      → title "claim", body "supporting metric"
+//   2. Parenthetical:      "claim (supporting metric)."
+//      → title "claim", body "supporting metric"
+//   3. No separator:       "claim only."
+//      → title is the whole string, no body
+// Trailing period on the body is preserved; title gets no terminal
+// punctuation to match Strongest Asset's title convention.
+function splitBottomLine(text: string): { title: string; body: string | null } {
+  const trimmed = text.trim();
+  // Em-dash split (covers buildGapBottomLine + _compute_bottom_line's
+  // gap-only branch). Uses the actual em-dash char with optional
+  // whitespace either side.
+  const emDash = trimmed.match(/^(.+?)\s*—\s*(.+?)\.?\s*$/);
+  if (emDash) {
+    return { title: emDash[1].trim(), body: emDash[2].trim() + "." };
+  }
+  // Parenthetical split (covers _compute_bottom_line's strong-only
+  // branch and most LLM-polished outputs that follow that template).
+  const paren = trimmed.match(/^(.+?)\s*\((.+?)\)\.?\s*$/);
+  if (paren) {
+    return { title: paren[1].trim(), body: paren[2].trim() + "." };
+  }
+  // No splittable separator (covers strong-and-gap variant + any
+  // polish output that the LLM rephrased into a single clause).
+  return { title: trimmed, body: null };
+}
+
+function BottomLineBlock({ text }: { text: string }) {
+  const { title, body } = splitBottomLine(text);
+  return (
+    <div className="mt-6 pl-3.5 border-l-2 border-l-primary">
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-primary">
+        Bottom line
+      </div>
+      <div className="mt-0.5 text-[15px] font-semibold text-foreground leading-snug">
+        {title}
+      </div>
+      {body && (
+        <p className="mt-1.5 text-[13.5px] text-foreground/75 leading-relaxed">
+          {body}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function HeroKpis({
   kpis,
   topics,
@@ -1317,27 +1368,15 @@ export default async function SubjectOverviewPage({
                       the actual headline; surfacing it sooner makes
                       the hero punchier. */}
 
-                  {/* Bottom Line — diagnostic finding. Sits in the
-                      same prominent slot as before, with the primary-
-                      tinted background and left-bar accent. */}
+                  {/* Bottom Line — diagnostic finding. Visually
+                      parallels the Strongest Asset takeaway below
+                      (same eyebrow weight, left-border accent, bold
+                      title + regular body) so the two read as a
+                      coherent pair instead of competing treatments.
+                      Slightly larger type than Strongest Asset since
+                      this is the lead claim. */}
                   {effectiveBottomLine && (
-                    <div className="mt-6 rounded-md overflow-hidden border border-border/40">
-                      <div
-                        className="relative pl-5 pr-4 py-4"
-                        style={{
-                          background:
-                            "color-mix(in oklab, var(--primary) 6%, transparent)",
-                        }}
-                      >
-                        <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary mb-1.5">
-                          Bottom line
-                        </div>
-                        <p className="text-[17px] leading-relaxed font-semibold tracking-[-0.005em] text-foreground">
-                          {effectiveBottomLine}
-                        </p>
-                      </div>
-                    </div>
+                    <BottomLineBlock text={effectiveBottomLine} />
                   )}
 
                   {/* Strategic-takeaway callouts inline with the hero
