@@ -3168,7 +3168,11 @@ def _top_sources_for_refresh(
         {
             "name": r["name"],
             "score": round((r["n_citations"] / max_n) * 100),
-            "type": (r["source_type"] or "unknown").replace("_", " ").title(),
+            # Fallback label for sources whose source_type classifier
+            # returned null — renamed from "Unknown" to "Other" per
+            # user request (reads cleaner in the donut category list
+            # and the Sources table type column).
+            "type": (r["source_type"] or "other").replace("_", " ").title(),
             "n_citations": r["n_citations"],
         }
         for r in ranked
