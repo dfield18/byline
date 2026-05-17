@@ -271,7 +271,24 @@ function buildGapBottomLine(
   const meanOthersPct = Math.round(
     (others.reduce((sum, t) => sum + (t.ai_recall ?? 0), 0) / others.length) * 100,
   );
-  return `AI underweights ${subjectName} on ${weakest.label} — ${weakestPct}% mention rate vs ${meanOthersPct}% average across ${others.length} other tracked topic${others.length === 1 ? "" : "s"}.`;
+  // 2-4 others: name them inline with an Oxford-comma list so a
+  // reader knows what the comparison baseline actually contains.
+  // 5+: fall back to the count phrasing — at that point the named
+  // list pushes the sentence past comfortable reading length.
+  const comparator =
+    others.length <= 4
+      ? joinList(others.map((t) => t.label))
+      : `${others.length} other tracked topics`;
+  return `AI underweights ${subjectName} on ${weakest.label} — ${weakestPct}% mention rate vs ${meanOthersPct}% average across ${comparator}.`;
+}
+
+// Plain-English list joiner: "A", "A and B", "A, B, and C", etc.
+// Used by buildGapBottomLine to name the comparator topics inline.
+function joinList(labels: string[]): string {
+  if (labels.length === 0) return "";
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
 function HeroKpis({

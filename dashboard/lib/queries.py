@@ -643,10 +643,13 @@ def _compute_strategic_takeaways(
         gap_pp = (other_mean - lowest["recall"]) * 100
         if gap_pp >= min_recall_gap_pp:
             lowest_pct = round(lowest["recall"] * 100)
-            # When there's a single other topic, compare directly to it
-            # by name (avoids the awkward "average across other topic
-            # areas" phrasing for 2-topic subjects). With 2+ others,
-            # keep the average phrasing but fix the pluralization.
+            # 1 other: compare directly by name (avoids the awkward
+            #          "average across other topic areas" phrasing).
+            # 2-4 others: name them inline with an Oxford-comma list
+            #          so the reader knows what the baseline contains.
+            # 5+ others: fall back to count phrasing — at that point
+            #          the named list pushes the sentence past
+            #          comfortable reading length.
             if len(others) == 1:
                 other = others[0]
                 body = (
@@ -654,6 +657,13 @@ def _compute_strategic_takeaways(
                     f"{lowest['label']} prompts, vs "
                     f"{round(other['recall'] * 100)}% on "
                     f"{other['label']} prompts."
+                )
+            elif len(others) <= 4:
+                others_named = _format_list([t["label"] for t in others])
+                body = (
+                    f"AI surfaces {subj_inline} in {lowest_pct}% of "
+                    f"{lowest['label']} prompts. Recall averages "
+                    f"{round(other_mean * 100)}% across {others_named}."
                 )
             else:
                 body = (
@@ -759,6 +769,20 @@ def _cap_first(s: str) -> str:
     """Capitalize the first character without lowercasing the rest. Used
     for topic labels that need to start a sentence."""
     return s[:1].upper() + s[1:] if s else s
+
+
+def _format_list(labels: list[str]) -> str:
+    """Plain-English list joiner with Oxford comma. Returns "" for
+    empty, the single label for 1, "A and B" for 2, "A, B, and C"
+    for 3+. Mirrors the TS `joinList` helper in the subject overview
+    page so backend and frontend phrasing stay consistent."""
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return ", ".join(labels[:-1]) + f", and {labels[-1]}"
 
 
 # ─── LLM polish for executive summary (Phase 3a refinement) ────────────
