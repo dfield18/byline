@@ -169,10 +169,13 @@ function MidPageCTA() {
             </a>
             <a
               href={SAMPLE_REPORT_URL}
-              className="inline-flex items-center gap-1.5 text-[14px] font-medium text-primary transition-colors hover:text-foreground"
+              className="group inline-flex items-center gap-2.5 rounded-md border border-border/80 bg-card/60 px-4 py-2 text-[14px] font-medium text-foreground/85 transition-colors hover:border-primary/40 hover:bg-card hover:text-foreground"
             >
+              <span className="flex h-6 w-6 items-center justify-center rounded-sm border border-border/80 bg-background/80 text-primary group-hover:border-primary/40">
+                <FileText className="h-3 w-3" strokeWidth={1.75} />
+              </span>
               See a sample report
-              <ArrowRight className="h-3.5 w-3.5" />
+              <ArrowRight className="h-3.5 w-3.5 text-foreground/55 transition-colors group-hover:text-primary" />
             </a>
           </div>
         </div>
