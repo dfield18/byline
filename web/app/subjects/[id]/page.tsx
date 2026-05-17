@@ -379,7 +379,7 @@ function HeroKpis({
   ];
 
   return (
-    <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4">
       {tiles.map((t) => {
         const change = getKpiChangeDisplay(
           t.kpi.delta,
