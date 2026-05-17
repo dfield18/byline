@@ -995,7 +995,10 @@ function EvidenceCard({ card }: { card: SubjectOverview["evidence_cards"][number
             className="text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-1.5"
             title="This quote comes from a prompt that named the subject directly (e.g., a 'criticisms of X' or 'policy positions of X' question). Responses to such prompts are excluded from the Unprompted Criticism Rate, since they reflect the question rather than AI's volunteered framing."
           >
-            Solicited prompt
+            Solicited prompt{" "}
+            <span className="font-normal normal-case tracking-normal text-muted-foreground/80">
+              (subject named in prompt)
+            </span>
           </div>
         )}
 
