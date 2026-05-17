@@ -2,20 +2,40 @@ import Link from "next/link";
 import { ArrowRight, Radar } from "lucide-react";
 import { Card } from "@/components/dashboard/ui";
 
+// TODO: replace these four placeholders with real values before launch.
+//   CTA_URL: booking URL (Calendly or similar)
+//   SAMPLE_REPORT_URL: page or external link for "See a sample report"
+//   CONTACT_EMAIL: address shown in the closing CTA
+//   DEMO_SUBJECT: name of the demo subject featured in the Product Preview section
 const CTA_URL = "[CTA_URL_PLACEHOLDER]";
 const SAMPLE_REPORT_URL = "[SAMPLE_REPORT_URL_PLACEHOLDER]";
 const CONTACT_EMAIL = "[CONTACT_EMAIL_PLACEHOLDER]";
 
 const DEMO_SUBJECT = "[DEMO_SUBJECT_PLACEHOLDER]";
 
-const SUBJECT_LIMITS = "[SUBJECT_LIMITS_PLACEHOLDER]";
-const SNAPSHOT_DETAILS = "[SNAPSHOT_DETAILS_PLACEHOLDER]";
-const INTEGRATION_LIST = "[INTEGRATION_LIST_PLACEHOLDER]";
+const SUBJECT_LIMITS =
+  "Up to 25 subjects per organization on the standard plan.";
+const SNAPSHOT_DETAILS =
+  "Each subject runs roughly 13 prompts per cycle across ChatGPT, Claude, Gemini, and Perplexity — refreshed weekly.";
+const INTEGRATION_LIST =
+  "Export to CSV, share snapshots via link, or send a weekly brief by email.";
 
 const WHO_IT_IS_FOR: { title: string; description: string }[] = [
-  { title: "[SEGMENT_1_PLACEHOLDER]", description: "[SEGMENT_1_COPY_PLACEHOLDER]" },
-  { title: "[SEGMENT_2_PLACEHOLDER]", description: "[SEGMENT_2_COPY_PLACEHOLDER]" },
-  { title: "[SEGMENT_3_PLACEHOLDER]", description: "[SEGMENT_3_COPY_PLACEHOLDER]" },
+  {
+    title: "Public-affairs firms",
+    description:
+      "Brief principals and clients on how AI is framing their issues, which sources are driving the answer, and where to push next.",
+  },
+  {
+    title: "Advocacy organizations",
+    description:
+      "Track how AI characterizes your cause and your opponents’ — and see which surfaces to seed to move the narrative.",
+  },
+  {
+    title: "Political campaigns",
+    description:
+      "Monitor how AI describes your candidate, your record, and your contrast with the field, with recommended moves each week.",
+  },
 ];
 
 
@@ -25,15 +45,73 @@ export function LandingPage() {
       <MarketingNav />
       <main>
         <Hero />
+        <PlatformsStrip />
         <Problem />
         <ProductPreview />
         <Capabilities />
+        <MidPageCTA />
         <HowItWorks />
         <WhoItsFor />
         <ClosingCTA />
       </main>
       <MarketingFooter />
     </div>
+  );
+}
+
+function PlatformsStrip() {
+  const platforms = ["ChatGPT", "Claude", "Gemini", "Perplexity"];
+  return (
+    <section className="border-b border-border/60 bg-card/30">
+      <div className="mx-auto max-w-[1200px] px-6 py-7">
+        <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-8">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Platforms monitored
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13.5px] font-medium text-foreground/80">
+            {platforms.map((p, i) => (
+              <span key={p} className="inline-flex items-center gap-6">
+                {p}
+                {i < platforms.length - 1 && (
+                  <span className="text-foreground/25" aria-hidden>
+                    ·
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MidPageCTA() {
+  return (
+    <section className="border-b border-border/60">
+      <div className="mx-auto max-w-[1200px] px-6 py-14">
+        <div className="flex flex-col items-center justify-center gap-5 text-center sm:flex-row sm:gap-8 sm:text-left">
+          <div className="text-[17px] font-medium tracking-tight text-foreground">
+            See it on your own subject.
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-5">
+            <a
+              href={CTA_URL}
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2.5 text-[14px] font-medium text-primary-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition-opacity hover:opacity-95"
+            >
+              Book a demo
+            </a>
+            <a
+              href={SAMPLE_REPORT_URL}
+              className="inline-flex items-center gap-1.5 text-[14px] font-medium text-primary transition-colors hover:text-foreground"
+            >
+              See a sample report
+              <ArrowRight className="h-3.5 w-3.5" />
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -176,15 +254,6 @@ function HeroVisual() {
             </div>
           ))}
         </div>
-        <div className="mt-5 rounded-md border border-warning/30 bg-warning/[0.06] px-3 py-2">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-warning">
-            Recommended action
-          </div>
-          <div className="mt-1 text-[12.5px] leading-snug text-foreground/85">
-            Seed authoritative sources on housing affordability &mdash; the
-            largest unowned gap in this snapshot.
-          </div>
-        </div>
       </div>
     </Card>
   );
@@ -251,30 +320,111 @@ function ProductPreview() {
           </p>
         </div>
 
-        <Card className="relative overflow-hidden">
-          {/* Placeholder for product screenshot. Replace with a real
-              Brand Visibility snapshot annotated with 3–4 callouts. */}
+        {/* Stylized mock of an AI Visibility Snapshot. Stand-in until a
+            real annotated screenshot ships. Numbers are illustrative. */}
+        <Card className="relative overflow-hidden p-6 md:p-8">
           <div
-            className="relative flex aspect-[16/9] items-center justify-center"
+            className="pointer-events-none absolute inset-0"
             style={{
               background:
-                "linear-gradient(135deg, color-mix(in oklab, var(--primary) 3%, transparent) 0%, color-mix(in oklab, var(--primary) 1%, transparent) 50%, transparent 100%)",
+                "linear-gradient(135deg, color-mix(in oklab, var(--primary) 4%, transparent) 0%, transparent 60%)",
             }}
-          >
-            <div
-              className="absolute inset-0 opacity-[0.35]"
-              style={{
-                backgroundImage:
-                  "linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)",
-                backgroundSize: "32px 32px",
-              }}
-            />
-            <div className="relative text-center">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                Placeholder
+          />
+          <div className="relative">
+            {/* Top row: subject + period */}
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 border-b border-border/60 pb-5">
+              <div>
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  AI Visibility Snapshot
+                </div>
+                <div className="font-display text-[20px] font-semibold tracking-[-0.01em] text-foreground">
+                  {DEMO_SUBJECT}
+                </div>
               </div>
-              <div className="mt-2 text-[15px] text-foreground/65">
-                Annotated dashboard screenshot &mdash; {DEMO_SUBJECT}
+              <div className="text-[11px] text-muted-foreground">
+                Last 7 days · 4 platforms
+              </div>
+            </div>
+
+            {/* KPI tiles */}
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              {[
+                { label: "Mention rate", value: "68%", delta: "+5 pts", trend: "up" },
+                { label: "Avg sentiment", value: "+0.18", delta: "+0.04", trend: "up" },
+                { label: "Risk frame rate", value: "24%", delta: "−2 pts", trend: "down" },
+              ].map((kpi) => (
+                <div
+                  key={kpi.label}
+                  className="rounded-md border border-border/60 bg-background/60 p-4"
+                >
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    {kpi.label}
+                  </div>
+                  <div className="mt-1.5 flex items-baseline gap-2">
+                    <span className="font-display text-[24px] font-semibold tabular-nums tracking-[-0.02em] text-foreground">
+                      {kpi.value}
+                    </span>
+                    <span className="text-[11px] font-medium text-success">
+                      {kpi.trend === "up" ? "▲" : "▼"} {kpi.delta}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Narrative mix */}
+            <div className="mt-8">
+              <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                Dominant narrative
+              </div>
+              <div className="space-y-2.5">
+                {[
+                  { label: "Progressive reformer", pct: 42, tone: "primary" as const },
+                  { label: "Consumer advocate", pct: 28, tone: "muted" as const },
+                  { label: "Polarizing figure", pct: 18, tone: "warning" as const },
+                  { label: "Other", pct: 12, tone: "muted" as const },
+                ].map((n) => (
+                  <div key={n.label} className="flex items-center gap-3">
+                    <div className="w-40 shrink-0 text-[12.5px] text-foreground/80">
+                      {n.label}
+                    </div>
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${n.pct}%`,
+                          background:
+                            n.tone === "primary"
+                              ? "var(--primary)"
+                              : n.tone === "warning"
+                                ? "var(--warning)"
+                                : "color-mix(in oklab, var(--muted-foreground) 55%, transparent)",
+                        }}
+                      />
+                    </div>
+                    <div className="w-10 shrink-0 text-right text-[12px] font-semibold tabular-nums text-foreground/80">
+                      {n.pct}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Recommended move */}
+            <div className="mt-7 rounded-md border border-primary/30 bg-primary/[0.05] p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                    Recommended move
+                  </div>
+                  <div className="text-[13.5px] leading-relaxed text-foreground/85">
+                    Seed independent sources on housing affordability &mdash;
+                    the largest unowned gap in this snapshot.
+                  </div>
+                </div>
+                <div className="shrink-0 whitespace-nowrap pt-1 text-[11px] font-medium text-primary">
+                  Read brief →
+                </div>
               </div>
             </div>
           </div>
@@ -315,11 +465,8 @@ function Capabilities() {
           </h2>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {items.map((item, i) => (
+          {items.map((item) => (
             <Card key={item.title} className="p-6">
-              <div className="mb-3 text-[11px] font-semibold tabular-nums text-muted-foreground">
-                {String(i + 1).padStart(2, "0")}
-              </div>
               <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
                 {item.title}
               </h3>
