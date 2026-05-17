@@ -1,10 +1,10 @@
 // Next.js 16 renamed `middleware.ts` to `proxy.ts`. clerkMiddleware()
 // works unchanged here.
 //
-// Every route requires auth EXCEPT the marketing landing at `/`. `/`
-// renders the public landing for signed-out visitors and redirects
-// signed-in visitors to `/subjects` (the real dashboard URL). The
-// dispatch happens inside app/page.tsx.
+// Every route requires auth EXCEPT the marketing landing at `/`,
+// which always renders the public landing regardless of session.
+// Signed-in users navigate to the dashboard at `/subjects` via the
+// in-page header link.
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 
 const isPublicRoute = createRouteMatcher(['/'])
