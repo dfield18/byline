@@ -727,10 +727,14 @@ def _compute_strategic_takeaways(
             "tone": "primary",
             "eyebrow": "Strongest asset",
             "title": f"Strongest association: {strong['label']}",
+            # Tightened from "{Subject} appears in N% of {topic} prompts
+            # with {label} overall sentiment." — the prior version
+            # repeated the subject name + topic name (both already
+            # surfaced in the hero H1 + this takeaway's title). Six
+            # words now, one line at typical hero width, scannable.
             "body": (
-                f"{subj_inline_cap} appears in {round(strong['recall'] * 100)}% "
-                f"of {strong['label']} prompts with {sent_label} overall "
-                f"sentiment."
+                f"{round(strong['recall'] * 100)}% mention rate, "
+                f"{sent_label} overall sentiment."
             ),
             # Per-topic recall + mean sentiment, surfaced as structured
             # fields so downstream consumers (e.g., _compute_bottom_line)

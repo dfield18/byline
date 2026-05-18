@@ -477,7 +477,7 @@ function HeroKpis({
   ];
 
   return (
-    <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-4">
       {tiles.map((t) => {
         const change = getKpiChangeDisplay(
           t.kpi.delta,
@@ -602,8 +602,8 @@ function DominantNarrativePanel({
   if (clusters.length === 0) {
     return (
       <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
-          Dominant narrative
+        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
+          Narrative mix
         </div>
         <p className="mt-3 text-[13px] text-foreground/55 leading-relaxed">
           No narrative clustering available for this snapshot yet. Run the
@@ -621,19 +621,18 @@ function DominantNarrativePanel({
 
   return (
     <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12">
-      {/* Eyebrow standardized to match the left column's
-          uppercase + tracked treatment (AI NARRATIVE BRIEF, BOTTOM
-          LINE, STRONGEST ASSET) — case inconsistency was a small
-          source of visual noise. The previous H2 that displayed
-          {top.name} above the bars was removed because the same
-          name appears as the first bar at the same percentage,
-          producing a literal duplication. The eyebrow alone names
-          the section; the bars carry the content. */}
-      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
-        Dominant narrative
+      {/* Renamed from "Dominant narrative" → "Narrative mix" + the
+          eyebrow is one notch smaller / lighter than the left-column
+          eyebrows so this panel reads as supporting context rather
+          than a competing focal point against the AI Narrative Brief.
+          The previous H2 that displayed {top.name} above the bars
+          was removed earlier — the same name appears as the first
+          bar at the same percentage, producing a literal duplication. */}
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
+        Narrative mix
       </div>
 
-      <ul className="mt-8 space-y-8">
+      <ul className="mt-6 space-y-5">
         {clusters.slice(0, 4).map((c, i) => {
           // Bar width = absolute share (0..1 → 0..100%). The remaining
           // track visually represents the share not covered by named
@@ -641,27 +640,30 @@ function DominantNarrativePanel({
           // to sum to 100%.
           const barWidth = c.share * 100;
           const negative = isNegative(c.name);
-          // Position-based opacity for non-negative clusters; warning
-          // color overrides for negative ones regardless of position
+          // Lowered opacity ramp (was 1.0 / 0.75 / 0.55 / 0.45) so even
+          // the top bar reads as muted-blue rather than full primary —
+          // keeps the panel in a supporting-data register, not
+          // competing with the brief's primary-tinted eyebrows. Warning
+          // negatives still pop because they need to flag a risk frame.
           const opacity =
-            i === 0 ? 1 : i === 1 ? 0.75 : i === 2 ? 0.55 : 0.45;
+            i === 0 ? 0.6 : i === 1 ? 0.45 : i === 2 ? 0.3 : 0.2;
           return (
             <li key={c.name} title={c.description}>
-              <div className="flex items-center justify-between text-[13px] mb-1.5">
-                <span className="text-foreground/85 font-medium">
+              <div className="flex items-center justify-between text-[12.5px] mb-1">
+                <span className="text-foreground/65">
                   {c.name}
                 </span>
-                <span className="text-foreground/70 tabular-nums text-[12px]">
+                <span className="text-foreground/55 tabular-nums text-[11.5px]">
                   {Math.round(c.share * 100)}%
                 </span>
               </div>
-              <div className="relative h-1.5 w-full rounded-full bg-muted/80 overflow-hidden">
+              <div className="relative h-1 w-full rounded-full bg-muted/80 overflow-hidden">
                 <div
                   className="absolute inset-y-0 left-0 rounded-full"
                   style={{
                     width: `${barWidth}%`,
                     background: negative ? "var(--warning)" : "var(--primary)",
-                    opacity: negative ? 0.85 : opacity,
+                    opacity: negative ? 0.75 : opacity,
                   }}
                 />
               </div>
@@ -1429,14 +1431,14 @@ export default async function SubjectOverviewPage({
                       <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-primary">
                         Recommended move
                       </div>
+                      {/* Hero shows just the imperative action — the
+                          "why" rationale is preserved on the
+                          /recommendations spoke alongside the
+                          secondary alternatives, so the briefing
+                          stays scannable. */}
                       <div className="mt-0.5 text-[14px] font-semibold text-foreground leading-snug">
                         {data.recommended_actions.primary.action}
                       </div>
-                      {data.recommended_actions.primary.why && (
-                        <p className="mt-1 text-[13px] text-foreground/70 leading-relaxed">
-                          {data.recommended_actions.primary.why}
-                        </p>
-                      )}
                       {data.recommended_actions.secondary.length > 0 && (
                         <Link
                           href={`/subjects/${subjectId}/recommendations`}
