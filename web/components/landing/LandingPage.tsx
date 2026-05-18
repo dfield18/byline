@@ -128,8 +128,8 @@ function Positioning() {
       <div className="mx-auto max-w-[900px] px-6 py-8 text-center">
         <p className="text-[16px] leading-relaxed text-foreground/85">
           AI is editing the political conversation.{" "}
-          <span className="font-semibold text-foreground">byline</span> reads
-          what it&rsquo;s writing.
+          <span className="font-semibold text-foreground">byline</span>
+          {" "}reads what it&rsquo;s writing.
         </p>
       </div>
     </section>
