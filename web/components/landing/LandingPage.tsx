@@ -150,6 +150,11 @@ function MethodologyBanner() {
         "Weekly prompt runs in two layers — named (your subject) and unnamed (its topic area). Same prompts each cycle.",
     },
     {
+      label: "Response Analysis",
+      value:
+        "Every response is parsed by a second-pass AI that extracts sentiment, narratives, and source citations — uniformly across platforms.",
+    },
+    {
       label: "Recommended Actions",
       value:
         "Concrete next-week moves: what to brief, what to pre-empt, where to add authority, and which sources to influence.",
@@ -165,7 +170,7 @@ function MethodologyBanner() {
             different gap (24px) than the inner stat-to-stat gap
             (40px). All four cells now use the same left-border
             chrome too so the row reads as a coherent four-up. */}
-        <div className="grid items-start gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid items-start gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
           <div className="border-l-2 border-primary pl-4">
             <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-primary">
               Methodology
