@@ -53,7 +53,7 @@ export function Sidebar({
   activeSection?: NavSection;
 } = {}) {
   return (
-    <aside className="hidden lg:flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar sticky top-0 h-screen overflow-y-auto">
+    <aside className="hidden lg:flex w-[246px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar sticky top-0 h-screen overflow-y-auto">
       <div className="flex items-center gap-3 px-6 h-20 border-b border-sidebar-border">
         <div className="relative flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
           <Radar className="h-4 w-4" />
