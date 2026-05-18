@@ -170,10 +170,7 @@ function MethodologyBanner() {
             <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-primary">
               Methodology
             </div>
-            <h3 className="mt-1.5 font-display text-[17px] font-semibold leading-snug tracking-tight text-foreground">
-              AI search monitoring for public affairs.
-            </h3>
-            <p className="mt-2 text-[13.5px] leading-relaxed text-foreground/75">
+            <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground/85">
               We track how ChatGPT, Claude, Gemini, and Perplexity describe
               your issue, organization, opponents, and policy landscape.
               Fresh, stateless sessions each cycle.
