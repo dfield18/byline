@@ -57,7 +57,13 @@ const WHO_IT_IS_FOR: { title: string; description: string }[] = [
 
 export function LandingPage() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    // cursor-default prevents the browser's text-I-beam pointer from
+    // showing when the user hovers over headlines, body copy, and
+    // other non-editable text. Links and buttons keep their pointer
+    // cursor via the UA stylesheet (for <a href>) and Tailwind
+    // preflight (for <button>), so interactivity affordances are
+    // unaffected.
+    <div className="min-h-screen cursor-default bg-background text-foreground">
       <MarketingNav />
       <main>
         <Hero />
