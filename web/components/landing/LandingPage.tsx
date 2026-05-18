@@ -587,7 +587,7 @@ function HowItWorks() {
       body: "Add the candidates, issues, or organizations you want to track.",
     },
     {
-      title: "Ask the questions voters, journalists, and stakeholders are asking.",
+      title: "Ask the questions voters, journalists, and policy makers are asking.",
       body: "We query ChatGPT, Claude, Gemini, and Perplexity the way real audiences do.",
     },
     {
