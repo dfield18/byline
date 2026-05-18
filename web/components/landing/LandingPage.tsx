@@ -137,16 +137,13 @@ function Positioning() {
 }
 
 function MethodologyBanner() {
-  // Each stat answers a distinct buyer question (What do you cover?
-  // / How often, how rigorously? / What do I actually get? / What
-  // do I do next?) so the section closes the most common objections
-  // a public-affairs buyer raises when evaluating the tool.
+  // Each stat answers a distinct buyer question (How often, how
+  // rigorously? / What do I actually get? / What do I do next?) so
+  // the section closes the most common objections a public-affairs
+  // buyer raises when evaluating the tool. Platform coverage moved
+  // up into the heading subtitle since it's the same beat as "what
+  // we track" — kept the stats focused on cadence/output/action.
   const stats: { label: string; value: string }[] = [
-    {
-      label: "Platform Coverage",
-      value:
-        "ChatGPT, Claude, Gemini, Perplexity. Fresh sessions each cycle, no state carryover.",
-    },
     {
       label: "Snapshot Cadence",
       value:
@@ -175,11 +172,12 @@ function MethodologyBanner() {
               AI search monitoring for public affairs.
             </h3>
             <p className="mt-3 text-[14px] leading-relaxed text-foreground/75">
-              We track how major AI platforms describe your issue,
-              organization, opponents, and policy terrain.
+              We track how ChatGPT, Claude, Gemini, and Perplexity describe
+              your issue, organization, opponents, and policy landscape.
+              Fresh, stateless sessions each cycle.
             </p>
           </div>
-          <dl className="grid gap-x-10 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
+          <dl className="grid gap-x-10 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
             {stats.map((s) => (
               <div key={s.label} className="border-l-2 border-border/80 pl-4">
                 <dt className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
