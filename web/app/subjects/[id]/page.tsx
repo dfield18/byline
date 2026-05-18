@@ -1134,7 +1134,15 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
     <div className="space-y-1">
       <div className="grid grid-cols-12 text-[10px] uppercase tracking-wider text-foreground/65 px-3 pb-2 border-b border-border">
         <div className="col-span-6">Source</div>
-        <div className="col-span-3 text-right">Influence</div>
+        <div className="col-span-3 text-right">
+          <span className="inline-flex items-center justify-end gap-1">
+            Influence
+            <KpiTooltipIcon
+              text="How often this source appears in AI answers, scored 0–100 relative to the most-cited source. The top source always scores 100; others scale down from there based on their citation count."
+              align="right"
+            />
+          </span>
+        </div>
         <div className="col-span-3 text-right">Type</div>
       </div>
       {sources.map((s, idx) => (
