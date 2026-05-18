@@ -1,10 +1,13 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  Bot,
   FileText,
   Globe,
+  MessageSquare,
   Radar,
   Search,
+  Sparkles,
   Target,
   Zap,
 } from "lucide-react";
@@ -68,7 +71,17 @@ export function LandingPage() {
 }
 
 function PlatformsStrip() {
-  const platforms = ["ChatGPT", "Claude", "Gemini", "Perplexity"];
+  // Functional/categorical lucide glyphs paired with each platform's
+  // name. Not brand logos — chosen so the icon hints at the
+  // platform's primary UX (chat / assistant / sparkle / search) and
+  // adds visual texture next to the wordmark without trademark
+  // recreation. The wordmark still carries the brand recognition.
+  const platforms: { name: string; icon: typeof Sparkles }[] = [
+    { name: "ChatGPT", icon: MessageSquare },
+    { name: "Claude", icon: Bot },
+    { name: "Gemini", icon: Sparkles },
+    { name: "Perplexity", icon: Search },
+  ];
   return (
     <section className="border-b border-border/80 bg-card/30">
       <div className="mx-auto max-w-[1200px] px-6 py-7">
@@ -76,17 +89,19 @@ function PlatformsStrip() {
           <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/70">
             Platforms monitored
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13.5px] font-medium text-foreground/80">
-            {platforms.map((p, i) => (
-              <span key={p} className="inline-flex items-center gap-6">
-                {p}
-                {i < platforms.length - 1 && (
-                  <span className="text-foreground/25" aria-hidden>
-                    ·
-                  </span>
-                )}
-              </span>
-            ))}
+          <div className="flex flex-wrap items-center justify-center gap-x-7 gap-y-2 text-[13.5px] font-medium text-foreground/80">
+            {platforms.map((p) => {
+              const Icon = p.icon;
+              return (
+                <span key={p.name} className="inline-flex items-center gap-1.5">
+                  <Icon
+                    className="h-3.5 w-3.5 text-foreground/55"
+                    strokeWidth={1.75}
+                  />
+                  <span>{p.name}</span>
+                </span>
+              );
+            })}
           </div>
         </div>
       </div>
