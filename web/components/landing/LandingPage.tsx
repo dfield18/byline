@@ -287,13 +287,21 @@ function Hero() {
   );
 }
 
-// Stylized sample of byline's AI Narrative Brief — the editorial
-// triad (Bottom Line · Strongest Asset · Recommended Move) is the
-// most distinctive byline output, so the Hero side panel mirrors
-// it instead of a generic topic-recall bar list. Copy is the
-// actual live brief for J.D. Vance lightly trimmed to fit the
-// narrower side-panel width.
+// Stylized sample of byline's Competitive Snapshot — Share of
+// Voice bars across the focal subject + top peers AI surfaces on
+// the same topic areas. The dashboard pairs these bars with a
+// metric table; the hero side panel keeps only the bars since
+// the table is too dense for this width. Copy is realistic
+// J.D. Vance peer data so the visual reads as authentic product
+// output rather than a stylized illustration.
 function HeroVisual() {
+  const competitors: { name: string; sov: number; isSubject?: boolean }[] = [
+    { name: "Donald Trump", sov: 92 },
+    { name: "J.D. Vance", sov: 48, isSubject: true },
+    { name: "Marco Rubio", sov: 31 },
+    { name: "Ron DeSantis", sov: 28 },
+    { name: "Vivek Ramaswamy", sov: 18 },
+  ];
   return (
     <Card className="relative overflow-hidden p-6">
       <div
@@ -304,59 +312,67 @@ function HeroVisual() {
         }}
       />
       <div className="relative">
-        {/* Card header — mirrors the live subject overview header
-            (eyebrow + subject name + meta line) so a visitor sees
-            an authentic-looking brief, not a marketing mock. */}
+        {/* Card header — mirrors the live dashboard's Competitive
+            Snapshot header (eyebrow + subject name + entities-
+            tracked pill) so a visitor sees an authentic-looking
+            module, not a marketing mock. */}
         <div className="flex items-baseline justify-between gap-3 pb-3 border-b border-border/80">
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/65">
-              AI Narrative Brief
+              Competitive Snapshot
             </div>
             <div className="mt-0.5 font-display text-[17px] font-semibold tracking-[-0.01em] text-foreground">
               J.D. Vance
             </div>
           </div>
-          <div className="text-[10.5px] font-medium text-foreground/70 whitespace-nowrap">
-            Last 7 days
+          <div className="rounded-sm border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary whitespace-nowrap">
+            {competitors.length} entities
           </div>
         </div>
 
-        {/* Briefing triad — each block: eyebrow (primary) + bold
-            title + regular body. Same chrome as the live dashboard
-            so the marketing visual reads as the real product. */}
-        <div className="mt-5 space-y-4">
-          <div className="pl-3 border-l-2 border-l-primary">
-            <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary">
-              Bottom line
-            </div>
-            <div className="mt-0.5 text-[13px] font-semibold text-foreground leading-snug">
-              AI underweights J.D. Vance on the future of American conservatism.
-            </div>
-            <p className="mt-1 text-[12px] leading-relaxed text-foreground/75">
-              0% mention rate vs 67% average across other tracked topics.
-            </p>
-          </div>
+        <div className="mt-5 mb-3 text-[10px] uppercase tracking-wider text-foreground/65">
+          Share of voice (% of answers)
+        </div>
 
-          <div className="pl-3 border-l-2 border-l-primary">
-            <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary">
-              Strongest asset
+        {/* Bars — focal subject gets the strongest primary tint +
+            a "You" pill; peers fade to lower opacity so the focal
+            row reads first. */}
+        <div className="space-y-3">
+          {competitors.map((c) => (
+            <div key={c.name}>
+              <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span
+                    className={`truncate text-[12.5px] ${
+                      c.isSubject
+                        ? "font-semibold text-foreground"
+                        : "text-foreground/85"
+                    }`}
+                  >
+                    {c.name}
+                  </span>
+                  {c.isSubject && (
+                    <span className="rounded-sm bg-primary/15 text-primary text-[9px] font-semibold uppercase tracking-[0.08em] px-1 py-0.5">
+                      You
+                    </span>
+                  )}
+                </div>
+                <span className="text-[12px] font-semibold tabular-nums text-foreground/85">
+                  {c.sov}%
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${c.sov}%`,
+                    background: "var(--primary)",
+                    opacity: c.isSubject ? 1 : 0.55,
+                  }}
+                />
+              </div>
             </div>
-            <div className="mt-0.5 text-[12.5px] font-semibold text-foreground leading-snug">
-              Strongest association: figures shaping the Republican administration.
-            </div>
-            <p className="mt-1 text-[12px] leading-relaxed text-foreground/70">
-              100% mention rate, neutral overall sentiment.
-            </p>
-          </div>
-
-          <div className="pl-3 border-l-2 border-l-primary">
-            <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary">
-              Recommended move
-            </div>
-            <div className="mt-0.5 text-[12.5px] font-semibold text-foreground leading-snug">
-              Author an op-ed defining a vision for &lsquo;the future of American conservatism.&rsquo;
-            </div>
-          </div>
+          ))}
         </div>
       </div>
     </Card>
