@@ -138,29 +138,29 @@ function Positioning() {
 
 function MethodologyBanner() {
   // Each stat answers a distinct buyer question (What do you cover?
-  // / How often, how rigorously? / What do I actually get?) so the
-  // section closes the most common objections a public-affairs buyer
-  // raises when evaluating the tool.
+  // / How often, how rigorously? / What do I actually get? / What
+  // do I do next?) so the section closes the most common objections
+  // a public-affairs buyer raises when evaluating the tool.
   const stats: { label: string; value: string }[] = [
     {
-      label: "Platform coverage",
+      label: "Platform Coverage",
       value:
-        "Every major AI platform monitored each cycle — ChatGPT, Claude, Gemini, Perplexity.",
+        "ChatGPT, Claude, Gemini, and Perplexity. Results are compared by model so you can see where narratives diverge.",
     },
     {
-      label: "Snapshot cadence",
+      label: "Snapshot Cadence",
       value:
-        "Weekly snapshots. ~13 audience-style prompts per subject — the same questions voters, journalists, and policy makers actually ask.",
+        "Weekly prompt runs across voter, journalist, policymaker, and stakeholder-style questions. The same prompts repeat over time.",
     },
     {
-      label: "What each brief shows",
+      label: "Brief Metrics",
       value:
-        "Mention rate, sentiment, narrative clusters, and source attribution.",
+        "Mention rate, rank position, sentiment, narrative cluster, source attribution, and competitor visibility.",
     },
     {
-      label: "Recommended actions",
+      label: "Recommended Actions",
       value:
-        "Concrete next-week moves derived from each snapshot — what to brief, where to pre-empt, what to seed. Each tied to the data driving it.",
+        "Concrete next-week moves: what to brief, what to pre-empt, where to add authority, and which sources to influence.",
     },
   ];
   return (
@@ -172,8 +172,12 @@ function MethodologyBanner() {
               Methodology
             </div>
             <h3 className="font-display text-[19px] font-semibold leading-snug tracking-tight text-foreground sm:text-[20px]">
-              Press-monitoring discipline, applied to AI search.
+              AI search monitoring for public affairs.
             </h3>
+            <p className="mt-3 text-[14px] leading-relaxed text-foreground/75">
+              We track how major AI platforms describe your issue,
+              organization, opponents, and policy terrain.
+            </p>
           </div>
           <dl className="grid gap-x-10 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
             {stats.map((s) => (
