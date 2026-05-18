@@ -1,16 +1,20 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  Bot,
   FileText,
   Globe,
-  MessageSquare,
   Radar,
   Search,
-  Sparkles,
   Target,
   Zap,
 } from "lucide-react";
+import {
+  SiAnthropic,
+  SiGooglegemini,
+  SiOpenai,
+  SiPerplexity,
+} from "react-icons/si";
+import type { IconType } from "react-icons";
 import { Card } from "@/components/dashboard/ui";
 
 // TODO: replace these four placeholders with real values before launch.
@@ -71,16 +75,16 @@ export function LandingPage() {
 }
 
 function PlatformsStrip() {
-  // Functional/categorical lucide glyphs paired with each platform's
-  // name. Not brand logos — chosen so the icon hints at the
-  // platform's primary UX (chat / assistant / sparkle / search) and
-  // adds visual texture next to the wordmark without trademark
-  // recreation. The wordmark still carries the brand recognition.
-  const platforms: { name: string; icon: typeof Sparkles }[] = [
-    { name: "ChatGPT", icon: MessageSquare },
-    { name: "Claude", icon: Bot },
-    { name: "Gemini", icon: Sparkles },
-    { name: "Perplexity", icon: Search },
+  // Actual brand marks via react-icons (wraps the CC0-licensed
+  // simple-icons set). Icons render with currentColor so the
+  // monochrome editorial treatment via text-foreground/N still
+  // applies — no rainbow brand-color circus competing with the
+  // rest of the page.
+  const platforms: { name: string; icon: IconType }[] = [
+    { name: "ChatGPT", icon: SiOpenai },
+    { name: "Claude", icon: SiAnthropic },
+    { name: "Gemini", icon: SiGooglegemini },
+    { name: "Perplexity", icon: SiPerplexity },
   ];
   return (
     <section className="border-b border-border/80 bg-card/30">
@@ -95,8 +99,8 @@ function PlatformsStrip() {
               return (
                 <span key={p.name} className="inline-flex items-center gap-1.5">
                   <Icon
-                    className="h-3.5 w-3.5 text-foreground/55"
-                    strokeWidth={1.75}
+                    className="h-3.5 w-3.5 text-foreground/70"
+                    aria-hidden
                   />
                   <span>{p.name}</span>
                 </span>
