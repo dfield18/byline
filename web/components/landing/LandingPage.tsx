@@ -269,7 +269,7 @@ function Hero() {
         <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-16">
           <div className="lg:col-span-7">
             <div className="mb-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
-              AI Narrative Intelligence
+              AI Narrative Intelligence for Public Affairs
             </div>
             <h1 className="font-display text-[36px] font-semibold leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[46px] md:text-[54px]">
               The most influential editor in politics has no byline.
