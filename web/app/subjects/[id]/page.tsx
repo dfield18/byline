@@ -601,7 +601,7 @@ function DominantNarrativePanel({
 }) {
   if (clusters.length === 0) {
     return (
-      <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12">
+      <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12 lg:pt-20">
         <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
           Narrative mix
         </div>
