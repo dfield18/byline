@@ -150,7 +150,7 @@ function MethodologyBanner() {
     {
       label: "Snapshot Cadence",
       value:
-        "Weekly prompt runs across voter, journalist, and policymaker AI prompts. The same prompts repeat over time (and you can add new ones).",
+        "Each week we run two prompt layers: direct questions about your subject, and topic-area questions where the subject isn't named — so you see both how AI frames you and whether AI surfaces you unprompted. Same prompts each cycle.",
     },
     {
       label: "Brief Metrics",
