@@ -99,8 +99,9 @@ function Positioning() {
     <section className="border-b border-border/80">
       <div className="mx-auto max-w-[900px] px-6 py-8 text-center">
         <p className="text-[16px] leading-relaxed text-foreground/85">
-          <span className="font-semibold text-foreground">byline</span> monitors
-          AI-generated answers the way media teams monitor press coverage.
+          AI is editing the political conversation.{" "}
+          <span className="font-semibold text-foreground">byline</span> reads
+          what it&rsquo;s writing.
         </p>
       </div>
     </section>
