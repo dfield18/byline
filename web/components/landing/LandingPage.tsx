@@ -287,13 +287,13 @@ function Hero() {
   );
 }
 
+// Stylized sample of byline's AI Narrative Brief — the editorial
+// triad (Bottom Line · Strongest Asset · Recommended Move) is the
+// most distinctive byline output, so the Hero side panel mirrors
+// it instead of a generic topic-recall bar list. Copy is the
+// actual live brief for J.D. Vance lightly trimmed to fit the
+// narrower side-panel width.
 function HeroVisual() {
-  const topics = [
-    { label: "Climate policy", pct: 84 },
-    { label: "Immigration", pct: 71 },
-    { label: "Voting rights", pct: 22, low: true },
-    { label: "Healthcare access", pct: 66 },
-  ];
   return (
     <Card className="relative overflow-hidden p-6">
       <div
@@ -304,38 +304,59 @@ function HeroVisual() {
         }}
       />
       <div className="relative">
-        <div className="flex items-center justify-between">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/80">
-            Topic recall
-          </div>
-          <div className="text-[10.5px] font-medium text-foreground/75">Last 30 days</div>
-        </div>
-        <div className="mt-5 space-y-3.5">
-          {topics.map((t) => (
-            <div key={t.label}>
-              <div className="mb-1.5 flex items-baseline justify-between">
-                <span className="text-[13px] text-foreground/90">{t.label}</span>
-                <span
-                  className={`text-[12.5px] font-semibold tabular-nums ${
-                    t.low ? "text-warning" : "text-foreground/85"
-                  }`}
-                >
-                  {t.pct}%
-                </span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${t.pct}%`,
-                    background: t.low
-                      ? "var(--warning)"
-                      : "var(--primary)",
-                  }}
-                />
-              </div>
+        {/* Card header — mirrors the live subject overview header
+            (eyebrow + subject name + meta line) so a visitor sees
+            an authentic-looking brief, not a marketing mock. */}
+        <div className="flex items-baseline justify-between gap-3 pb-3 border-b border-border/80">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/65">
+              AI Narrative Brief
             </div>
-          ))}
+            <div className="mt-0.5 font-display text-[17px] font-semibold tracking-[-0.01em] text-foreground">
+              J.D. Vance
+            </div>
+          </div>
+          <div className="text-[10.5px] font-medium text-foreground/70 whitespace-nowrap">
+            Last 7 days
+          </div>
+        </div>
+
+        {/* Briefing triad — each block: eyebrow (primary) + bold
+            title + regular body. Same chrome as the live dashboard
+            so the marketing visual reads as the real product. */}
+        <div className="mt-5 space-y-4">
+          <div className="pl-3 border-l-2 border-l-primary">
+            <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary">
+              Bottom line
+            </div>
+            <div className="mt-0.5 text-[13px] font-semibold text-foreground leading-snug">
+              AI underweights J.D. Vance on the future of American conservatism.
+            </div>
+            <p className="mt-1 text-[12px] leading-relaxed text-foreground/75">
+              0% mention rate vs 67% average across other tracked topics.
+            </p>
+          </div>
+
+          <div className="pl-3 border-l-2 border-l-primary">
+            <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary">
+              Strongest asset
+            </div>
+            <div className="mt-0.5 text-[12.5px] font-semibold text-foreground leading-snug">
+              Strongest association: figures shaping the Republican administration.
+            </div>
+            <p className="mt-1 text-[12px] leading-relaxed text-foreground/70">
+              100% mention rate, neutral overall sentiment.
+            </p>
+          </div>
+
+          <div className="pl-3 border-l-2 border-l-primary">
+            <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary">
+              Recommended move
+            </div>
+            <div className="mt-0.5 text-[12.5px] font-semibold text-foreground leading-snug">
+              Author an op-ed defining a vision for &lsquo;the future of American conservatism.&rsquo;
+            </div>
+          </div>
         </div>
       </div>
     </Card>
