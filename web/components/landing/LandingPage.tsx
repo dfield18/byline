@@ -767,8 +767,8 @@ function ClosingCTA() {
           Find out what AI is saying about your issue.
         </h2>
         <p className="mx-auto mt-5 max-w-xl text-[17px] leading-relaxed text-foreground/85">
-          Free to use while byline is in beta &mdash; see the briefing AI
-          is already giving your audience.
+          Lock in free access during our beta period and instantly see the
+          briefing AI is already giving your audience.
         </p>
         <div className="mt-10 flex flex-col items-center gap-3">
           <a
