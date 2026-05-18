@@ -155,7 +155,12 @@ function MethodologyBanner() {
     {
       label: "What each brief shows",
       value:
-        "Mention rate, sentiment, narrative clusters, source attribution, and a recommended next-week move.",
+        "Mention rate, sentiment, narrative clusters, and source attribution.",
+    },
+    {
+      label: "Recommended actions",
+      value:
+        "Concrete next-week moves derived from each snapshot — what to brief, where to pre-empt, what to seed. Each tied to the data driving it.",
     },
   ];
   return (
@@ -170,7 +175,7 @@ function MethodologyBanner() {
               Press-monitoring discipline, applied to AI search.
             </h3>
           </div>
-          <dl className="grid gap-x-10 gap-y-5 sm:grid-cols-3">
+          <dl className="grid gap-x-10 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
             {stats.map((s) => (
               <div key={s.label} className="border-l-2 border-border/80 pl-4">
                 <dt className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
