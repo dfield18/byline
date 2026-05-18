@@ -1269,7 +1269,7 @@ export default async function SubjectOverviewPage({
             backLabel="All subjects"
             refreshSlot={<RefreshButton subjectId={subjectId} />}
           />
-          <main className="flex-1 px-4 md:px-12 py-6 space-y-8 max-w-[1500px] w-full mx-auto">
+          <main className="flex-1 px-4 md:px-12 py-6 space-y-12 max-w-[1500px] w-full mx-auto">
             <Card className="relative overflow-hidden p-10 md:p-14 border-border/60">
               <div
                 className="absolute inset-0 pointer-events-none"
@@ -1342,7 +1342,7 @@ export default async function SubjectOverviewPage({
           refreshSlot={<RefreshButton subjectId={subjectId} />}
         />
 
-        <main className="flex-1 px-4 md:px-12 py-6 space-y-8 max-w-[1500px] w-full mx-auto">
+        <main className="flex-1 px-4 md:px-12 py-6 space-y-12 max-w-[1500px] w-full mx-auto">
           {/* HERO */}
           <section>
             <Card className="relative overflow-hidden p-6 md:p-8 border-border/60">
