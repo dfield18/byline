@@ -157,7 +157,7 @@ function MethodologyBanner() {
     {
       label: "Recommended Actions",
       value:
-        "Concrete next-week moves: what to brief, what to pre-empt, where to add authority, and which sources to influence.",
+        "Concrete next-week moves: what to brief, where to add authority, and which sources to influence.",
     },
   ];
   return (
