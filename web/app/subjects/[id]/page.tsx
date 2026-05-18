@@ -620,7 +620,7 @@ function DominantNarrativePanel({
     /polarizing|adversarial|criticism|controversy|risk|scandal/i.test(name);
 
   return (
-    <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12">
+    <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12 lg:pt-20">
       {/* Renamed from "Dominant narrative" → "Narrative mix" + the
           eyebrow is one notch smaller / lighter than the left-column
           eyebrows so this panel reads as supporting context rather
