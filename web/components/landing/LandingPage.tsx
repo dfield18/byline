@@ -152,7 +152,7 @@ function MethodologyBanner() {
     {
       label: "Response Analysis",
       value:
-        "Every response is parsed by a second-pass AI that extracts sentiment, narratives, and source citations — uniformly across platforms.",
+        "Every response is parsed by a second-pass AI that extracts sentiment, narratives, and source citations.",
     },
     {
       label: "Recommended Actions",
@@ -177,8 +177,7 @@ function MethodologyBanner() {
             </div>
             <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground/85">
               We track how ChatGPT, Claude, Gemini, and Perplexity describe
-              your issue, organization, opponents, and policy landscape.
-              Fresh, stateless sessions each cycle.
+              your cause. Fresh, stateless sessions each cycle.
             </p>
           </div>
           {stats.map((s) => (
