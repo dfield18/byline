@@ -407,7 +407,7 @@ function Problem() {
     <section className="border-b border-border/80 bg-card/40">
       <div className="mx-auto max-w-[900px] px-6 py-20 text-center">
         <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
-          The problem
+          Why this matters
         </div>
         <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
           AI is the new front door to the internet.
