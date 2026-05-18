@@ -158,14 +158,14 @@ function MidPageCTA() {
       <div className="mx-auto max-w-[1200px] px-6 py-12">
         <div className="flex flex-col items-center justify-center gap-5 text-center sm:flex-row sm:gap-8 sm:text-left">
           <div className="text-[17px] font-medium tracking-tight text-foreground">
-            See it on your own subject.
+            Try it free on your own subject.
           </div>
           <div className="flex flex-wrap items-center justify-center gap-5">
             <a
               href={CTA_URL}
               className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2.5 text-[14px] font-medium text-primary-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition-opacity hover:opacity-95"
             >
-              Book a demo
+              Create your free account
             </a>
             <a
               href={SAMPLE_REPORT_URL}
@@ -195,6 +195,9 @@ function MarketingNav() {
           <span className="text-[15px] font-semibold tracking-tight text-foreground">
             byline
           </span>
+          <span className="ml-1 rounded-sm border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary">
+            Beta
+          </span>
         </Link>
 
         <nav className="ml-8 hidden gap-6 text-sm text-foreground/80 md:flex">
@@ -222,7 +225,7 @@ function MarketingNav() {
             href={CTA_URL}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:opacity-95 transition-opacity"
           >
-            Book a demo
+            Create free account
           </a>
         </div>
       </div>
@@ -252,7 +255,7 @@ function Hero() {
                 href={CTA_URL}
                 className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] hover:opacity-95 transition-opacity"
               >
-                Book a demo
+                Create your free account
               </a>
               <a
                 href={SAMPLE_REPORT_URL}
@@ -265,6 +268,14 @@ function Hero() {
                 <ArrowRight className="h-3.5 w-3.5 text-foreground/55 transition-colors group-hover:text-primary" />
               </a>
             </div>
+            {/* Beta clarifier — sits beneath the CTAs so a visitor
+                immediately understands the two paths are both free
+                while the product is in beta. */}
+            <p className="mt-4 text-[13.5px] text-foreground/65">
+              <span className="font-medium text-foreground/85">byline</span>{" "}
+              is in beta &mdash; free to use for now. Browse a sample
+              report, or create an account to run your own.
+            </p>
           </div>
 
           <div className="lg:col-span-5">
@@ -669,14 +680,15 @@ function ClosingCTA() {
           Find out what AI is saying about your issue.
         </h2>
         <p className="mx-auto mt-5 max-w-xl text-[17px] leading-relaxed text-foreground/85">
-          See the briefing AI is already giving your audience.
+          Free to use while byline is in beta &mdash; see the briefing AI
+          is already giving your audience.
         </p>
         <div className="mt-10 flex flex-col items-center gap-3">
           <a
             href={CTA_URL}
             className="inline-flex items-center gap-2 rounded-md bg-primary px-6 py-3.5 text-[15px] font-medium text-primary-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] hover:opacity-95 transition-opacity"
           >
-            Book a demo
+            Create your free account
           </a>
           <div className="text-[13.5px] text-foreground/75">
             or email us at{" "}
