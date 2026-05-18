@@ -166,7 +166,7 @@ function MethodologyBanner() {
   return (
     <section className="border-b border-border/80 bg-card/50">
       <div className="mx-auto max-w-[1200px] px-6 py-10">
-        <div className="grid items-start gap-y-8 gap-x-12 lg:grid-cols-[minmax(0,_320px)_1fr]">
+        <div className="grid items-start gap-y-8 gap-x-6 lg:grid-cols-[minmax(0,_320px)_1fr]">
           <div>
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
               Methodology
