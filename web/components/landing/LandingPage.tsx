@@ -607,14 +607,14 @@ function Capabilities() {
     icon: typeof Target;
   }[] = [
     {
-      title: "Narrative tracking",
+      title: "Uncover hidden narratives",
       icon: Target,
       body: "See how AI assistants frame your issues, candidates, and organizations across ChatGPT, Claude, and Gemini.",
     },
     {
       title: "Topic-level gaps",
       icon: Search,
-      body: "Identify where AI underweights your strongest assets — and where your opponents are breaking through.",
+      body: "Spot vulnerabilities and blind spots before your opponents exploit them, and identify where AI underweights your strongest assets.",
     },
     {
       title: "Source intelligence",
@@ -647,7 +647,7 @@ function Capabilities() {
           {items.map((item) => {
             const Icon = item.icon;
             return (
-              <Card key={item.title} className="p-6">
+              <Card key={item.title} className="h-full p-6">
                 <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md border border-primary/20 bg-primary/[0.08] text-primary">
                   <Icon className="h-5 w-5" strokeWidth={1.75} />
                 </div>
