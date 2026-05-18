@@ -272,8 +272,8 @@ function Hero() {
             {/* Beta clarifier — sits beneath the CTAs so a visitor
                 immediately understands the two paths are both free
                 while the product is in beta. */}
-            <p className="mt-4 text-[13.5px] text-foreground/65">
-              <span className="font-medium text-foreground/85">byline</span>{" "}
+            <p className="mt-4 text-[15px] leading-relaxed text-foreground/75">
+              <span className="font-medium text-foreground/90">byline</span>{" "}
               is in beta &mdash; free to use for now. Browse a sample
               report, or create an account to run your own.
             </p>
