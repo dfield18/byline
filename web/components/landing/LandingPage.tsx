@@ -137,18 +137,25 @@ function Positioning() {
 }
 
 function MethodologyBanner() {
+  // Each stat answers a distinct buyer question (What do you cover?
+  // / How often, how rigorously? / What do I actually get?) so the
+  // section closes the most common objections a public-affairs buyer
+  // raises when evaluating the tool.
   const stats: { label: string; value: string }[] = [
     {
-      label: "Monitored queries",
-      value: "[Placeholder: Monitored queries volume]",
+      label: "Platform coverage",
+      value:
+        "Every major AI platform monitored each cycle — ChatGPT, Claude, Gemini, Perplexity.",
     },
     {
-      label: "Sentiment mapping",
-      value: "[Placeholder: Sentiment mapping tech]",
+      label: "Snapshot cadence",
+      value:
+        "Weekly snapshots. ~13 audience-style prompts per subject — the same questions voters, journalists, and policy makers actually ask.",
     },
     {
-      label: "Update frequency",
-      value: "[Placeholder: Update frequency]",
+      label: "What each brief shows",
+      value:
+        "Mention rate, sentiment, narrative clusters, source attribution, and a recommended next-week move.",
     },
   ];
   return (
@@ -160,7 +167,7 @@ function MethodologyBanner() {
               Methodology
             </div>
             <h3 className="font-display text-[19px] font-semibold leading-snug tracking-tight text-foreground sm:text-[20px]">
-              Powered by real-time LLM intelligence.
+              Press-monitoring discipline, applied to AI search.
             </h3>
           </div>
           <dl className="grid gap-x-10 gap-y-5 sm:grid-cols-3">
