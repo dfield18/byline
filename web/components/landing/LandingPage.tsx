@@ -150,7 +150,7 @@ function MethodologyBanner() {
     {
       label: "Snapshot Cadence",
       value:
-        "Weekly prompt runs across voter, journalist, policymaker, and stakeholder-style questions. The same prompts repeat over time.",
+        "Weekly prompt runs across voter, journalist, and policymaker AI prompts. The same prompts repeat over time (and you can add new ones).",
     },
     {
       label: "Brief Metrics",
