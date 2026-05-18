@@ -163,32 +163,37 @@ function MethodologyBanner() {
   return (
     <section className="border-b border-border/80 bg-card/50">
       <div className="mx-auto max-w-[1200px] px-6 py-10">
-        <div className="grid items-start gap-y-8 gap-x-6 lg:grid-cols-[minmax(0,_320px)_1fr]">
-          <div>
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
+        {/* Single flat 4-column grid so all four areas (heading +
+            3 stats) get equal width and consistent gaps. Previously
+            a nested 2-col outer grid (320px heading + stats) gave
+            the heading a noticeably wider column and used a
+            different gap (24px) than the inner stat-to-stat gap
+            (40px). All four cells now use the same left-border
+            chrome too so the row reads as a coherent four-up. */}
+        <div className="grid items-start gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="border-l-2 border-primary pl-4">
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-primary">
               Methodology
             </div>
-            <h3 className="font-display text-[19px] font-semibold leading-snug tracking-tight text-foreground sm:text-[20px]">
+            <h3 className="mt-1.5 font-display text-[17px] font-semibold leading-snug tracking-tight text-foreground">
               AI search monitoring for public affairs.
             </h3>
-            <p className="mt-3 text-[14px] leading-relaxed text-foreground/75">
+            <p className="mt-2 text-[13.5px] leading-relaxed text-foreground/75">
               We track how ChatGPT, Claude, Gemini, and Perplexity describe
               your issue, organization, opponents, and policy landscape.
               Fresh, stateless sessions each cycle.
             </p>
           </div>
-          <dl className="grid gap-x-10 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-            {stats.map((s) => (
-              <div key={s.label} className="border-l-2 border-border/80 pl-4">
-                <dt className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
-                  {s.label}
-                </dt>
-                <dd className="mt-1.5 text-[13.5px] leading-relaxed text-foreground/85">
-                  {s.value}
-                </dd>
+          {stats.map((s) => (
+            <div key={s.label} className="border-l-2 border-border/80 pl-4">
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
+                {s.label}
               </div>
-            ))}
-          </dl>
+              <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground/85">
+                {s.value}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
     </section>
