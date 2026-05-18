@@ -1,11 +1,14 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  BarChart3,
   FileText,
   Globe,
   Radar,
   Search,
+  Sparkles,
   Target,
+  TextCursorInput,
   Zap,
 } from "lucide-react";
 import {
@@ -664,21 +667,31 @@ function Capabilities() {
 }
 
 function HowItWorks() {
-  const steps: { title: string; body: string }[] = [
+  // Each step now carries a UI-evocative lucide glyph instead of a
+  // numeric badge — shifts the section's register from "generic
+  // process steps" to "software features" and aligns visually with
+  // the Capabilities cards above (same primary-tinted square tile
+  // chrome). Icons chosen to hint at the actual UI surface for each
+  // step (input field, AI spark, bar chart, action).
+  const steps: { title: string; body: string; icon: typeof Sparkles }[] = [
     {
       title: "Choose what you care about.",
+      icon: TextCursorInput,
       body: "Add the candidates, issues, or organizations you want to track.",
     },
     {
       title: "Ask the questions voters, journalists, and policy makers are asking.",
-      body: "We query ChatGPT, Claude, Gemini, and Perplexity the way real audiences do.",
+      icon: Sparkles,
+      body: "The platform queries ChatGPT, Claude, Gemini, and Perplexity exactly the way real audiences do.",
     },
     {
       title: "Track how AI answers frame the subject.",
+      icon: BarChart3,
       body: "Each snapshot shows the dominant narrative and the sources shaping it.",
     },
     {
       title: "Turn narrative gaps into comms strategy.",
+      icon: Zap,
       body: "Get specific next-week moves — what to brief, where to pre-empt, what to seed.",
     },
   ];
@@ -694,21 +707,24 @@ function HowItWorks() {
           </h2>
         </div>
         <ol className="grid gap-7 md:grid-cols-2 lg:grid-cols-4">
-          {steps.map((step, i) => (
-            <li key={step.title}>
-              <Card className="h-full p-6 md:p-7">
-                <div className="mb-5 flex h-9 w-9 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-[13px] font-semibold tabular-nums text-primary">
-                  {i + 1}
-                </div>
-                <h3 className="text-[16px] font-semibold leading-snug tracking-tight text-foreground">
-                  {step.title}
-                </h3>
-                <p className="mt-3 text-[14.5px] leading-relaxed text-foreground/85">
-                  {step.body}
-                </p>
-              </Card>
-            </li>
-          ))}
+          {steps.map((step) => {
+            const Icon = step.icon;
+            return (
+              <li key={step.title}>
+                <Card className="h-full p-6 md:p-7">
+                  <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-md border border-primary/20 bg-primary/[0.08] text-primary">
+                    <Icon className="h-5 w-5" strokeWidth={1.75} />
+                  </div>
+                  <h3 className="text-[16px] font-semibold leading-snug tracking-tight text-foreground">
+                    {step.title}
+                  </h3>
+                  <p className="mt-3 text-[14.5px] leading-relaxed text-foreground/85">
+                    {step.body}
+                  </p>
+                </Card>
+              </li>
+            );
+          })}
         </ol>
       </div>
     </section>
