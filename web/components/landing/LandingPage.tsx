@@ -276,8 +276,7 @@ function Hero() {
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
               Get ahead of what AI is writing about your candidate, issue,
-              or organization &mdash; across ChatGPT, Claude, Gemini, and
-              Perplexity.
+              or organization &mdash; across every major AI platform.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-5">
               <a
