@@ -269,9 +269,9 @@ function Hero() {
               The most influential editor in politics has no byline.
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
-              Track the narrative AI is telling about your candidate, issue,
-              or organization &mdash; see how ChatGPT, Claude, Gemini, and
-              Perplexity frame the story.
+              Get ahead of what AI is writing about your candidate, issue,
+              or organization &mdash; across ChatGPT, Claude, Gemini, and
+              Perplexity.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-5">
               <a
