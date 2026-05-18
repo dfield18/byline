@@ -145,7 +145,7 @@ function MethodologyBanner() {
     {
       label: "Platform Coverage",
       value:
-        "ChatGPT, Claude, Gemini, and Perplexity. Results are compared by model so you can see where narratives diverge.",
+        "ChatGPT, Claude, Gemini, Perplexity. Fresh sessions each cycle, no state carryover.",
     },
     {
       label: "Snapshot Cadence",
