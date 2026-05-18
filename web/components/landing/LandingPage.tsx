@@ -427,22 +427,37 @@ function Problem() {
             </a>
           </div>
         </div>
-        <div className="mx-auto mt-12 max-w-2xl space-y-5 text-[16.5px] leading-relaxed text-foreground/85">
-          <p>
-            Half of consumers now intentionally use AI-powered search. Among
-            those who&apos;ve tried it, 44% say it&apos;s already their primary
-            source for online information, beating traditional search at 31%.
-          </p>
-          <p>
-            Voters ask ChatGPT, Gemini, Claude, and Google&apos;s AI features
-            the same questions they used to type into Google — about
-            candidates, records, policies, and the organizations shaping them.
-            The AI doesn&apos;t link them to your press release, your op-ed,
-            or your fact sheet. It gives them an answer. Most communications
-            teams have no idea what that answer says.
-          </p>
+        {/* Two-column callout grid — the prior stacked-paragraph
+            block read as a wall of text. Splitting into side-by-side
+            panels with a subtle white card background against the
+            section's faint card tint makes each beat scannable as a
+            standalone supporting point. Single column stacks on
+            mobile. */}
+        <div className="mt-14 grid grid-cols-1 gap-5 text-left md:grid-cols-2">
+          <div className="rounded-lg border border-border/70 bg-background p-5 text-[15.5px] leading-relaxed text-foreground/85 md:p-6">
+            <p>
+              Half of consumers now intentionally use AI-powered search. Among
+              those who&apos;ve tried it, 44% say it&apos;s already their primary
+              source for online information, beating traditional search at 31%.
+            </p>
+          </div>
+          <div className="rounded-lg border border-border/70 bg-background p-5 text-[15.5px] leading-relaxed text-foreground/85 md:p-6">
+            <p>
+              Voters ask ChatGPT, Gemini, Claude, and Google&apos;s AI features
+              the same questions they used to type into Google — about
+              candidates, records, policies, and the organizations shaping them.
+              The AI doesn&apos;t link them to your press release, your op-ed,
+              or your fact sheet. It gives them an answer. Most communications
+              teams have no idea what that answer says.
+            </p>
+          </div>
         </div>
-        <div className="mx-auto mt-10 max-w-2xl rounded-md border-l-2 border-primary/60 bg-card/60 px-5 py-4 text-left text-[15px] leading-relaxed text-foreground/85">
+        {/* Elevated takeaway — distinct visual register from the
+            callouts above: thicker left border, primary-tinted wash,
+            larger and slightly weightier type, generous mt-16 so it
+            reads as a separate beat rather than another supporting
+            paragraph. */}
+        <div className="mx-auto mt-16 max-w-2xl rounded-md border-l-4 border-primary bg-primary/[0.05] px-6 py-5 text-left text-[17px] font-medium leading-relaxed text-foreground/90">
           AI search is becoming a persuasion channel. Most campaigns and
           advocacy teams are not monitoring it yet.
         </div>
