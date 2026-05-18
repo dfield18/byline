@@ -446,12 +446,11 @@ function Problem() {
           </div>
           <div className="rounded-lg border border-border/70 bg-background p-5 text-[15.5px] leading-relaxed text-foreground/85 md:p-6">
             <p>
-              Voters ask ChatGPT, Gemini, Claude, and Google&apos;s AI features
-              the same questions they used to type into Google — about
-              candidates, records, policies, and the organizations shaping them.
-              The AI doesn&apos;t link them to your press release, your op-ed,
-              or your fact sheet. It gives them an answer. Most communications
-              teams have no idea what that answer says.
+              Voters ask ChatGPT, Claude, Gemini, and Perplexity the same
+              questions they used to type into Google &mdash; about candidates,
+              records, and policies. The AI doesn&apos;t link to your press
+              release or op-ed; it gives them an answer. Most communications
+              teams have no idea what it says.
             </p>
           </div>
         </div>
