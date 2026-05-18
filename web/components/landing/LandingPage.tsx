@@ -147,7 +147,7 @@ function MethodologyBanner() {
     {
       label: "Snapshot Cadence",
       value:
-        "Each week we run two prompt layers: direct questions about your subject, and topic-area questions where the subject isn't named — so you see both how AI frames you and whether AI surfaces you unprompted. Same prompts each cycle.",
+        "Weekly prompt runs in two layers — named (your subject) and unnamed (its topic area). Same prompts each cycle.",
     },
     {
       label: "Brief Metrics",
