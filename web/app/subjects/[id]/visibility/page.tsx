@@ -175,6 +175,51 @@ export default async function VisibilityPage({
   const mentionRate = data.kpis.ai_recall.value;
   const mentionRateDelta = data.kpis.ai_recall.delta;
 
+  // Per-platform rows for the Hero's right column. The backend ships
+  // mention-rate data for only the platforms it currently queries
+  // (OpenAI/Google as of this writing); Claude and Perplexity are
+  // wired into the marketing copy but not yet into the response
+  // pipeline. We render the full intended coverage by appending
+  // placeholder "N/A" rows for any expected platform missing from
+  // platform_recall, so a viewer sees the full product surface and
+  // which slots are still pending data. Real entries sort high→low;
+  // placeholders trail at the bottom.
+  type PlatformRow = {
+    name: string;
+    value: number | null;
+    isPlaceholder: boolean;
+  };
+  const EXPECTED_PLATFORMS: { display: string; matches: string[] }[] = [
+    { display: "ChatGPT", matches: ["chatgpt", "openai", "gpt"] },
+    { display: "Claude", matches: ["claude", "anthropic"] },
+    { display: "Gemini", matches: ["gemini", "google"] },
+    { display: "Perplexity", matches: ["perplexity"] },
+  ];
+  const platformRows: PlatformRow[] = (() => {
+    const real: PlatformRow[] = [];
+    const placeholders: PlatformRow[] = [];
+    for (const spec of EXPECTED_PLATFORMS) {
+      const match = data.platform_recall.find((p) =>
+        spec.matches.some((kw) => p.name.toLowerCase().includes(kw)),
+      );
+      if (match && match.value !== null) {
+        real.push({
+          name: spec.display,
+          value: match.value,
+          isPlaceholder: false,
+        });
+      } else {
+        placeholders.push({
+          name: spec.display,
+          value: null,
+          isPlaceholder: true,
+        });
+      }
+    }
+    real.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+    return [...real, ...placeholders];
+  })();
+
   // KPI strip values (mention rate, avg position, first-mention rate,
   // delta vs prior). Tooltips explain each metric in plain English so
   // a non-technical reader can hover for context without leaving the
@@ -352,37 +397,55 @@ export default async function VisibilityPage({
                   {/* Right: per-platform mention-rate bars. Same chrome
                       as Overview's DominantNarrativePanel (Narrative
                       Mix) — same eyebrow weight, same opacity ramp by
-                      position, same thin bar treatment. Aligned with
-                      lg:pt-20 to start at the same y as the briefing
-                      triad's first eyebrow. */}
-                  <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12 lg:pt-20">
+                      position, same thin bar treatment. Sits flush at
+                      the top of the right column (no pt offset) so the
+                      eyebrow lines up near the top of the body grid.
+                      Placeholder rows for platforms not yet wired in
+                      the backend (Claude, Perplexity today) render as
+                      muted "N/A" with an empty bar track so a viewer
+                      sees the full intended coverage and which slots
+                      are still pending data. */}
+                  <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12">
                     <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
                       Per-platform mention rate
                     </div>
                     <ul className="mt-6 space-y-5">
-                      {[...data.platform_recall]
-                        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-                        .map((p, i) => {
-                          const pct = (p.value ?? 0) * 100;
-                          const opacity =
-                            i === 0
-                              ? 0.6
-                              : i === 1
-                                ? 0.45
-                                : i === 2
-                                  ? 0.3
-                                  : 0.2;
-                          return (
-                            <li key={p.name}>
-                              <div className="mb-1 flex items-center justify-between text-[12.5px]">
-                                <span className="text-foreground/65">
-                                  {p.name}
-                                </span>
-                                <span className="tabular-nums text-[11.5px] text-foreground/55">
-                                  {formatPct(p.value)}
-                                </span>
-                              </div>
-                              <div className="relative h-1 w-full overflow-hidden rounded-full bg-muted/80">
+                      {platformRows.map((row, i) => {
+                        const pct = (row.value ?? 0) * 100;
+                        const opacity =
+                          i === 0
+                            ? 0.6
+                            : i === 1
+                              ? 0.45
+                              : i === 2
+                                ? 0.3
+                                : 0.2;
+                        return (
+                          <li key={row.name}>
+                            <div className="mb-1 flex items-center justify-between text-[12.5px]">
+                              <span
+                                className={
+                                  row.isPlaceholder
+                                    ? "text-foreground/40"
+                                    : "text-foreground/65"
+                                }
+                              >
+                                {row.name}
+                              </span>
+                              <span
+                                className={`tabular-nums text-[11.5px] ${
+                                  row.isPlaceholder
+                                    ? "text-foreground/35"
+                                    : "text-foreground/55"
+                                }`}
+                              >
+                                {row.isPlaceholder
+                                  ? "N/A"
+                                  : formatPct(row.value)}
+                              </span>
+                            </div>
+                            <div className="relative h-1 w-full overflow-hidden rounded-full bg-muted/80">
+                              {!row.isPlaceholder && (
                                 <div
                                   className="absolute inset-y-0 left-0 rounded-full"
                                   style={{
@@ -391,10 +454,11 @@ export default async function VisibilityPage({
                                     opacity,
                                   }}
                                 />
-                              </div>
-                            </li>
-                          );
-                        })}
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 </div>
@@ -498,7 +562,11 @@ export default async function VisibilityPage({
                                 background: isWeakest
                                   ? "var(--warning)"
                                   : "var(--primary)",
-                                opacity: isWeakest ? 0.85 : 0.7,
+                                // Value-derived opacity so a 100% bar reads
+                                // darker than a 50% bar — width alone wasn't
+                                // enough visual differentiation between
+                                // high- and mid-recall topics.
+                                opacity: isWeakest ? 0.85 : 0.4 + (pct / 100) * 0.45,
                               }}
                             />
                           </div>

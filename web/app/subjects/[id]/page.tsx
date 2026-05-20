@@ -742,8 +742,15 @@ function TopicRecallChart({
                   </div>
                   <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
                     <div
-                      className={`h-full rounded-full ${isWeakest ? "bg-warning/70" : "bg-primary/70"}`}
-                      style={{ width: `${pct}%` }}
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${pct}%`,
+                        background: isWeakest ? "var(--warning)" : "var(--primary)",
+                        // Value-derived opacity so a 100% bar reads darker
+                        // than a 50% bar — width alone wasn't enough visual
+                        // differentiation between high- and mid-recall topics.
+                        opacity: isWeakest ? 0.75 : 0.4 + (pct / 100) * 0.45,
+                      }}
                     />
                   </div>
                 </div>
