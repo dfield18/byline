@@ -1,16 +1,5 @@
 import Link from "next/link";
-import {
-  ArrowRight,
-  BarChart3,
-  FileText,
-  Globe,
-  Radar,
-  Search,
-  Sparkles,
-  Target,
-  TextCursorInput,
-  Zap,
-} from "lucide-react";
+import { ArrowRight, FileText, Radar } from "lucide-react";
 import {
   SiAnthropic,
   SiGooglegemini,
@@ -68,9 +57,8 @@ export function LandingPage() {
         <MethodologyBanner />
         <Problem />
         <ProductPreview />
-        <Capabilities />
-        <MidPageCTA />
         <HowItWorks />
+        <MidPageCTA />
         <WhoItsFor />
         <ClosingCTA />
       </main>
@@ -229,9 +217,6 @@ function MarketingNav() {
         <nav className="ml-8 hidden gap-6 text-sm text-foreground/80 md:flex">
           <Link href="#how-it-works" className="hover:text-foreground transition-colors">
             How it works
-          </Link>
-          <Link href="#capabilities" className="hover:text-foreground transition-colors">
-            Product
           </Link>
           <Link href="#audience" className="hover:text-foreground transition-colors">
             Who it&rsquo;s for
@@ -403,6 +388,10 @@ function Problem() {
           </div>
           <div className="mt-3 max-w-md text-[15.5px] leading-relaxed text-foreground/85">
             of US consumers now intentionally seek out AI-powered search.
+            44% of those who&apos;ve tried it say it&apos;s already their
+            primary source &mdash; beating traditional search at 31%. They
+            ask AI what they once asked Google, and they get an answer, not
+            a link.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
             <a
@@ -415,32 +404,11 @@ function Problem() {
             </a>
           </div>
         </div>
-        {/* Two-column callout grid — the prior stacked-paragraph
-            block read as a wall of text. Splitting into side-by-side
-            panels with a subtle white card background against the
-            section's faint card tint makes each beat scannable as a
-            standalone supporting point. Single column stacks on
-            mobile. */}
-        <div className="mt-14 grid grid-cols-1 gap-5 text-left md:grid-cols-2">
-          <div className="rounded-lg border border-border/70 bg-background p-5 text-[15.5px] leading-relaxed text-foreground/85 md:p-6">
-            <p>
-              Half of consumers now intentionally use AI-powered search. Among
-              those who&apos;ve tried it, 44% say it&apos;s already their primary
-              source for online information, beating traditional search at 31%.
-            </p>
-          </div>
-          <div className="rounded-lg border border-border/70 bg-background p-5 text-[15.5px] leading-relaxed text-foreground/85 md:p-6">
-            <p>
-              Voters ask ChatGPT, Claude, Gemini, and Perplexity what they
-              once asked Google &mdash; candidates, records, and policies.
-              They get an answer, not a link. Most comms teams have no idea
-              what it says.
-            </p>
-          </div>
-        </div>
         {/* Persuasion-magnitude stat — same big-number + caption +
-            source-link pattern as the 50% above, so the two stats
-            read as a paired set bracketing the supporting callouts. */}
+            source-link pattern as the 50% above. The two stats now
+            sit as a structural pair (each with a long detail-rich
+            caption underneath) rather than being separated by a
+            text-callout block. */}
         <div className="mt-14 flex flex-col items-center">
           <div className="font-display text-[64px] font-semibold leading-none tracking-[-0.03em] text-primary sm:text-[88px]">
             4×
@@ -506,131 +474,83 @@ function ProductPreview() {
   );
 }
 
-function Capabilities() {
-  const items: {
-    title: string;
-    body: string;
-    icon: typeof Target;
-  }[] = [
+function HowItWorks() {
+  // Merged section: combines the prior "What it does" differentiator
+  // headline with the "How it works" process steps. Rendered as a
+  // numbered vertical timeline (large primary digits + connecting
+  // line + per-step title/body) rather than a card grid, so it
+  // reads as a distinct visual register from the icon-card grids
+  // used elsewhere on the page. Section bg-card/40 picks up the
+  // alt-bg slot vacated by the deleted Capabilities section so the
+  // page rhythm stays intact.
+  const steps: { title: string; body: string }[] = [
     {
-      title: "Uncover hidden narratives",
-      icon: Target,
-      body: "See how AI assistants frame your issues, candidates, and organizations across ChatGPT, Claude, and Gemini.",
+      title: "Choose what you care about.",
+      body: "Add the candidates, issues, or organizations you want to track.",
     },
     {
-      title: "Topic-level gaps",
-      icon: Search,
-      body: "Spot vulnerabilities and blind spots before your opponents exploit them, and identify where AI underweights your strongest assets.",
+      title: "We ask what your audiences ask.",
+      body: "byline queries ChatGPT, Claude, Gemini, and Perplexity the way voters, journalists, and policymakers actually do.",
     },
     {
-      title: "Source intelligence",
-      icon: Globe,
-      body: "See which publications, sites, and platforms are shaping AI's answers about you.",
+      title: "See the narrative — and what’s driving it.",
+      body: "Each snapshot shows the dominant framing across platforms, where opponents could exploit a gap, and the sources shaping every answer.",
     },
     {
-      title: "Recommended moves",
-      icon: Zap,
-      body: "Get specific, executable actions from every snapshot — which surfaces to seed, where to pre-empt, what to brief.",
+      title: "Turn gaps into moves.",
+      body: "Get specific, executable next-week actions: which sources to seed, where to pre-empt, what to brief.",
     },
   ];
   return (
-    <section id="capabilities" className="border-b border-border/80 bg-card/40">
+    <section id="how-it-works" className="border-b border-border/80 bg-card/40">
       <div className="mx-auto max-w-[1200px] px-6 py-20">
-        <div className="mb-10 max-w-2xl">
+        <div className="mb-12 max-w-2xl">
           <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
-            What it does
+            How it works
           </div>
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
             Built for narrative, not brand mentions.
           </h2>
           <p className="mt-4 text-[16px] leading-relaxed text-foreground/85">
-            Most AI visibility tools count mentions. byline explains the story
-            AI is telling about what you care about &mdash; and where the
-            framing is shifting.
+            Most AI visibility tools count mentions.{" "}
+            <span className="font-semibold text-foreground">byline</span>{" "}
+            shows the story AI is telling about what you care about &mdash;
+            and turns it into your next move.
           </p>
         </div>
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {items.map((item) => {
-            const Icon = item.icon;
-            return (
-              <Card key={item.title} className="h-full p-6">
-                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md border border-primary/20 bg-primary/[0.08] text-primary">
-                  <Icon className="h-5 w-5" strokeWidth={1.75} />
-                </div>
-                <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
-                  {item.title}
+        {/* Numbered vertical timeline. Each step is a 2-col grid row
+            (number circle | title + body). A thin connecting line
+            runs through the center of the number column on every
+            step except the last, joining the circles into a
+            continuous timeline. Number circles sit at z-10 so the
+            line disappears behind them. */}
+        <ol className="mx-auto max-w-3xl">
+          {steps.map((step, i) => (
+            <li
+              key={step.title}
+              className="relative grid grid-cols-[auto_1fr] gap-x-6 pb-12 last:pb-0"
+            >
+              {i < steps.length - 1 && (
+                <span
+                  aria-hidden
+                  className="absolute left-[23px] top-12 bottom-0 w-px bg-border/80"
+                />
+              )}
+              <div className="relative z-10 flex h-12 w-12 items-center justify-center rounded-full border border-primary/30 bg-background">
+                <span className="font-display text-[22px] font-semibold leading-none tracking-[-0.02em] text-primary tabular-nums">
+                  {i + 1}
+                </span>
+              </div>
+              <div className="pt-2">
+                <h3 className="text-[18px] font-semibold leading-snug tracking-[-0.01em] text-foreground">
+                  {step.title}
                 </h3>
-                <p className="mt-2.5 text-[14.5px] leading-relaxed text-foreground/85">
-                  {item.body}
+                <p className="mt-2 text-[15px] leading-relaxed text-foreground/75">
+                  {step.body}
                 </p>
-              </Card>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function HowItWorks() {
-  // Each step now carries a UI-evocative lucide glyph instead of a
-  // numeric badge — shifts the section's register from "generic
-  // process steps" to "software features" and aligns visually with
-  // the Capabilities cards above (same primary-tinted square tile
-  // chrome). Icons chosen to hint at the actual UI surface for each
-  // step (input field, AI spark, bar chart, action).
-  const steps: { title: string; body: string; icon: typeof Sparkles }[] = [
-    {
-      title: "Choose what you care about.",
-      icon: TextCursorInput,
-      body: "Add the candidates, issues, or organizations you want to track.",
-    },
-    {
-      title: "Ask the questions voters, journalists, and policy makers are asking.",
-      icon: Sparkles,
-      body: "The platform queries ChatGPT, Claude, Gemini, and Perplexity exactly the way real audiences do.",
-    },
-    {
-      title: "Track how AI answers frame the subject.",
-      icon: BarChart3,
-      body: "Each snapshot shows the dominant narrative and the sources shaping it.",
-    },
-    {
-      title: "Turn narrative gaps into comms strategy.",
-      icon: Zap,
-      body: "Get specific next-week moves — what to brief, where to pre-empt, what to seed.",
-    },
-  ];
-  return (
-    <section id="how-it-works" className="border-b border-border/80">
-      <div className="mx-auto max-w-[1200px] px-6 py-20">
-        <div className="mb-10 max-w-2xl">
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
-            How it works
-          </div>
-          <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
-            From subjects to action in four steps.
-          </h2>
-        </div>
-        <ol className="grid gap-7 md:grid-cols-2 lg:grid-cols-4">
-          {steps.map((step) => {
-            const Icon = step.icon;
-            return (
-              <li key={step.title}>
-                <Card className="h-full p-6 md:p-7">
-                  <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-md border border-primary/20 bg-primary/[0.08] text-primary">
-                    <Icon className="h-5 w-5" strokeWidth={1.75} />
-                  </div>
-                  <h3 className="text-[16px] font-semibold leading-snug tracking-tight text-foreground">
-                    {step.title}
-                  </h3>
-                  <p className="mt-3 text-[14.5px] leading-relaxed text-foreground/85">
-                    {step.body}
-                  </p>
-                </Card>
-              </li>
-            );
-          })}
+              </div>
+            </li>
+          ))}
         </ol>
       </div>
     </section>
