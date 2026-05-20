@@ -29,8 +29,8 @@ type NavEntry = {
 
 const NAV: NavEntry[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, slug: null, isOverview: true },
-  { key: "narrative", label: "Narrative", icon: MessagesSquare, slug: null },
   { key: "visibility", label: "Visibility", icon: Eye, slug: null },
+  { key: "narrative", label: "Narrative", icon: MessagesSquare, slug: null },
   { key: "competition", label: "Competition", icon: Swords, slug: null },
   { key: "topics", label: "Topics", icon: Hash, slug: null },
   { key: "sources", label: "Sources", icon: BookText, slug: null },
