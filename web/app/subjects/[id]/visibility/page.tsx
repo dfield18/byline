@@ -19,7 +19,7 @@
  * pending that extraction.
  */
 import Link from "next/link";
-import { ArrowLeft, TrendingDown, TrendingUp, Minus } from "lucide-react";
+import { ArrowLeft, Info, TrendingDown, TrendingUp, Minus } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
@@ -36,6 +36,36 @@ import {
 import { RefreshButton } from "../refresh-button";
 
 export const dynamic = "force-dynamic";
+
+// Lightweight tooltip-on-hover for KPI tile titles. Mirrors the
+// KpiTooltipIcon pattern used on the Overview page — duplicated
+// here for now; future refactor should extract to shared
+// components/dashboard/ui.tsx so both pages import the same
+// component.
+function KpiTooltipIcon({
+  text,
+  align = "center",
+}: {
+  text: string;
+  align?: "left" | "center" | "right";
+}) {
+  const pos =
+    align === "right"
+      ? "right-0"
+      : align === "left"
+        ? "left-0"
+        : "left-1/2 -translate-x-1/2";
+  return (
+    <span className="group relative inline-flex">
+      <Info className="h-3 w-3 opacity-50 hover:opacity-100 transition-opacity cursor-help" />
+      <span
+        className={`pointer-events-none absolute ${pos} bottom-full mb-2 w-56 rounded-md border border-border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground opacity-0 group-hover:opacity-100 transition-opacity z-30 shadow-lg`}
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
 
 function deriveInitials(name: string): string {
   const words = name.trim().split(/\s+/);
@@ -137,7 +167,9 @@ export default async function VisibilityPage({
   const mentionRateDelta = data.kpis.ai_recall.delta;
 
   // KPI strip values (mention rate, avg position, first-mention rate,
-  // delta vs prior).
+  // delta vs prior). Tooltips explain each metric in plain English so
+  // a non-technical reader can hover for context without leaving the
+  // page.
   type KPI = {
     label: string;
     value: string;
@@ -145,6 +177,7 @@ export default async function VisibilityPage({
     delta: string | null;
     trend: "up" | "down" | "flat";
     subtitle?: string;
+    tooltip: string;
   };
   const kpis: KPI[] = [
     {
@@ -160,6 +193,8 @@ export default async function VisibilityPage({
             : mentionRateDelta < 0
               ? "down"
               : "flat",
+      tooltip:
+        "Share of AI answers (across the four monitored platforms) that mention this subject when asked about its tracked topic areas. Higher means AI consistently surfaces the subject when discussing its topics.",
     },
     {
       label: "Average position",
@@ -168,6 +203,8 @@ export default async function VisibilityPage({
       delta: null,
       trend: "flat",
       subtitle: "When mentioned, what rank",
+      tooltip:
+        "When this subject is mentioned in an AI answer, what rank it occupies on average (1 = first entity named, 2 = second, etc.). Lower numbers mean AI tends to name this subject earlier — a sign of prominence.",
     },
     {
       label: "First-mention rate",
@@ -176,6 +213,8 @@ export default async function VisibilityPage({
       delta: null,
       trend: "flat",
       subtitle: "Share of answers naming you first",
+      tooltip:
+        "Share of AI answers (about this subject's topic areas) where this subject is the very first entity named. A top-of-mind signal — high values mean AI leads with this subject when discussing the topic.",
     },
     {
       label: "Weakest topic",
@@ -184,6 +223,8 @@ export default async function VisibilityPage({
       delta: null,
       trend: "flat",
       subtitle: weakestTopic?.label ?? "No tracked topics",
+      tooltip:
+        "The tracked topic where this subject's mention rate is lowest — the largest visibility gap in this snapshot. Subtitle names the topic. Same data drives the Topic Recall section below.",
     },
   ];
 
@@ -275,9 +316,9 @@ export default async function VisibilityPage({
                           Strongest platform: {topPlatform.name}.
                         </div>
                         <p className="mt-1 text-[13px] leading-relaxed text-foreground/70">
-                          {formatPct(topPlatform.value)} mention rate
-                          there &mdash; higher than the cross-platform
-                          average.
+                          {formatPct(topPlatform.value)}
+                          {" "}mention rate there &mdash; higher than the
+                          cross-platform average.
                         </p>
                       </div>
                     )}
@@ -375,8 +416,11 @@ export default async function VisibilityPage({
                         key={k.label}
                         className="rounded-lg border border-border/80 bg-background/60 p-5 min-h-[140px] flex flex-col"
                       >
-                        <div className="truncate text-sm font-medium text-foreground">
-                          {k.label}
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="truncate text-sm font-medium text-foreground">
+                            {k.label}
+                          </span>
+                          <KpiTooltipIcon text={k.tooltip} align="right" />
                         </div>
                         <div className="mt-auto pt-4 space-y-1.5">
                           <div className="flex min-h-[40px] items-center gap-2.5">
