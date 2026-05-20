@@ -126,7 +126,8 @@ function MethodologyBanner() {
     },
     {
       label: "Recommended Actions",
-      value: "Add authority and influence sources.",
+      value:
+        "Add authority where it matters and influence the sources AI cites.",
     },
   ];
   return (
