@@ -503,13 +503,29 @@ function HeroKpis({
               <KpiTooltipIcon text={t.tooltip} align="right" />
             </div>
 
-            {/* Value + change + subtitle stack — each on its own line.
-                Stacking (vs the prior horizontal value+change layout)
-                keeps the value from wrapping at narrow card widths and
-                gives the change indicator its own room. mt-auto floats
-                this stack to the bottom of the card so the value
-                baseline aligns across all four tiles. */}
+            {/* Subtitle + value + change stack — each on its own line.
+                Subtitle sits ABOVE the value so the topic name reads
+                as the label of what the number applies to — e.g.,
+                "Federal housing policy" → "45%" — rather than dangling
+                as an afterthought below the value. mt-auto floats this
+                stack to the bottom of the card so the change-indicator
+                baseline aligns across all four tiles; the subtitle
+                slot has reserved min-h-[14px] when empty so the value
+                position stays consistent tile-to-tile. */}
             <div className="mt-auto pt-4 space-y-1.5">
+              {/* Subtitle slot — reserved with min-h even when empty
+                  so the value sits at the same vertical position
+                  regardless of whether this tile carries a subtitle.
+                  Only the Weakest Topic Visibility tile populates this
+                  today (with the weakest topic name, or a "no material
+                  gap" signal when topics are clustered); the others
+                  render an empty placeholder. */}
+              <div
+                className="text-[11px] text-muted-foreground truncate min-h-[14px]"
+                title={t.subtitle ?? undefined}
+              >
+                {t.subtitle ?? ""}
+              </div>
               <div
                 className={`text-2xl font-semibold tracking-tight leading-none ${t.valueColor}`}
               >
@@ -520,19 +536,6 @@ function HeroKpis({
               >
                 <ChangeIcon className="h-3 w-3 shrink-0" />
                 <span>{change.text}</span>
-              </div>
-              {/* Subtitle slot — reserved with min-h even when empty
-                  so the bottom edge of every card sits at the same
-                  vertical position regardless of whether this tile
-                  carries a subtitle. Only the Weakest Topic Visibility
-                  tile populates this today (with the weakest topic
-                  name, or a "no material gap" signal when topics are
-                  clustered); the others render an empty placeholder. */}
-              <div
-                className="text-[11px] text-muted-foreground truncate min-h-[14px]"
-                title={t.subtitle ?? undefined}
-              >
-                {t.subtitle ?? ""}
               </div>
             </div>
           </div>

@@ -329,6 +329,15 @@ export function ProductPreviewClient() {
                     {k.label}
                   </div>
                   <div className="mt-auto space-y-1.5 pt-4">
+                    {/* Subtitle (topic name) sits ABOVE the value so it
+                        reads as the label of what the number applies to —
+                        e.g., "Federal housing policy" → "45%". Empty
+                        min-h placeholder for tiles without a subtitle
+                        preserves vertical alignment of the value across
+                        the strip. */}
+                    <div className="min-h-[14px] truncate text-[11px] text-muted-foreground">
+                      {k.subtitle ?? ""}
+                    </div>
                     <div
                       className={`text-2xl font-semibold leading-none tracking-tight ${k.valueColor}`}
                     >
@@ -339,9 +348,6 @@ export function ProductPreviewClient() {
                     >
                       <TrendIcon className="h-3 w-3 shrink-0" aria-hidden />
                       <span>{deltaText}</span>
-                    </div>
-                    <div className="min-h-[14px] truncate text-[11px] text-muted-foreground">
-                      {k.subtitle ?? ""}
                     </div>
                   </div>
                 </div>

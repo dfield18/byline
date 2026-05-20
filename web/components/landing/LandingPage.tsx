@@ -413,7 +413,7 @@ function Problem() {
           <div className="mt-3 max-w-md text-[15.5px] leading-relaxed text-foreground/85">
             A brief AI chatbot conversation shifted voters&apos; views on
             candidates and policies up to four times more than traditional
-            political ads &mdash; and even more when optimized for persuasion.
+            political ads.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
             <a
