@@ -161,7 +161,7 @@ export function ProductPreviewClient() {
       <div
         role="tablist"
         aria-label="Switch between sample subjects"
-        className="inline-flex rounded-md border border-border/80 bg-card/40 p-1"
+        className="inline-grid grid-cols-2 rounded-md border border-border/80 bg-card/40 p-1"
       >
         {SUBJECTS.map((s) => {
           const active = s.id === activeId;
