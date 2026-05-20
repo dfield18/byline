@@ -286,7 +286,7 @@ function Hero() {
                 href={CTA_URL}
                 className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] hover:opacity-95 transition-opacity"
               >
-                Create your free account
+                Create free account
               </a>
               <a
                 href={SAMPLE_REPORT_URL}
@@ -295,17 +295,15 @@ function Hero() {
                 <span className="flex h-7 w-7 items-center justify-center rounded-sm border border-border/80 bg-background/80 text-primary group-hover:border-primary/40">
                   <FileText className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </span>
-                See a sample report
+                View sample report
                 <ArrowRight className="h-3.5 w-3.5 text-foreground/55 transition-colors group-hover:text-primary" />
               </a>
             </div>
-            {/* Beta clarifier — sits beneath the CTAs so a visitor
-                immediately understands the two paths are both free
-                while the product is in beta. */}
-            <p className="mt-4 text-[15px] leading-relaxed text-foreground/75">
-              <span className="font-medium text-foreground/90">byline</span>{" "}
-              is in beta &mdash; free to use for now. Browse a sample
-              report, or create an account to run your own.
+            {/* One-line beta clarifier under the CTAs. Replaces the
+                earlier two-sentence paragraph; just enough to signal
+                the price ($0) and friction ($0). */}
+            <p className="mt-4 text-[14px] text-foreground/70">
+              Free during beta. No credit card required.
             </p>
           </div>
 
