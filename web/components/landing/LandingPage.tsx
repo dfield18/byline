@@ -19,22 +19,15 @@ import {
 } from "react-icons/si";
 import type { IconType } from "react-icons";
 import { Card } from "@/components/dashboard/ui";
+import { ProductPreviewClient } from "@/components/landing/ProductPreviewClient";
 
-// TODO: replace these four placeholders with real values before launch.
+// TODO: replace these three placeholders with real values before launch.
 //   CTA_URL: booking URL (Calendly or similar)
 //   SAMPLE_REPORT_URL: page or external link for "See a sample report"
 //   CONTACT_EMAIL: address shown in the closing CTA
-//   DEMO_SUBJECT: name of the demo subject featured in the Product Preview section
 const CTA_URL = "[CTA_URL_PLACEHOLDER]";
 const SAMPLE_REPORT_URL = "[SAMPLE_REPORT_URL_PLACEHOLDER]";
 const CONTACT_EMAIL = "[CONTACT_EMAIL_PLACEHOLDER]";
-
-const DEMO_SUBJECT = "[DEMO_SUBJECT_PLACEHOLDER]";
-// Fallback name rendered in the UI until DEMO_SUBJECT is set to a real value.
-// Keeps the page from showing the literal `[..._PLACEHOLDER]` string.
-const DEMO_SUBJECT_DISPLAY = DEMO_SUBJECT.startsWith("[")
-  ? "Senator Maya Reyes"
-  : DEMO_SUBJECT;
 
 const WHO_IT_IS_FOR: { title: string; description: string }[] = [
   {
@@ -445,6 +438,31 @@ function Problem() {
             </p>
           </div>
         </div>
+        {/* Persuasion-magnitude stat — same big-number + caption +
+            source-link pattern as the 50% above, so the two stats
+            read as a paired set bracketing the supporting callouts. */}
+        <div className="mt-14 flex flex-col items-center">
+          <div className="font-display text-[64px] font-semibold leading-none tracking-[-0.03em] text-primary sm:text-[88px]">
+            4×
+          </div>
+          <div className="mt-3 max-w-md text-[15.5px] leading-relaxed text-foreground/85">
+            In a brief conversation, an AI chatbot shifted voters&apos; views
+            on candidates and policies up to four times more than traditional
+            political advertising &mdash; and far more when optimized to
+            persuade.
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            <a
+              href="https://www.technologyreview.com/2025/12/04/1128824/ai-chatbots-can-sway-voters-better-than-political-advertisements/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline-offset-2 hover:underline hover:text-foreground transition-colors"
+            >
+              Cornell-led studies, <em>Nature</em> &amp; <em>Science</em>,
+              December 2025
+            </a>
+          </div>
+        </div>
         {/* Elevated takeaway — distinct visual register from the
             callouts above: thicker left border, primary-tinted wash,
             larger and slightly weightier type, generous mt-16 so it
@@ -468,123 +486,21 @@ function ProductPreview() {
             What you see
           </div>
           <h2 className="font-display text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground sm:text-[40px]">
-            A live read on how AI is framing {DEMO_SUBJECT_DISPLAY}.
+            A live read on how AI is framing political figures.
           </h2>
           <p className="mt-4 text-[16px] leading-relaxed text-foreground/85">
-            Every snapshot pairs the AI&rsquo;s actual framing with the gap that
-            matters, the sources driving it, and the move you can make this week.
+            Every brief pairs the AI&rsquo;s actual framing with the gap that
+            matters, the sources driving it, and the move you can make this
+            week. Toggle between two real subjects below.
           </p>
         </div>
 
-        {/* Stylized mock of an AI Visibility Snapshot. Stand-in until a
-            real annotated screenshot ships. Numbers are illustrative. */}
-        <Card className="relative overflow-hidden p-6 md:p-8">
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(135deg, color-mix(in oklab, var(--primary) 4%, transparent) 0%, transparent 60%)",
-            }}
-          />
-          <div className="relative">
-            {/* Top row: subject + period */}
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 border-b border-border/80 pb-5">
-              <div>
-                <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-foreground/80">
-                  AI Visibility Snapshot
-                </div>
-                <div className="font-display text-[20px] font-semibold tracking-[-0.01em] text-foreground">
-                  {DEMO_SUBJECT_DISPLAY}
-                </div>
-              </div>
-              <div className="text-[11.5px] font-medium text-foreground/75">
-                Last 7 days · 4 platforms
-              </div>
-            </div>
-
-            {/* KPI tiles */}
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              {[
-                { label: "Mention rate", value: "68%", delta: "+5 pts", trend: "up" },
-                { label: "Avg sentiment", value: "+0.18", delta: "+0.04", trend: "up" },
-                { label: "Risk frame rate", value: "24%", delta: "−2 pts", trend: "down" },
-              ].map((kpi) => (
-                <div
-                  key={kpi.label}
-                  className="rounded-md border border-border/80 bg-background/60 p-4"
-                >
-                  <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/80">
-                    {kpi.label}
-                  </div>
-                  <div className="mt-1.5 flex items-baseline gap-2">
-                    <span className="font-display text-[24px] font-semibold tabular-nums tracking-[-0.02em] text-foreground">
-                      {kpi.value}
-                    </span>
-                    <span className="text-[11.5px] font-semibold text-success">
-                      {kpi.trend === "up" ? "▲" : "▼"} {kpi.delta}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Narrative mix */}
-            <div className="mt-8">
-              <div className="mb-3 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground/80">
-                Dominant narrative
-              </div>
-              <div className="space-y-2.5">
-                {[
-                  { label: "Progressive reformer", pct: 42, tone: "primary" as const },
-                  { label: "Consumer advocate", pct: 28, tone: "muted" as const },
-                  { label: "Polarizing figure", pct: 18, tone: "warning" as const },
-                  { label: "Other", pct: 12, tone: "muted" as const },
-                ].map((n) => (
-                  <div key={n.label} className="flex items-center gap-3">
-                    <div className="w-40 shrink-0 text-[13px] text-foreground/85">
-                      {n.label}
-                    </div>
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${n.pct}%`,
-                          background:
-                            n.tone === "primary"
-                              ? "var(--primary)"
-                              : n.tone === "warning"
-                                ? "var(--warning)"
-                                : "color-mix(in oklab, var(--muted-foreground) 75%, transparent)",
-                        }}
-                      />
-                    </div>
-                    <div className="w-10 shrink-0 text-right text-[12.5px] font-semibold tabular-nums text-foreground/85">
-                      {n.pct}%
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Recommended move */}
-            <div className="mt-7 rounded-md border border-primary/30 bg-primary/[0.05] p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-primary">
-                    Recommended move
-                  </div>
-                  <div className="text-[14px] leading-relaxed text-foreground/90">
-                    Seed independent sources on housing affordability &mdash;
-                    the largest unowned gap in this snapshot.
-                  </div>
-                </div>
-                <div className="shrink-0 whitespace-nowrap pt-1 text-[11.5px] font-semibold text-primary">
-                  Read brief →
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
+        {/* Interactive product preview — moved into a client component
+            so the subject toggle can be a useState. The brief content
+            mirrors what the live dashboard generates for each subject
+            (J.D. Vance's brief uses the actual production output; AOC's
+            is a plausible composition matching the same format). */}
+        <ProductPreviewClient />
       </div>
     </section>
   );
