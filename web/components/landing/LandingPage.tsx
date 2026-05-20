@@ -146,8 +146,8 @@ function MethodologyBanner() {
               Methodology
             </div>
             <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground/85">
-              We track how ChatGPT, Claude, Gemini, and Perplexity describe
-              your cause across fresh, stateless sessions.
+              We track how the major AI platforms describe your cause, in
+              fresh sessions every cycle.
             </p>
           </div>
           {stats.map((s) => (
