@@ -122,7 +122,7 @@ function MethodologyBanner() {
     {
       label: "Response Analysis",
       value:
-        "Every response is classified by AI to extract sentiment, narratives, and sources.",
+        "Every response is classified by sentiment, narratives, and sources.",
     },
     {
       label: "Recommended Actions",
