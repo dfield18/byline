@@ -84,6 +84,15 @@ function formatRank(v: number | null | undefined): string {
   return v.toFixed(1);
 }
 
+// Capitalize the first character without lowercasing the rest. Used
+// to normalize topic labels that arrive from the backend with
+// inconsistent capitalization ("Current events" vs "post-presidency
+// political influence") so the dashboard renders a uniform first
+// letter regardless of source casing.
+function capitalizeFirst(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
 function formatPtsDelta(deltaShare: number | null | undefined): string | null {
   if (deltaShare === null || deltaShare === undefined) return null;
   const pts = Math.abs(Math.round(deltaShare * 100));
@@ -222,7 +231,7 @@ export default async function VisibilityPage({
       valueColor: "text-warning",
       delta: null,
       trend: "flat",
-      subtitle: weakestTopic?.label ?? "No tracked topics",
+      subtitle: weakestTopic ? capitalizeFirst(weakestTopic.label) : "No tracked topics",
       tooltip:
         "The tracked topic where this subject's mention rate is lowest — the largest visibility gap in this snapshot. Subtitle names the topic. Same data drives the Topic Recall section below.",
     },
@@ -329,7 +338,7 @@ export default async function VisibilityPage({
                           Visibility gap
                         </div>
                         <div className="mt-0.5 text-[14px] font-semibold leading-snug text-foreground">
-                          Underweighted on {weakestTopic.label}.
+                          Underweighted on {capitalizeFirst(weakestTopic.label)}.
                         </div>
                         <p className="mt-1 text-[13px] leading-relaxed text-foreground/70">
                           Only {formatPct(weakestTopic.ai_recall)} mention
@@ -479,7 +488,7 @@ export default async function VisibilityPage({
                       <div key={t.label} className="grid grid-cols-[1fr_auto] items-center gap-x-4">
                         <div>
                           <div className="mb-1 text-[13.5px] text-foreground/85">
-                            {t.label}
+                            {capitalizeFirst(t.label)}
                           </div>
                           <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted/80">
                             <div
