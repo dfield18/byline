@@ -318,14 +318,20 @@ function Hero() {
   );
 }
 
-// Stylized sample of byline's Evidence surface — a single
-// "What AI is actually saying" card. The dashboard renders three
-// of these in a row; the hero side panel shows one so a visitor
-// sees AI's actual output (verbatim quote + originating prompt +
-// frame label) rather than just metrics about it. Most byline-
-// distinctive: no AI-SEO tool surfaces the actual text AI
-// generates about your subject.
+// Stylized sample of byline's Narrative Mix surface — the
+// cluster-share bars that live on the dashboard hero's right
+// column. Pairs with the page H1 ("AI is shaping political
+// narratives") by literally showing the narratives AI is
+// producing about the subject. Mirrors the live
+// DominantNarrativePanel: same opacity ramp by position,
+// same warning-tone treatment for risk-frame clusters.
 function HeroVisual() {
+  const clusters: { name: string; pct: number; negative?: boolean }[] = [
+    { name: "Administration Role and Influence", pct: 40 },
+    { name: "Conservative Populism and Policies", pct: 35 },
+    { name: "Author and Commentator", pct: 10 },
+    { name: "Political Opportunism Critiques", pct: 10, negative: true },
+  ];
   return (
     <Card className="relative overflow-hidden p-6">
       <div
@@ -336,13 +342,12 @@ function HeroVisual() {
         }}
       />
       <div className="relative">
-        {/* Card header — mirrors the live Evidence section title
-            (eyebrow + subject name + meta) so the panel reads as
-            an authentic product surface, not a marketing mock. */}
+        {/* Card header — mirrors the live Narrative Mix section
+            title (eyebrow + subject name + meta). */}
         <div className="flex items-baseline justify-between gap-3 pb-3 border-b border-border/80">
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/65">
-              Evidence
+              Narrative Mix
             </div>
             <div className="mt-0.5 font-display text-[17px] font-semibold tracking-[-0.01em] text-foreground">
               J.D. Vance
@@ -353,50 +358,37 @@ function HeroVisual() {
           </div>
         </div>
 
-        {/* Platform tag + cluster pill, matching the live evidence
-            card's top row. */}
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-foreground/85">
-            <SiOpenai className="h-3.5 w-3.5 text-foreground/70" aria-hidden />
-            ChatGPT
-          </div>
-          <span className="rounded-sm border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary whitespace-nowrap">
-            Characterization
-          </span>
-        </div>
-
-        {/* Solicited-prompt tag with the same parenthetical the
-            live dashboard uses on solicited evidence cards. */}
-        <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.06em] text-foreground/65">
-          Solicited prompt{" "}
-          <span className="font-normal normal-case tracking-normal text-foreground/55">
-            (subject named in prompt)
-          </span>
-        </div>
-
-        {/* Originating prompt — the question that elicited the
-            quote below. */}
-        <div className="mt-2 text-[13px] font-semibold text-foreground leading-snug">
-          &ldquo;Who is J.D. Vance and what is he known for?&rdquo;
-        </div>
-
-        {/* AI's verbatim-style excerpt. Plausible, neutral
-            characterization phrased the way AI assistants
-            typically summarize public figures. */}
-        <div className="mt-3 text-[12.5px] leading-relaxed text-foreground/80 italic">
-          &ldquo;Best known for authoring{" "}
-          <span className="not-italic">Hillbilly Elegy</span> and for an
-          ideological shift toward the populist right that culminated in
-          his current vice-presidential role&hellip;&rdquo;
-        </div>
-
-        {/* Frame — which narrative cluster this quote falls under. */}
-        <div className="mt-3 text-[11px] text-foreground/65">
-          Frame:{" "}
-          <span className="font-semibold text-foreground/85">
-            Author and Commentator
-          </span>
-        </div>
+        {/* Cluster bars — same opacity ramp (0.6 / 0.45 / 0.3 /
+            0.2) and warning-color override for risk-frame clusters
+            as the live dashboard's DominantNarrativePanel. */}
+        <ul className="mt-6 space-y-5">
+          {clusters.map((c, i) => {
+            const opacity =
+              i === 0 ? 0.6 : i === 1 ? 0.45 : i === 2 ? 0.3 : 0.2;
+            return (
+              <li key={c.name}>
+                <div className="mb-1 flex items-center justify-between text-[12.5px]">
+                  <span className="text-foreground/65">{c.name}</span>
+                  <span className="tabular-nums text-[11.5px] text-foreground/55">
+                    {c.pct}%
+                  </span>
+                </div>
+                <div className="relative h-1 w-full overflow-hidden rounded-full bg-muted/80">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full"
+                    style={{
+                      width: `${c.pct}%`,
+                      background: c.negative
+                        ? "var(--warning)"
+                        : "var(--primary)",
+                      opacity: c.negative ? 0.75 : opacity,
+                    }}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       </div>
     </Card>
   );
