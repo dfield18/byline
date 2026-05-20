@@ -387,9 +387,8 @@ function Problem() {
             50%
           </div>
           <div className="mt-3 max-w-md text-[15.5px] leading-relaxed text-foreground/85">
-            of US consumers now intentionally seek out AI-powered search
-            &mdash; and 44% of those who&apos;ve tried it now prefer it to
-            traditional search.
+            of US consumers now turn to AI for answers &mdash; and 44% of
+            those who&apos;ve tried it now prefer it to Google.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
             <a
@@ -412,10 +411,9 @@ function Problem() {
             4×
           </div>
           <div className="mt-3 max-w-md text-[15.5px] leading-relaxed text-foreground/85">
-            In a brief conversation, an AI chatbot shifted voters&apos; views
-            on candidates and policies up to four times more than traditional
-            political advertising &mdash; and far more when optimized to
-            persuade.
+            A brief AI chatbot conversation shifted voters&apos; views on
+            candidates and policies up to four times more than traditional
+            political ads &mdash; and even more when optimized for persuasion.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
             <a
