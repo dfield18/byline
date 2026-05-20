@@ -137,7 +137,7 @@ function MethodologyBanner() {
     {
       label: "Response Analysis",
       value:
-        "Every response is parsed by a second-pass AI that extracts sentiment, narratives, and source citations.",
+        "Every response is classified by AI to extract sentiment, narratives, and sources.",
     },
     {
       label: "Recommended Actions",
