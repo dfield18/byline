@@ -521,7 +521,7 @@ function HeroKpis({
                   gap" signal when topics are clustered); the others
                   render an empty placeholder. */}
               <div
-                className="text-[13px] text-muted-foreground truncate min-h-[16px]"
+                className="text-[13px] text-muted-foreground line-clamp-3 leading-snug min-h-[16px]"
                 title={t.subtitle ?? undefined}
               >
                 {t.subtitle ?? ""}

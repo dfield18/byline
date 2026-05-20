@@ -335,7 +335,10 @@ export function ProductPreviewClient() {
                         min-h placeholder for tiles without a subtitle
                         preserves vertical alignment of the value across
                         the strip. */}
-                    <div className="min-h-[16px] truncate text-[13px] text-muted-foreground">
+                    <div
+                      className="line-clamp-3 min-h-[16px] text-[13px] leading-snug text-muted-foreground"
+                      title={k.subtitle ?? undefined}
+                    >
                       {k.subtitle ?? ""}
                     </div>
                     <div
