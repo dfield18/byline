@@ -17,7 +17,7 @@ import {
 // renders as a disabled-looking entry with a small "Soon" pill so
 // users know it's coming but not built. Overview is special-cased
 // (subject root, no slug suffix).
-type NavSection = "overview" | "recommendations";
+type NavSection = "overview" | "visibility" | "recommendations";
 
 type NavEntry = {
   key: string;          // matches `activeSection` for highlight
@@ -29,7 +29,7 @@ type NavEntry = {
 
 const NAV: NavEntry[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, slug: null, isOverview: true },
-  { key: "visibility", label: "Visibility", icon: Eye, slug: null },
+  { key: "visibility", label: "Visibility", icon: Eye, slug: "visibility" },
   { key: "narrative", label: "Narrative", icon: MessagesSquare, slug: null },
   { key: "competition", label: "Competition", icon: Swords, slug: null },
   { key: "topics", label: "Topics", icon: Hash, slug: null },
