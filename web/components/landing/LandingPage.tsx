@@ -387,11 +387,9 @@ function Problem() {
             50%
           </div>
           <div className="mt-3 max-w-md text-[15.5px] leading-relaxed text-foreground/85">
-            of US consumers now intentionally seek out AI-powered search.
-            44% of those who&apos;ve tried it say it&apos;s already their
-            primary source &mdash; beating traditional search at 31%. They
-            ask AI what they once asked Google, and they get an answer, not
-            a link.
+            of US consumers now intentionally seek out AI-powered search
+            &mdash; and 44% of those who&apos;ve tried it now prefer it to
+            traditional search.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
             <a
