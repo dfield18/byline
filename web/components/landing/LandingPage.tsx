@@ -117,7 +117,7 @@ function MethodologyBanner() {
     {
       label: "Snapshot Cadence",
       value:
-        "Weekly prompt runs in two layers — named (your subject) and unnamed (its topic area). Same prompts each cycle.",
+        "Two weekly prompt layers: about your subject, and about its topic area.",
     },
     {
       label: "Response Analysis",
