@@ -59,11 +59,15 @@ export function LandingPage() {
   return (
     // cursor-default prevents the browser's text-I-beam pointer from
     // showing when the user hovers over headlines, body copy, and
-    // other non-editable text. Links and buttons keep their pointer
-    // cursor via the UA stylesheet (for <a href>) and Tailwind
-    // preflight (for <button>), so interactivity affordances are
-    // unaffected.
-    <div className="min-h-screen cursor-default bg-background text-foreground">
+    // other non-editable text. caret-transparent hides the text-
+    // selection caret that would otherwise blink when a click lands
+    // inside non-editable text (Tailwind class for
+    // `caret-color: transparent`). Text stays selectable for copy-
+    // paste — just no visible blinking caret on click. Links and
+    // buttons keep their pointer cursor via the UA stylesheet
+    // (for <a href>) and Tailwind preflight (for <button>), so
+    // interactivity affordances are unaffected.
+    <div className="min-h-screen cursor-default caret-transparent bg-background text-foreground">
       <MarketingNav />
       <main>
         <Hero />
