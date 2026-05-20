@@ -275,8 +275,11 @@ function Hero() {
               AI is shaping political narratives. Track what it says about you.
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
-              Get ahead of what AI is writing about your candidate, issue,
-              or organization &mdash; across every major AI platform.
+              <span className="font-semibold text-foreground">byline</span>
+              {" "}tracks how ChatGPT, Claude, Gemini, and Perplexity answer
+              high-stakes questions about your candidate, issue, organization,
+              or industry &mdash; including visibility, ranking, framing,
+              competitors, and cited sources.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-5">
               <a
