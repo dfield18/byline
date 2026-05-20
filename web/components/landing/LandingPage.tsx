@@ -259,12 +259,13 @@ function Hero() {
               AI Narrative Intelligence for Public Affairs
             </div>
             <h1 className="font-display text-[36px] font-semibold leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[46px] md:text-[54px]">
-              AI is shaping political narratives. Track what it says about you.
+              AI is shaping political narratives. See how it frames your
+              issue.
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
               <span className="font-semibold text-foreground">byline</span>
-              {" "}monitors how the major AI platforms answer the questions
-              that shape your candidate, issue, or industry.
+              {" "}tracks how major AI platforms answer the questions shaping
+              your candidate, issue, organization, or industry.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-5">
               <a
@@ -391,9 +392,9 @@ function Problem() {
           <div className="font-display text-[64px] font-semibold leading-none tracking-[-0.03em] text-primary sm:text-[88px]">
             50%
           </div>
-          <div className="mt-3 max-w-md text-[15.5px] leading-relaxed text-foreground/85">
-            of US consumers now turn to AI for answers &mdash; and 44% of
-            those who&apos;ve tried it now prefer it to Google.
+          <div className="mt-3 max-w-md text-[16.5px] leading-relaxed text-foreground/90">
+            of U.S. consumers now intentionally seek out AI answers &mdash;
+            and 44% of AI-search adopters prefer them to Google.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
             <a
@@ -415,9 +416,9 @@ function Problem() {
           <div className="font-display text-[64px] font-semibold leading-none tracking-[-0.03em] text-primary sm:text-[88px]">
             4×
           </div>
-          <div className="mt-3 max-w-md text-[15.5px] leading-relaxed text-foreground/85">
+          <div className="mt-3 max-w-md text-[16.5px] leading-relaxed text-foreground/90">
             A brief AI chatbot conversation shifted voters&apos; views on
-            candidates and policies up to four times more than traditional
+            candidates and policies up to 4&times; more than traditional
             political ads.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
@@ -458,9 +459,8 @@ function ProductPreview() {
             A live read on how AI is framing political figures.
           </h2>
           <p className="mt-4 text-[16px] leading-relaxed text-foreground/85">
-            Every brief pairs the AI&rsquo;s actual framing with the gap that
-            matters, the sources driving it, and the move you can make this
-            week. Toggle between two real subjects below.
+            Each report pairs AI framing with the signals that matter: the
+            dominant narrative, source mix, sentiment, and recommended moves.
           </p>
         </div>
 
@@ -490,16 +490,16 @@ function HowItWorks() {
       body: "Add the candidates, issues, or organizations you want to track.",
     },
     {
-      title: "We ask what your audiences ask.",
-      body: "byline queries ChatGPT, Claude, Gemini, and Perplexity the way voters, journalists, and policymakers actually do.",
+      title: "Ask what your audience asks.",
+      body: "Run structured prompts across ChatGPT, Claude, Gemini, and Perplexity.",
     },
     {
-      title: "See the narrative — and what’s driving it.",
-      body: "Each snapshot shows the dominant framing across platforms, where opponents could exploit a gap, and the sources shaping every answer.",
+      title: "See the narrative.",
+      body: "Track framing, sentiment, source influence, and visibility gaps.",
     },
     {
       title: "Turn gaps into moves.",
-      body: "Get specific, executable next-week actions: which sources to seed, where to pre-empt, what to brief.",
+      body: "Get specific actions: which sources to seed, where to preempt, and what to brief.",
     },
   ];
   return (
@@ -515,8 +515,8 @@ function HowItWorks() {
           <p className="mt-4 text-[16px] leading-relaxed text-foreground/85">
             Most AI visibility tools count mentions.{" "}
             <span className="font-semibold text-foreground">byline</span>{" "}
-            shows the story AI is telling about what you care about &mdash;
-            and turns it into your next move.
+            shows the story AI is telling about your issue &mdash; and
+            turns that into your next move.
           </p>
         </div>
         {/* Numbered vertical timeline. Each step is a 2-col grid row
@@ -615,6 +615,14 @@ function ClosingCTA() {
             </a>
           </div>
         </div>
+        {/* Methodology trust line — sits below the CTA cluster as a
+            quiet reassurance for buyers worried about black-box AI
+            tools. Secondary type weight so it doesn't compete with
+            the CTA above. */}
+        <p className="mx-auto mt-6 max-w-xl text-[12.5px] text-muted-foreground">
+          Built on structured prompt sets, repeated runs, source
+          extraction, and transparent methodology.
+        </p>
       </div>
     </section>
   );
@@ -632,7 +640,7 @@ function MarketingFooter() {
             byline
           </span>
           <span className="ml-2 text-xs text-muted-foreground">
-            AI narrative intelligence for public affairs
+            AI narrative intelligence for public affairs teams.
           </span>
         </div>
         <div className="flex items-center gap-6 text-xs text-muted-foreground">
