@@ -287,7 +287,7 @@ function Hero() {
               AI Narrative Intelligence for Public Affairs
             </div>
             <h1 className="font-display text-[36px] font-semibold leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[46px] md:text-[54px]">
-              The most influential editor in politics has no byline.
+              AI is shaping political narratives. Track what it says about you.
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
               Get ahead of what AI is writing about your candidate, issue,
