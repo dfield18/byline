@@ -287,7 +287,7 @@ function Hero() {
             {/* One-line beta clarifier under the CTAs. Replaces the
                 earlier two-sentence paragraph; just enough to signal
                 the price ($0) and friction ($0). */}
-            <p className="mt-4 text-[14px] text-foreground/70">
+            <p className="mt-4 text-[16px] text-foreground/80">
               Free during beta. No credit card required.
             </p>
           </div>
