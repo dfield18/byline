@@ -171,8 +171,13 @@ function MidPageCTA() {
     <section className="border-b border-border/80">
       <div className="mx-auto max-w-[1200px] px-6 py-12">
         <div className="flex flex-col items-center justify-center gap-5 text-center sm:flex-row sm:gap-8 sm:text-left">
-          <div className="text-[17px] font-medium tracking-tight text-foreground">
-            Try it free on your own subject.
+          <div>
+            <div className="text-[17px] font-medium tracking-tight text-foreground">
+              Try it free on your own subject.
+            </div>
+            <div className="mt-1 text-[13.5px] text-foreground/65">
+              Free now while byline is in beta.
+            </div>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-5">
             <a
