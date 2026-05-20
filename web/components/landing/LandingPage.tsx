@@ -417,9 +417,8 @@ function Problem() {
             4×
           </div>
           <div className="mt-3 max-w-md text-[16.5px] leading-relaxed text-foreground/90">
-            A brief AI chatbot conversation shifted voters&apos; views on
-            candidates and policies up to 4&times; more than traditional
-            political ads.
+            A brief AI chatbot conversation shifted voters&apos; views
+            4&times; more than traditional political ads.
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
             <a
