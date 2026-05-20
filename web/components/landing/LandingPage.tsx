@@ -126,8 +126,7 @@ function MethodologyBanner() {
     },
     {
       label: "Recommended Actions",
-      value:
-        "Concrete next-week moves: where to add authority and which sources to influence.",
+      value: "Add authority and influence sources.",
     },
   ];
   return (
