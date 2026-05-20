@@ -7,6 +7,7 @@
  * (narrative clusters / bottom-line synth / key insights), and
  * subject parameterization will be wired in subsequent passes.
  */
+import type { Metadata } from "next";
 import {
   TrendingUp,
   TrendingDown,
@@ -28,6 +29,14 @@ import {
   CompetitorBars,
   SourcesDonut,
 } from "@/components/dashboard/Charts";
+
+// Keep this hardcoded-demo page out of search engines so the
+// Elizabeth Warren mock doesn't get indexed alongside the real
+// product pages. follow: false too — no real links to crawl
+// from a static mock.
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 /**
  * Prompt coverage breakdown — surfaced inside the methodology
