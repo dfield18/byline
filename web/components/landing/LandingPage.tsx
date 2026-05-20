@@ -318,21 +318,14 @@ function Hero() {
   );
 }
 
-// Stylized sample of byline's Competitive Snapshot — Share of
-// Voice bars across the focal subject + top peers AI surfaces on
-// the same topic areas. The dashboard pairs these bars with a
-// metric table; the hero side panel keeps only the bars since
-// the table is too dense for this width. Copy is realistic
-// J.D. Vance peer data so the visual reads as authentic product
-// output rather than a stylized illustration.
+// Stylized sample of byline's Evidence surface — a single
+// "What AI is actually saying" card. The dashboard renders three
+// of these in a row; the hero side panel shows one so a visitor
+// sees AI's actual output (verbatim quote + originating prompt +
+// frame label) rather than just metrics about it. Most byline-
+// distinctive: no AI-SEO tool surfaces the actual text AI
+// generates about your subject.
 function HeroVisual() {
-  const competitors: { name: string; sov: number; isSubject?: boolean }[] = [
-    { name: "Donald Trump", sov: 92 },
-    { name: "J.D. Vance", sov: 48, isSubject: true },
-    { name: "Marco Rubio", sov: 31 },
-    { name: "Ron DeSantis", sov: 28 },
-    { name: "Vivek Ramaswamy", sov: 18 },
-  ];
   return (
     <Card className="relative overflow-hidden p-6">
       <div
@@ -343,67 +336,66 @@ function HeroVisual() {
         }}
       />
       <div className="relative">
-        {/* Card header — mirrors the live dashboard's Competitive
-            Snapshot header (eyebrow + subject name + entities-
-            tracked pill) so a visitor sees an authentic-looking
-            module, not a marketing mock. */}
+        {/* Card header — mirrors the live Evidence section title
+            (eyebrow + subject name + meta) so the panel reads as
+            an authentic product surface, not a marketing mock. */}
         <div className="flex items-baseline justify-between gap-3 pb-3 border-b border-border/80">
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/65">
-              Competitive Snapshot
+              Evidence
             </div>
             <div className="mt-0.5 font-display text-[17px] font-semibold tracking-[-0.01em] text-foreground">
               J.D. Vance
             </div>
           </div>
-          <div className="rounded-sm border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary whitespace-nowrap">
-            {competitors.length} entities
+          <div className="text-[10.5px] font-medium text-foreground/70 whitespace-nowrap">
+            Last 7 days
           </div>
         </div>
 
-        <div className="mt-5 mb-3 text-[10px] uppercase tracking-wider text-foreground/65">
-          Share of voice (% of answers)
+        {/* Platform tag + cluster pill, matching the live evidence
+            card's top row. */}
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-foreground/85">
+            <SiOpenai className="h-3.5 w-3.5 text-foreground/70" aria-hidden />
+            ChatGPT
+          </div>
+          <span className="rounded-sm border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-primary whitespace-nowrap">
+            Characterization
+          </span>
         </div>
 
-        {/* Bars — focal subject gets the strongest primary tint +
-            a "You" pill; peers fade to lower opacity so the focal
-            row reads first. */}
-        <div className="space-y-3">
-          {competitors.map((c) => (
-            <div key={c.name}>
-              <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    className={`truncate text-[12.5px] ${
-                      c.isSubject
-                        ? "font-semibold text-foreground"
-                        : "text-foreground/85"
-                    }`}
-                  >
-                    {c.name}
-                  </span>
-                  {c.isSubject && (
-                    <span className="rounded-sm bg-primary/15 text-primary text-[9px] font-semibold uppercase tracking-[0.08em] px-1 py-0.5">
-                      You
-                    </span>
-                  )}
-                </div>
-                <span className="text-[12px] font-semibold tabular-nums text-foreground/85">
-                  {c.sov}%
-                </span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${c.sov}%`,
-                    background: "var(--primary)",
-                    opacity: c.isSubject ? 1 : 0.55,
-                  }}
-                />
-              </div>
-            </div>
-          ))}
+        {/* Solicited-prompt tag with the same parenthetical the
+            live dashboard uses on solicited evidence cards. */}
+        <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.06em] text-foreground/65">
+          Solicited prompt{" "}
+          <span className="font-normal normal-case tracking-normal text-foreground/55">
+            (subject named in prompt)
+          </span>
+        </div>
+
+        {/* Originating prompt — the question that elicited the
+            quote below. */}
+        <div className="mt-2 text-[13px] font-semibold text-foreground leading-snug">
+          &ldquo;Who is J.D. Vance and what is he known for?&rdquo;
+        </div>
+
+        {/* AI's verbatim-style excerpt. Plausible, neutral
+            characterization phrased the way AI assistants
+            typically summarize public figures. */}
+        <div className="mt-3 text-[12.5px] leading-relaxed text-foreground/80 italic">
+          &ldquo;Best known for authoring{" "}
+          <span className="not-italic">Hillbilly Elegy</span> and for an
+          ideological shift toward the populist right that culminated in
+          his current vice-presidential role&hellip;&rdquo;
+        </div>
+
+        {/* Frame — which narrative cluster this quote falls under. */}
+        <div className="mt-3 text-[11px] text-foreground/65">
+          Frame:{" "}
+          <span className="font-semibold text-foreground/85">
+            Author and Commentator
+          </span>
         </div>
       </div>
     </Card>
