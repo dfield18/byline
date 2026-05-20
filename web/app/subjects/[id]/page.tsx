@@ -503,33 +503,34 @@ function HeroKpis({
               <KpiTooltipIcon text={t.tooltip} align="right" />
             </div>
 
-            {/* Subtitle + value + change stack — each on its own line.
-                Subtitle sits ABOVE the value so the topic name reads
-                as the label of what the number applies to — e.g.,
-                "Federal housing policy" → "45%" — rather than dangling
-                as an afterthought below the value. mt-auto floats this
-                stack to the bottom of the card so the change-indicator
-                baseline aligns across all four tiles; the subtitle
-                slot has reserved min-h-[14px] when empty so the value
-                position stays consistent tile-to-tile. */}
+            {/* Value + subtitle on one row, change indicator below.
+                Subtitle (only the Weakest Topic Visibility tile uses
+                it today, with the weakest topic name or a "no
+                material gap" signal) sits inline with the value so
+                the topic reads as the label of what the number
+                applies to — e.g., "0%  The future of American
+                conservatism." Fixed min-h on the row reserves 2-line
+                subtitle worth of vertical space whether or not a
+                tile has a subtitle, so values align horizontally
+                across the four-tile strip. items-center vertically
+                centers the value within the row. mt-auto pushes the
+                whole bottom stack to the card's bottom so the
+                change-indicator baseline aligns across all four. */}
             <div className="mt-auto pt-4 space-y-1.5">
-              {/* Subtitle slot — reserved with min-h even when empty
-                  so the value sits at the same vertical position
-                  regardless of whether this tile carries a subtitle.
-                  Only the Weakest Topic Visibility tile populates this
-                  today (with the weakest topic name, or a "no material
-                  gap" signal when topics are clustered); the others
-                  render an empty placeholder. */}
-              <div
-                className="text-[13px] text-muted-foreground line-clamp-3 leading-snug min-h-[16px]"
-                title={t.subtitle ?? undefined}
-              >
-                {t.subtitle ?? ""}
-              </div>
-              <div
-                className={`text-2xl font-semibold tracking-tight leading-none ${t.valueColor}`}
-              >
-                {t.value}
+              <div className="flex min-h-[40px] items-center gap-2.5">
+                <div
+                  className={`shrink-0 text-2xl font-semibold tracking-tight leading-none ${t.valueColor}`}
+                >
+                  {t.value}
+                </div>
+                {t.subtitle && (
+                  <div
+                    className="text-[13px] text-muted-foreground line-clamp-2 leading-snug"
+                    title={t.subtitle}
+                  >
+                    {t.subtitle}
+                  </div>
+                )}
               </div>
               <div
                 className={`flex items-center gap-1 text-xs leading-none ${change.color}`}

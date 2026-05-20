@@ -329,22 +329,28 @@ export function ProductPreviewClient() {
                     {k.label}
                   </div>
                   <div className="mt-auto space-y-1.5 pt-4">
-                    {/* Subtitle (topic name) sits ABOVE the value so it
-                        reads as the label of what the number applies to —
-                        e.g., "Federal housing policy" → "45%". Empty
-                        min-h placeholder for tiles without a subtitle
-                        preserves vertical alignment of the value across
-                        the strip. */}
-                    <div
-                      className="line-clamp-3 min-h-[16px] text-[13px] leading-snug text-muted-foreground"
-                      title={k.subtitle ?? undefined}
-                    >
-                      {k.subtitle ?? ""}
-                    </div>
-                    <div
-                      className={`text-2xl font-semibold leading-none tracking-tight ${k.valueColor}`}
-                    >
-                      {k.value}
+                    {/* Value + subtitle on one row so the topic name
+                        sits inline with the number it describes,
+                        e.g., "0%  The future of American conservatism".
+                        Fixed min-h on the row reserves 2-line
+                        subtitle worth of vertical space whether or
+                        not the tile carries one, so values align
+                        across the strip. items-center vertically
+                        centers the value within the row. */}
+                    <div className="flex min-h-[40px] items-center gap-2.5">
+                      <div
+                        className={`shrink-0 text-2xl font-semibold leading-none tracking-tight ${k.valueColor}`}
+                      >
+                        {k.value}
+                      </div>
+                      {k.subtitle && (
+                        <div
+                          className="line-clamp-2 text-[13px] leading-snug text-muted-foreground"
+                          title={k.subtitle}
+                        >
+                          {k.subtitle}
+                        </div>
+                      )}
                     </div>
                     <div
                       className={`flex items-center gap-1 text-xs leading-none ${deltaColor}`}
