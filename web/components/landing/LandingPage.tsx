@@ -276,7 +276,7 @@ function Hero() {
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
               <span className="font-semibold text-foreground">byline</span>
-              {" "}tracks how ChatGPT, Claude, Gemini, and Perplexity answer
+              {" "}monitors how ChatGPT, Claude, Gemini, and Perplexity answer
               high-stakes questions about your candidate, issue, organization,
               or industry &mdash; including visibility, ranking, framing,
               competitors, and cited sources.
