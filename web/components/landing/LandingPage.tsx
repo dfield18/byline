@@ -280,10 +280,8 @@ function Hero() {
             </h1>
             <p className="mt-6 max-w-2xl text-[17.5px] leading-[1.6] text-foreground/85">
               <span className="font-semibold text-foreground">byline</span>
-              {" "}monitors how ChatGPT, Claude, Gemini, and Perplexity answer
-              high-stakes questions about your candidate, issue, organization,
-              or industry &mdash; including visibility, ranking, framing,
-              competitors, and cited sources.
+              {" "}monitors how the major AI platforms answer the questions
+              that shape your candidate, issue, or industry.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-5">
               <a
