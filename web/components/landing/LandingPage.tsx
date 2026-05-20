@@ -146,8 +146,7 @@ function MethodologyBanner() {
               Methodology
             </div>
             <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground/85">
-              We track how the major AI platforms describe your cause, in
-              fresh sessions every cycle.
+              We simulate AI search queries for questions real audiences ask.
             </p>
           </div>
           {stats.map((s) => (
