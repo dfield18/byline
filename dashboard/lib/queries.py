@@ -2723,6 +2723,41 @@ def get_subject_overview(
             cur, latest_refresh_id,
         )
 
+        # ── Subject-set benchmarks (Briefing KPI context) ───────
+        # Cross-subject averages for the four headline KPIs so the
+        # Briefing can render "vs subject-set avg" annotations. One
+        # bulk query, computed against each subject's latest
+        # completed refresh.
+        subject_set_benchmarks = _subject_set_benchmarks(cur)
+
+        # ── Topic leaderboard (Topic Battleground view) ─────────
+        # Per-topic leader entity + the subject's standing on each
+        # topic. Surfaces "where am I winning vs losing on a topic
+        # basis" — topic_coverage is subject-only and can't name
+        # the competitor that's beating the subject on each one.
+        topic_leaderboard = _topic_leaderboard_for_refresh(
+            cur, latest_refresh_id, setup_inputs, sname,
+        )
+
+        # ── Co-mention frequency ─────────────────────────────────
+        # Of N responses naming the subject, who else does AI
+        # mention alongside them? Powers the "competitive gravity"
+        # bar chart — distinct from SoV (which is share of all
+        # responses) because the denominator is "responses where
+        # subject was mentioned" specifically.
+        co_mention_frequency = _co_mention_frequency_for_refresh(
+            cur, latest_refresh_id,
+        )
+
+        # ── Per-platform entity SoV grid ─────────────────────────
+        # Rows × columns: top entities × platforms, cells = each
+        # entity's SoV on each platform. Reveals platform-specific
+        # competitive ownership ("Bill Clinton owns Gemini, you're
+        # weak everywhere") that the headline SoV bars can't show.
+        per_platform_entity_sov = _per_platform_entity_sov_for_refresh(
+            cur, latest_refresh_id, sname,
+        )
+
         # ── First-mention steal share (Visibility tab) ───────────
         # When the subject doesn't land at #1, who does? Names the
         # specific competitors winning rank-1 placements and on
@@ -2873,6 +2908,10 @@ def get_subject_overview(
         "cross_platform_divergence": cross_platform_divergence,
         "per_prompt_coverage": per_prompt_coverage,
         "topic_trajectories": topic_trajectories,
+        "topic_leaderboard": topic_leaderboard,
+        "co_mention_frequency": co_mention_frequency,
+        "per_platform_entity_sov": per_platform_entity_sov,
+        "subject_set_benchmarks": subject_set_benchmarks,
         "snapshot_diff": snapshot_diff,
         "meta": {
             "latest_refresh_id": latest_refresh_id,
@@ -2925,15 +2964,22 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "competitor_trajectories": [],
         "per_platform_kpis": [],
         "platform_topic_matrix": {"platforms": [], "topics": [], "cells": []},
-        # Empty subject still ships the 4 fixed buckets (all zero) so
-        # the frontend can render the histogram skeleton without
-        # null-guarding the array length.
-        "rank_distribution": [
-            {"rank": 1, "label": "#1", "n": 0, "share": 0.0},
-            {"rank": 2, "label": "#2", "n": 0, "share": 0.0},
-            {"rank": 3, "label": "#3", "n": 0, "share": 0.0},
-            {"rank": 4, "label": "#4+", "n": 0, "share": 0.0, "is_aggregate": True},
-        ],
+        # Empty subject still ships the fixed bucket skeleton (all
+        # zero) so the frontend can render without null-guarding.
+        "rank_distribution": {
+            "total_responses": 0,
+            "n_mentioned": 0,
+            "buckets": [
+                {"rank": 1, "label": "Rank 1", "n": 0, "share": 0.0},
+                {"rank": 2, "label": "Ranks 2-3", "n": 0, "share": 0.0},
+                {"rank": 4, "label": "Ranks 4-5", "n": 0, "share": 0.0},
+                {"rank": 6, "label": "Rank 6+", "n": 0, "share": 0.0},
+                {
+                    "rank": 0, "label": "Not mentioned", "n": 0,
+                    "share": 0.0, "is_absence": True,
+                },
+            ],
+        },
         "sentiment_distribution": {
             "positive": 0, "neutral": 0, "negative": 0, "total": 0,
             "mean": None, "threshold": 0.1,
@@ -2960,6 +3006,22 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         },
         "per_prompt_coverage": [],
         "topic_trajectories": [],
+        "topic_leaderboard": [],
+        "co_mention_frequency": {
+            "subject_mention_count": 0,
+            "co_mentions": [],
+        },
+        "per_platform_entity_sov": {
+            "platforms": [],
+            "entities": [],
+            "cells": [],
+        },
+        "subject_set_benchmarks": {
+            "n_subjects": 0,
+            "ai_mention_rate_avg": None,
+            "avg_mention_rank_avg": None,
+            "first_mention_rate_avg": None,
+        },
         "snapshot_diff": None,
         "meta": {
             "latest_refresh_id": None,
@@ -3133,29 +3195,32 @@ def _platform_recall_for_refresh(
 
 def _rank_distribution_for_refresh(
     cur, refresh_run_id: int,
-) -> list[dict[str, Any]]:
-    """Distribution of where the subject lands among entities listed in
-    AI answers, on unnamed-layer responses where the subject is
-    mentioned. Buckets are 1, 2, 3, and 4+ — the long tail past 3 is
-    rare enough that splitting 4 vs 5 vs 6+ adds noise without insight.
+) -> dict[str, Any]:
+    """Distribution of where the subject lands in AI answers, across
+    ALL unnamed-layer responses in this refresh — including the
+    "Not mentioned" bucket so the bars sum to 100% of total
+    responses (not just mentioned ones). The full-population
+    framing matters for an executive read: "we're #1 on 40% of
+    answers, missing entirely on 25%" is more honest than "of the
+    answers that did mention us, 40% had us at #1."
 
-    Returned as an ordered list so the frontend can render the four
-    buckets in fixed position regardless of which buckets had data
-    in this snapshot:
-      [
-        {"rank": 1, "label": "#1",  "n": int, "share": float},
-        {"rank": 2, "label": "#2",  "n": int, "share": float},
-        {"rank": 3, "label": "#3",  "n": int, "share": float},
-        {"rank": 4, "label": "#4+", "n": int, "share": float, "is_aggregate": True},
-      ]
+    Buckets:
+      - Rank 1
+      - Ranks 2-3
+      - Ranks 4-5
+      - Rank 6+
+      - Not mentioned   (subject_mentioned = false)
 
-    `share` is the share of mentioned-responses at that rank (so the
-    four shares sum to 1.0 when total_mentioned > 0). Tiles with n=0
-    still render — the absence of a #1 bar is signal too.
+    Returned shape:
+      {
+        buckets: [{rank, label, n, share, is_absence?}, ...],
+        total_responses: int,   # all unnamed-layer responses
+        n_mentioned: int,       # subject_mentioned = true
+      }
     """
     cur.execute(
         """
-        SELECT sm.mention_rank
+        SELECT sm.subject_mentioned, sm.mention_rank
         FROM model_responses mr
         JOIN prompts p ON p.id = mr.prompt_id
         JOIN LATERAL (
@@ -3167,46 +3232,66 @@ def _rank_distribution_for_refresh(
         WHERE mr.refresh_run_id = %s
           AND p.layer = 'unnamed'
           AND mr.success = TRUE
-          AND sm.subject_mentioned = TRUE
-          AND sm.mention_rank IS NOT NULL
         """,
         (refresh_run_id,),
     )
-    ranks = [int(r[0]) for r in cur.fetchall()]
-    total = len(ranks)
-    buckets = {1: 0, 2: 0, 3: 0, 4: 0}  # 4 is the 4+ bucket
-    for r in ranks:
-        if r <= 3:
-            buckets[r] += 1
-        else:
+    rows = cur.fetchall()
+    total = len(rows)
+    # Bucket keys are the lower bound of each range, plus 0 for the
+    # "not mentioned" absence bucket (so the list ordering is stable
+    # regardless of which ranks have data this snapshot).
+    buckets = {1: 0, 2: 0, 4: 0, 6: 0, 0: 0}
+    for mentioned, rank in rows:
+        if not mentioned or rank is None:
+            buckets[0] += 1
+            continue
+        r = int(rank)
+        if r == 1:
+            buckets[1] += 1
+        elif r <= 3:
+            buckets[2] += 1
+        elif r <= 5:
             buckets[4] += 1
-    return [
-        {
-            "rank": 1,
-            "label": "#1",
-            "n": buckets[1],
-            "share": (buckets[1] / total) if total else 0.0,
-        },
-        {
-            "rank": 2,
-            "label": "#2",
-            "n": buckets[2],
-            "share": (buckets[2] / total) if total else 0.0,
-        },
-        {
-            "rank": 3,
-            "label": "#3",
-            "n": buckets[3],
-            "share": (buckets[3] / total) if total else 0.0,
-        },
-        {
-            "rank": 4,
-            "label": "#4+",
-            "n": buckets[4],
-            "share": (buckets[4] / total) if total else 0.0,
-            "is_aggregate": True,
-        },
-    ]
+        else:
+            buckets[6] += 1
+    n_mentioned = sum(v for k, v in buckets.items() if k != 0)
+    return {
+        "total_responses": total,
+        "n_mentioned": n_mentioned,
+        "buckets": [
+            {
+                "rank": 1,
+                "label": "Rank 1",
+                "n": buckets[1],
+                "share": (buckets[1] / total) if total else 0.0,
+            },
+            {
+                "rank": 2,
+                "label": "Ranks 2-3",
+                "n": buckets[2],
+                "share": (buckets[2] / total) if total else 0.0,
+            },
+            {
+                "rank": 4,
+                "label": "Ranks 4-5",
+                "n": buckets[4],
+                "share": (buckets[4] / total) if total else 0.0,
+            },
+            {
+                "rank": 6,
+                "label": "Rank 6+",
+                "n": buckets[6],
+                "share": (buckets[6] / total) if total else 0.0,
+            },
+            {
+                "rank": 0,
+                "label": "Not mentioned",
+                "n": buckets[0],
+                "share": (buckets[0] / total) if total else 0.0,
+                "is_absence": True,
+            },
+        ],
+    }
 
 
 def _per_platform_kpis_for_refresh(
@@ -3610,6 +3695,548 @@ def _cross_platform_divergence_for_refresh(
         "diverged": total_multi - agreed,
         "alignment_score": (agreed / total_multi) if total_multi else None,
         "divergent_prompts": divergent[:5],
+    }
+
+
+def _subject_set_benchmarks(cur) -> dict[str, Any]:
+    """Aggregate benchmarks across all subjects' latest snapshots —
+    used by the Visibility Briefing to anchor each KPI in a
+    comparison ("vs subject-set avg of 65%"). Computes per-subject
+    means in one bulk query, then averages those per-subject values
+    across the set.
+
+    Returns:
+      {
+        n_subjects: int,                     # subjects contributing
+        ai_mention_rate_avg: float | None,   # 0..1
+        avg_mention_rank_avg: float | None,  # ranks (lower better)
+        first_mention_rate_avg: float | None,# 0..1
+      }
+
+    Currently not org-scoped — the page-level org filter would let
+    a strict-tenant deployment leak benchmark data across orgs.
+    Acceptable for the single-tenant / operator-mode usage today;
+    revisit when multi-tenant production scoping ships.
+    """
+    cur.execute(
+        """
+        WITH latest_refreshes AS (
+          SELECT DISTINCT ON (subject_id) subject_id, id
+          FROM refresh_runs
+          WHERE status = 'completed'
+          ORDER BY
+            subject_id,
+            COALESCE(historical_as_of, started_at::date) DESC,
+            id DESC
+        )
+        SELECT
+          lr.subject_id,
+          AVG(CASE WHEN sm.subject_mentioned THEN 1.0 ELSE 0.0 END) AS recall,
+          AVG(sm.mention_rank::numeric) FILTER (
+            WHERE sm.subject_mentioned = TRUE
+              AND sm.mention_rank IS NOT NULL
+          ) AS avg_rank,
+          AVG(
+            CASE WHEN sm.subject_mentioned AND sm.mention_rank = 1
+                 THEN 1.0 ELSE 0.0 END
+          ) AS first_rate
+        FROM latest_refreshes lr
+        JOIN model_responses mr ON mr.refresh_run_id = lr.id
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+          SELECT subject_mentioned, mention_rank
+          FROM response_extractions
+          WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+          ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE p.layer = 'unnamed' AND mr.success = TRUE
+        GROUP BY lr.subject_id
+        """,
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return {
+            "n_subjects": 0,
+            "ai_mention_rate_avg": None,
+            "avg_mention_rank_avg": None,
+            "first_mention_rate_avg": None,
+        }
+
+    recalls: list[float] = []
+    ranks: list[float] = []
+    firsts: list[float] = []
+    for _subject_id, recall, avg_rank, first_rate in rows:
+        if recall is not None:
+            recalls.append(float(recall))
+        if avg_rank is not None:
+            ranks.append(float(avg_rank))
+        if first_rate is not None:
+            firsts.append(float(first_rate))
+
+    return {
+        "n_subjects": len(rows),
+        "ai_mention_rate_avg": (
+            sum(recalls) / len(recalls) if recalls else None
+        ),
+        "avg_mention_rank_avg": (
+            sum(ranks) / len(ranks) if ranks else None
+        ),
+        "first_mention_rate_avg": (
+            sum(firsts) / len(firsts) if firsts else None
+        ),
+    }
+
+
+def _topic_leaderboard_for_refresh(
+    cur,
+    refresh_run_id: int,
+    setup_inputs: dict[str, Any],
+    subject_name: str,
+) -> list[dict[str, Any]]:
+    """Per-topic leader — for each tracked topic, who has the
+    strongest mention rate? Surfaces the "Topic Battleground"
+    view: which topics is the subject winning vs losing on a
+    per-topic basis. Different from `topic_coverage` (which is
+    subject-only) — this also names the competitor that's
+    beating the subject on each topic.
+
+    Mention rate per (topic, entity) = entity's appearances in
+    that topic's unnamed-layer responses ÷ total unnamed-layer
+    responses for that topic. Subject + every deduped competitor
+    in `competitors_mentioned` counts as an entity. Entities are
+    not normalized across name variants ("Joe Biden" vs "Biden"
+    would count separately) — matches existing methodology.
+
+    Returns one row per topic, sorted by gap_to_leader desc so
+    the topics where the subject is most behind lead the list:
+      [
+        {
+          topic_label, source_field,
+          n_responses,
+          subject_rate: float,
+          leader_name: str,
+          leader_rate: float,
+          subject_is_leader: bool,
+          gap_to_leader: float,        # leader_rate - subject_rate, ≥0
+          top_competitors: [{name, rate}]  # top 2 non-subject by rate
+        },
+        ...
+      ]
+    """
+    # Pull subject's mention_rank alongside competitors_mentioned so
+    # we can compute per-(topic, entity) avg_rank and first-mention
+    # rate, not just mention rate. Powers the topic-scoped Prominence
+    # table: the dropdown can filter to one topic and recompute the
+    # full Score / Avg Rank / First Mention per entity from this
+    # richer payload.
+    cur.execute(
+        """
+        SELECT
+          p.template,
+          sm.subject_mentioned,
+          sm.mention_rank,
+          sm.competitors_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank, competitors_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND (
+                subject_mentioned IS NOT NULL
+                OR competitors_mentioned IS NOT NULL
+              )
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+
+    # per_topic[label] = {
+    #   "source_field", "n_responses",
+    #   "by_entity": {name: {mentions, ranks, firsts}}
+    # }
+    per_topic: dict[str, dict[str, Any]] = {}
+    for template, subj_mentioned, subj_rank, comps_raw in cur.fetchall():
+        topic = _topic_for_prompt(template, setup_inputs)
+        if topic is None:
+            continue
+        label, source_field = topic
+        agg = per_topic.setdefault(
+            label,
+            {
+                "source_field": source_field,
+                "n_responses": 0,
+                "by_entity": {},
+            },
+        )
+        agg["n_responses"] += 1
+
+        if subj_mentioned:
+            entry = agg["by_entity"].setdefault(
+                subject_name,
+                {"mentions": 0, "ranks": [], "firsts": 0},
+            )
+            entry["mentions"] += 1
+            if isinstance(subj_rank, (int, float)):
+                r = int(subj_rank)
+                entry["ranks"].append(float(r))
+                if r == 1:
+                    entry["firsts"] += 1
+
+        comps = _maybe_json(comps_raw) or []
+        if isinstance(comps, list):
+            seen: set[str] = set()
+            for c in comps:
+                if not isinstance(c, dict):
+                    continue
+                name = c.get("name")
+                if not isinstance(name, str) or not name or name in seen:
+                    continue
+                seen.add(name)
+                entry = agg["by_entity"].setdefault(
+                    name,
+                    {"mentions": 0, "ranks": [], "firsts": 0},
+                )
+                entry["mentions"] += 1
+                r = c.get("rank")
+                if isinstance(r, (int, float)):
+                    ri = int(r)
+                    entry["ranks"].append(float(ri))
+                    if ri == 1:
+                        entry["firsts"] += 1
+
+    rows: list[dict[str, Any]] = []
+    for label, agg in per_topic.items():
+        n = agg["n_responses"]
+        if n == 0:
+            continue
+        # Per-entity prominence data for the topic-scoped table.
+        entities: list[dict[str, Any]] = []
+        for name, e in agg["by_entity"].items():
+            avg_rank = (
+                sum(e["ranks"]) / len(e["ranks"]) if e["ranks"] else None
+            )
+            entities.append({
+                "name": name,
+                "mentions": e["mentions"],
+                "sov": e["mentions"] / n,
+                "avg_rank": avg_rank,
+                "first_mention_rate": e["firsts"] / n,
+                "is_subject": name == subject_name,
+            })
+        entities.sort(key=lambda x: -x["sov"])
+
+        # Subject's per-topic rank distribution — same five-bucket
+        # shape as the top-level `rank_distribution`, scoped to just
+        # this topic's responses. Powers the Answer Position section's
+        # "scope to topic" dropdown. Mentioned-without-rank rows
+        # land in the absence bucket to match top-level methodology.
+        subj_ranks = (
+            agg["by_entity"].get(subject_name, {}).get("ranks", [])
+        )
+        b1 = sum(1 for r in subj_ranks if r == 1)
+        b23 = sum(1 for r in subj_ranks if 2 <= r <= 3)
+        b45 = sum(1 for r in subj_ranks if 4 <= r <= 5)
+        b6 = sum(1 for r in subj_ranks if r >= 6)
+        n_absence_topic = n - (b1 + b23 + b45 + b6)
+        subject_rank_buckets = {
+            "total_responses": n,
+            "n_mentioned": b1 + b23 + b45 + b6,
+            "buckets": [
+                {
+                    "rank": 1,
+                    "label": "Rank 1",
+                    "n": b1,
+                    "share": (b1 / n) if n else 0.0,
+                },
+                {
+                    "rank": 2,
+                    "label": "Ranks 2-3",
+                    "n": b23,
+                    "share": (b23 / n) if n else 0.0,
+                },
+                {
+                    "rank": 4,
+                    "label": "Ranks 4-5",
+                    "n": b45,
+                    "share": (b45 / n) if n else 0.0,
+                },
+                {
+                    "rank": 6,
+                    "label": "Rank 6+",
+                    "n": b6,
+                    "share": (b6 / n) if n else 0.0,
+                },
+                {
+                    "rank": 0,
+                    "label": "Not mentioned",
+                    "n": n_absence_topic,
+                    "share": (n_absence_topic / n) if n else 0.0,
+                    "is_absence": True,
+                },
+            ],
+        }
+
+        subject_rate = next(
+            (e["sov"] for e in entities if e["is_subject"]),
+            0.0,
+        )
+        # Leader = entity with highest sov. Ties go to subject if
+        # present (so the table doesn't read as "you're losing" when
+        # you're actually tied).
+        leader_name = subject_name
+        leader_rate = subject_rate
+        for e in entities:
+            if e["sov"] > leader_rate or (
+                e["sov"] == leader_rate and e["is_subject"]
+            ):
+                leader_name = e["name"]
+                leader_rate = e["sov"]
+        subject_is_leader = leader_name == subject_name
+        top_competitors = [
+            {"name": e["name"], "rate": e["sov"]}
+            for e in entities
+            if not e["is_subject"]
+        ][:2]
+        rows.append({
+            "topic_label": label,
+            "source_field": agg["source_field"],
+            "n_responses": n,
+            "subject_rate": subject_rate,
+            "leader_name": leader_name,
+            "leader_rate": leader_rate,
+            "subject_is_leader": subject_is_leader,
+            "gap_to_leader": max(0.0, leader_rate - subject_rate),
+            "top_competitors": top_competitors,
+            "entities": entities,
+            "subject_rank_buckets": subject_rank_buckets,
+        })
+    # Sort by gap_to_leader desc so the most losing topics lead.
+    # Ties (gap = 0) ordered by topic volume desc — bigger sample
+    # size first.
+    rows.sort(key=lambda r: (-r["gap_to_leader"], -r["n_responses"]))
+    return rows
+
+
+def _co_mention_frequency_for_refresh(
+    cur, refresh_run_id: int,
+) -> dict[str, Any]:
+    """When AI mentions the subject, who else shares the answer?
+    Aggregates `competitors_mentioned` across all unnamed-layer
+    responses where the subject was actually mentioned, so the
+    output is "of N responses naming the subject, here's who AI
+    paired them with and how often." Powers the Co-Mention bar
+    chart.
+
+    Deduplicates competitor names within each response — a single
+    response that lists "Bernie Sanders" twice still counts once.
+    Names are not normalized across variants (matches existing
+    snapshot methodology).
+
+    Returns:
+      {
+        subject_mention_count: int,    # denominator
+        co_mentions: [
+          {name, count, share}         # share = count / denominator
+        ]  # top 8 desc by count
+      }
+    """
+    cur.execute(
+        """
+        SELECT sm.competitors_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+            SELECT subject_mentioned, competitors_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+          AND sm.subject_mentioned = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    rows = cur.fetchall()
+    subject_count = len(rows)
+    if subject_count == 0:
+        return {"subject_mention_count": 0, "co_mentions": []}
+
+    co_counts: dict[str, int] = {}
+    for (comps_raw,) in rows:
+        comps = _maybe_json(comps_raw) or []
+        if not isinstance(comps, list):
+            continue
+        seen: set[str] = set()
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("name")
+            if not isinstance(name, str) or not name or name in seen:
+                continue
+            seen.add(name)
+            co_counts[name] = co_counts.get(name, 0) + 1
+
+    co_mentions = sorted(
+        (
+            {
+                "name": name,
+                "count": count,
+                "share": count / subject_count,
+            }
+            for name, count in co_counts.items()
+        ),
+        key=lambda x: -x["count"],
+    )[:8]
+    return {
+        "subject_mention_count": subject_count,
+        "co_mentions": co_mentions,
+    }
+
+
+def _per_platform_entity_sov_for_refresh(
+    cur,
+    refresh_run_id: int,
+    subject_name: str,
+    *,
+    top_n: int = 5,
+) -> dict[str, Any]:
+    """Per-platform Share of Voice per entity. Rows × columns:
+      rows = top N entities by total appearances (subject always
+             included even if it would rank lower)
+      cols = platforms
+      cells = entity's appearances on that platform ÷ platform's
+              total unnamed-layer responses
+    Surfaces "Bill Clinton dominates Gemini; Donald Trump dominates
+    ChatGPT" patterns the SoV bar chart can't show on its own.
+
+    Returns:
+      {
+        platforms: [{slug, name, n_responses}],
+        entities:  [{name, total_appearances, is_subject}],
+        cells: [{platform_slug, entity_name, sov, n_appearances}]
+      }
+    """
+    cur.execute(
+        """
+        SELECT
+          m.slug,
+          sm.subject_mentioned,
+          sm.competitors_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN models m ON m.id = mr.model_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned, competitors_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND (
+                subject_mentioned IS NOT NULL
+                OR competitors_mentioned IS NOT NULL
+              )
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return {"platforms": [], "entities": [], "cells": []}
+
+    # per_platform[slug] = {n_responses, by_entity: {name: count}}
+    per_platform: dict[str, dict[str, Any]] = {}
+    total_appearances: dict[str, int] = {}
+    for slug, subj_mentioned, comps_raw in rows:
+        plat = per_platform.setdefault(
+            slug, {"n_responses": 0, "by_entity": {}},
+        )
+        plat["n_responses"] += 1
+
+        if subj_mentioned:
+            plat["by_entity"][subject_name] = (
+                plat["by_entity"].get(subject_name, 0) + 1
+            )
+            total_appearances[subject_name] = (
+                total_appearances.get(subject_name, 0) + 1
+            )
+
+        comps = _maybe_json(comps_raw) or []
+        if not isinstance(comps, list):
+            continue
+        seen: set[str] = set()
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("name")
+            if not isinstance(name, str) or not name or name in seen:
+                continue
+            seen.add(name)
+            plat["by_entity"][name] = plat["by_entity"].get(name, 0) + 1
+            total_appearances[name] = total_appearances.get(name, 0) + 1
+
+    # Top N entities by total appearances; force subject to be
+    # present even if it would otherwise miss the cut (so a low-
+    # visibility subject still shows up in its own dashboard).
+    ranked = sorted(total_appearances.items(), key=lambda kv: -kv[1])
+    top_names = [n for n, _ in ranked[:top_n]]
+    if subject_name not in top_names and subject_name in total_appearances:
+        # Replace the last entry with the subject so the list stays
+        # the same length.
+        if len(top_names) >= top_n:
+            top_names[-1] = subject_name
+        else:
+            top_names.append(subject_name)
+
+    display = {
+        "chatgpt": "ChatGPT", "gemini": "Gemini",
+        "claude": "Claude", "perplexity": "Perplexity",
+    }
+    platforms = sorted(
+        (
+            {
+                "slug": slug,
+                "name": display.get(slug, slug),
+                "n_responses": agg["n_responses"],
+            }
+            for slug, agg in per_platform.items()
+        ),
+        key=lambda p: p["slug"],
+    )
+    entities = [
+        {
+            "name": name,
+            "total_appearances": total_appearances.get(name, 0),
+            "is_subject": name == subject_name,
+        }
+        for name in top_names
+    ]
+    cells: list[dict[str, Any]] = []
+    for slug, plat in per_platform.items():
+        n_total = plat["n_responses"]
+        if n_total == 0:
+            continue
+        for name in top_names:
+            n_appearances = plat["by_entity"].get(name, 0)
+            cells.append({
+                "platform_slug": slug,
+                "entity_name": name,
+                "sov": n_appearances / n_total,
+                "n_appearances": n_appearances,
+            })
+    return {
+        "platforms": platforms,
+        "entities": entities,
+        "cells": cells,
     }
 
 

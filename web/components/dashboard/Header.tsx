@@ -4,7 +4,21 @@ import { ChevronDown, Download, Check } from "lucide-react";
 import { toPng } from "html-to-image";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
+import dynamic from "next/dynamic";
+
+// Clerk's UserButton portal-mounts after hydration and produces a
+// `<div data-clerk-component="UserButton">` on the client that the
+// server doesn't emit, triggering a React hydration mismatch. The
+// `suppressHydrationWarning` on the wrapping span doesn't reach
+// deep enough into Clerk's portal tree to silence it. Loading the
+// component dynamically with ssr:false means the server emits the
+// empty span and the client mounts UserButton after hydration —
+// no mismatch because there's nothing to compare against on the
+// server.
+const UserButton = dynamic(
+  () => import("@clerk/nextjs").then((m) => m.UserButton),
+  { ssr: false },
+);
 
 // Defaults match the Warren design reference so /dashboard-preview keeps
 // working without changes. /subjects/[id] passes the real subject in.

@@ -1502,6 +1502,39 @@ export default async function SubjectOverviewPage({
             </Card>
           </section>
 
+          {/* VISIBILITY TRENDS — promoted out of its previous
+              position-after-Competitive slot to sit directly under
+              the hero. Reads as the natural follow-up to the
+              KPI strip's snapshot values: "here's where you are
+              right now (hero) → here's how the headline metrics
+              have moved (trends) → drill into specifics below."
+              SectionTitle's right slot carries a cross-link into
+              the Visibility deep-dive spoke for readers who want
+              the full per-platform / per-topic analysis. */}
+          {data.trajectory.weeks.length >= 2 && (
+            <section>
+              <SectionTitle
+                eyebrow="Visibility Trends"
+                title="How visibility has shifted"
+                description={
+                  data.trajectory.weeks.length === 2
+                    ? "Early trend — based on 2 snapshots. Open circles are retrospective estimates; filled circles are live snapshots."
+                    : `Movement across the headline metrics over the last ${data.trajectory.weeks.length} weekly snapshots. Open circles are retrospective estimates; filled circles are live snapshots.`
+                }
+                right={
+                  <Link
+                    href={`/subjects/${subjectId}/visibility`}
+                    className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-card px-3 py-1.5 text-[12.5px] font-medium text-foreground/85 transition-colors hover:border-primary/50 hover:bg-accent/40"
+                  >
+                    Open Visibility deep-dive
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                  </Link>
+                }
+              />
+              <TrajectoryStrip trajectory={data.trajectory} />
+            </section>
+          )}
+
           {/* TOPIC RECALL — horizontal bar chart that surfaces the
               per-topic mention rate distribution. Sits directly under
               the hero card so the headline "weakest topic" tile is
@@ -1615,32 +1648,6 @@ export default async function SubjectOverviewPage({
                 </div>
               </div>
             </Card>
-          )}
-
-          {/* VISIBILITY TRENDS — only render when there are at least
-              2 snapshots in history. With 0 or 1 snapshots there's no
-              line to draw, and a "trend will appear after the next
-              snapshot" placeholder reads as filler in an executive
-              briefing. The Snapshot History section below already
-              communicates how many snapshots exist, so a missing
-              Trends section here doesn't leave the user wondering.
-              Positioned after Competitive Snapshot so the page
-              narrative goes "what's happening now (Brief + Takeaways)
-              → who/what's being mentioned (Coverage + Evidence +
-              Competitive) → trajectory over time (Trends)". */}
-          {data.trajectory.weeks.length >= 2 && (
-            <section>
-              <SectionTitle
-                eyebrow="Visibility Trends"
-                title="How visibility has shifted"
-                description={
-                  data.trajectory.weeks.length === 2
-                    ? "Early trend — based on 2 snapshots. Open circles are retrospective estimates; filled circles are live snapshots."
-                    : `Movement across the headline metrics over the last ${data.trajectory.weeks.length} weekly snapshots. Open circles are retrospective estimates; filled circles are live snapshots.`
-                }
-              />
-              <TrajectoryStrip trajectory={data.trajectory} />
-            </section>
           )}
 
           {/* SOURCES — wired */}

@@ -191,7 +191,20 @@ export function CompetitorBarsFromData({
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid stroke="oklch(0.91 0.008 250)" strokeDasharray="2 4" horizontal={false} />
-        <XAxis type="number" stroke="oklch(0.45 0.015 250)" fontSize={10} tickLine={false} axisLine={false} unit="%" />
+        {/* sov values come in as 0..1 fractions; convert to whole
+            percent points for the tick labels so the axis reads
+            "25%" instead of ".25%". domain={[0, 1]} pins the
+            chart to the full pie even when no entity exceeds 50%
+            share. */}
+        <XAxis
+          type="number"
+          domain={[0, 1]}
+          stroke="oklch(0.45 0.015 250)"
+          fontSize={10}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={(v: number) => `${Math.round(v * 100)}%`}
+        />
         <YAxis
           type="category"
           dataKey="name"
@@ -201,7 +214,11 @@ export function CompetitorBarsFromData({
           axisLine={false}
           width={170}
         />
-        <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "oklch(0.95 0.008 250)" }} />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          cursor={{ fill: "oklch(0.95 0.008 250)" }}
+          formatter={(v) => [`${Math.round(Number(v) * 100)}%`, "Share"]}
+        />
         <Bar dataKey="sov" radius={[0, 4, 4, 0]} barSize={18}>
           {data.map((c, i) => (
             <Cell

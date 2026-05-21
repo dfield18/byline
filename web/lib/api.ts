@@ -332,17 +332,21 @@ export type SubjectOverview = {
     first_mention_rate: number | null; // 0..1
     avg_sentiment: number | null;      // -1..+1
   }[];
-  // Position histogram for the subject across all unnamed-layer
-  // responses where they were mentioned. Always exactly four buckets
-  // (#1, #2, #3, #4+) so the UI can render fixed-position bars.
-  // `share` sums to 1.0 when total mentioned > 0.
+  // Position distribution across ALL unnamed-layer responses
+  // (including the "Not mentioned" bucket so bars sum to 100% of
+  // total responses, not just mentioned ones). Five fixed buckets
+  // for stable rendering even when some buckets are empty.
   rank_distribution: {
-    rank: number;            // 1, 2, 3, or 4
-    label: string;           // "#1", "#2", "#3", "#4+"
-    n: number;
-    share: number;           // 0..1
-    is_aggregate?: boolean;  // true for the #4+ bucket
-  }[];
+    total_responses: number;
+    n_mentioned: number;
+    buckets: {
+      rank: number;           // 1, 2, 4, 6, or 0 (not mentioned)
+      label: string;
+      n: number;
+      share: number;          // 0..1, normalized to total_responses
+      is_absence?: boolean;   // true for the "Not mentioned" bucket
+    }[];
+  };
   // Sentiment-of-mentions lens: pos/neu/neg counts among responses
   // where the subject was actually mentioned (or where the prompt
   // named them). Different question from the avg_sentiment KPI —
@@ -447,6 +451,89 @@ export type SubjectOverview = {
       delta: number;
     }[];
   } | null;
+  // Per-topic leader entity + the subject's standing on each topic.
+  // Powers a "Topic Battleground" view — surfaces who is beating
+  // the subject on each tracked topic and by how much. Sorted with
+  // the biggest gap_to_leader first so the topics where the subject
+  // is most behind lead the list.
+  topic_leaderboard: {
+    topic_label: string;
+    source_field: string;
+    n_responses: number;
+    subject_rate: number;            // 0..1
+    leader_name: string;
+    leader_rate: number;             // 0..1
+    subject_is_leader: boolean;
+    gap_to_leader: number;           // 0..1, ≥0
+    top_competitors: { name: string; rate: number }[];
+    // Full per-entity prominence within this topic — powers the
+    // topic-scoped Prominence dropdown so the table can recompute
+    // Score / Share / Avg Rank / First Mention against just this
+    // topic's response subset.
+    entities: {
+      name: string;
+      mentions: number;              // raw count
+      sov: number;                   // 0..1 (mention rate within this topic)
+      avg_rank: number | null;       // mean rank when mentioned in topic
+      first_mention_rate: number;    // 0..1 (rank-1 share within topic)
+      is_subject: boolean;
+    }[];
+    // Subject's rank-bucket distribution scoped to just this
+    // topic's responses — same shape as the top-level
+    // `rank_distribution`. Powers the Answer Position "scope to
+    // topic" dropdown so the same histogram + Avg Rank callout
+    // can re-render against one topic's response subset.
+    subject_rank_buckets: {
+      total_responses: number;
+      n_mentioned: number;
+      buckets: {
+        rank: number;
+        label: string;
+        n: number;
+        share: number;
+        is_absence?: boolean;
+      }[];
+    };
+  }[];
+  // "When AI mentions the subject, who else shares the answer?"
+  // Denominator is subject_mention_count (responses where the
+  // subject was mentioned), so `share` is "what fraction of my
+  // mentions also named this competitor."
+  co_mention_frequency: {
+    subject_mention_count: number;
+    co_mentions: {
+      name: string;
+      count: number;
+      share: number;                 // 0..1
+    }[];
+  };
+  // Per-platform entity SoV grid — rows × columns × cell shape so
+  // the UI can render a heatmap directly. Top N entities by total
+  // appearances (subject always included); cells are sparse (only
+  // measured combos appear).
+  per_platform_entity_sov: {
+    platforms: { slug: string; name: string; n_responses: number }[];
+    entities: {
+      name: string;
+      total_appearances: number;
+      is_subject: boolean;
+    }[];
+    cells: {
+      platform_slug: string;
+      entity_name: string;
+      sov: number;                   // 0..1
+      n_appearances: number;
+    }[];
+  };
+  // Cross-subject benchmarks so the Briefing KPIs can render a
+  // "vs subject-set avg" annotation under each card — context the
+  // raw percentage alone can't provide.
+  subject_set_benchmarks: {
+    n_subjects: number;
+    ai_mention_rate_avg: number | null;     // 0..1
+    avg_mention_rank_avg: number | null;    // ranks (lower better)
+    first_mention_rate_avg: number | null;  // 0..1
+  };
   evidence_cards: {
     model_response_id: number;
     model_slug: string;
