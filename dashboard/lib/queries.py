@@ -2665,9 +2665,104 @@ def get_subject_overview(
             cur, latest_refresh_id, prior_refresh_id,
         )
 
+        # ── Per-platform metric matrix (Visibility tab) ──────────
+        # Mention rate / avg rank / first-mention rate / avg sentiment
+        # broken out per model in a single row each, so the
+        # Visibility tab can render the full 4-platform × 4-metric
+        # matrix without having to re-aggregate on the client. Same
+        # mention_rate values that drive `platform_recall` above —
+        # kept in both places so the legacy callers don't have to
+        # change but the new matrix has its own well-typed shape.
+        per_platform_kpis = _per_platform_kpis_for_refresh(
+            cur, latest_refresh_id,
+        )
+
+        # ── Rank distribution (Visibility tab) ───────────────────
+        # When the subject IS mentioned, where do they rank? Four
+        # buckets: #1, #2, #3, #4+. Powers the position histogram
+        # alongside the avg-rank KPI tile.
+        rank_distribution = _rank_distribution_for_refresh(
+            cur, latest_refresh_id,
+        )
+
+        # ── Platform × Topic matrix (Visibility hero heatmap) ───
+        # Per-(platform, topic) mention rate so the hero can render
+        # a mini-heatmap on the right column AND derive its
+        # "build on / fix" callouts from real argmax/argmin cells.
+        # Uses the same prompt → topic resolution as
+        # _topic_coverage_for_refresh so labels match across the page.
+        platform_topic_matrix = _platform_topic_matrix_for_refresh(
+            cur, latest_refresh_id, setup_inputs,
+        )
+
+        # ── Sentiment-of-mentions distribution (Visibility tab) ──
+        # Pos/Neu/Neg counts among responses where the subject was
+        # actually mentioned (or where the prompt named them).
+        # Powers the sentiment-mix bar and tells the comms reader
+        # "when AI talks about me, how does it talk about me?" —
+        # distinct from the avg_sentiment KPI which is just a mean.
+        sentiment_distribution = _sentiment_distribution_for_refresh(
+            cur, latest_refresh_id,
+        )
+
+        # ── Mention quality stratification (Visibility tab) ──────
+        # When the subject IS mentioned, how crowded is the company
+        # they keep? Solo vs paired vs group splits — surfaces "AI
+        # calls you out by name" vs "AI lists you in a group of 8".
+        mention_quality = _mention_quality_for_refresh(
+            cur, latest_refresh_id,
+        )
+
+        # ── Cross-platform divergence (Visibility tab) ───────────
+        # When the same prompt runs across multiple platforms, do
+        # they agree (all mention or all miss) or disagree? High
+        # alignment = systemic gaps; low alignment = platform-
+        # specific blind spots. Surfaces a question pattern no
+        # other section can.
+        cross_platform_divergence = _cross_platform_divergence_for_refresh(
+            cur, latest_refresh_id,
+        )
+
+        # ── First-mention steal share (Visibility tab) ───────────
+        # When the subject doesn't land at #1, who does? Names the
+        # specific competitors winning rank-1 placements and on
+        # which questions, so the Position histogram has a "who's
+        # beating you" companion view.
+        first_mention_steal_share = _first_mention_steal_share(
+            cur, latest_refresh_id,
+        )
+
+        # ── Per-prompt coverage (Visibility tab) ──────────────────
+        # Every tracked unnamed-layer prompt as a row, with per-
+        # platform mention status. The "what to fix" table — most
+        # actionable view in pro AI-search tools (Profound, Otterly).
+        per_prompt_coverage = _per_prompt_coverage(
+            cur, latest_refresh_id, setup_inputs,
+        )
+
         # ── Trajectory (latest N refreshes, chronological) ───────
         trajectory = _trajectory_for_subject(
             cur, sid, weeks=weeks, risk_frame_threshold=risk_frame_threshold,
+        )
+
+        # ── Per-topic trajectories (Visibility tab) ───────────────
+        # One mention-rate series per topic, aligned to the same
+        # refresh order as the headline trajectory. Powers the
+        # Topic Trends multi-line chart — "which topic is rising
+        # or falling" rather than just "weakest right now."
+        # (Sits below trajectory because it needs its refresh_ids.)
+        topic_trajectories = _topic_trajectories(
+            cur, trajectory["refresh_ids"], setup_inputs,
+        )
+
+        # ── Competitor trajectories (Visibility Trend overlay) ──
+        # Top 3 competitors by total appearances across the window,
+        # each with per-refresh mention_rate / share_of_voice /
+        # top_result_rate arrays aligned to trajectory.weeks so the
+        # frontend can render lighter overlay lines beside the
+        # subject's line on each tab.
+        competitor_trajectories = _competitor_trajectories(
+            cur, trajectory["refresh_ids"], top_n=3,
         )
 
         # ── Top cited sources ───────────────────────────────────
@@ -2705,6 +2800,22 @@ def get_subject_overview(
         # ── Competitive snapshot (Phase 4 — single-subject path) ────
         competitive = _read_competitive_snapshot(
             cur, latest_refresh_id, sname,
+        )
+
+        # ── Snapshot diff (Visibility "what changed" banner) ────
+        # Compares latest refresh against prior refresh — overall
+        # recall delta + biggest topic / competitor swings. Returns
+        # None when there's no prior refresh to compare against.
+        # Surfaces the change story that Overview's snapshot-state
+        # framing can't tell on its own.
+        snapshot_diff = _snapshot_diff(
+            cur,
+            latest_refresh_id,
+            prior_refresh_id,
+            setup_inputs,
+            competitive,
+            kpis["ai_recall"]["value"],
+            risk_frame_threshold=risk_frame_threshold,
         )
 
         # ── Meta counts ─────────────────────────────────────────
@@ -2752,6 +2863,17 @@ def get_subject_overview(
         "narrative_clusters": narrative_clusters,
         "evidence_cards": evidence_cards,
         "competitive": competitive,
+        "competitor_trajectories": competitor_trajectories,
+        "per_platform_kpis": per_platform_kpis,
+        "platform_topic_matrix": platform_topic_matrix,
+        "rank_distribution": rank_distribution,
+        "sentiment_distribution": sentiment_distribution,
+        "first_mention_steal_share": first_mention_steal_share,
+        "mention_quality": mention_quality,
+        "cross_platform_divergence": cross_platform_divergence,
+        "per_prompt_coverage": per_prompt_coverage,
+        "topic_trajectories": topic_trajectories,
+        "snapshot_diff": snapshot_diff,
         "meta": {
             "latest_refresh_id": latest_refresh_id,
             "last_refresh_at": latest_completed.isoformat() if latest_completed else None,
@@ -2788,6 +2910,8 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
             "avg_sentiment": [],
             "risk_frame_rate": [],
             "citation_rate": [],
+            "share_of_voice": [],
+            "top_result_rate": [],
         },
         "sources": [],
         "topic_coverage": [],
@@ -2798,6 +2922,45 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "narrative_clusters": [],
         "evidence_cards": [],
         "competitive": [],
+        "competitor_trajectories": [],
+        "per_platform_kpis": [],
+        "platform_topic_matrix": {"platforms": [], "topics": [], "cells": []},
+        # Empty subject still ships the 4 fixed buckets (all zero) so
+        # the frontend can render the histogram skeleton without
+        # null-guarding the array length.
+        "rank_distribution": [
+            {"rank": 1, "label": "#1", "n": 0, "share": 0.0},
+            {"rank": 2, "label": "#2", "n": 0, "share": 0.0},
+            {"rank": 3, "label": "#3", "n": 0, "share": 0.0},
+            {"rank": 4, "label": "#4+", "n": 0, "share": 0.0, "is_aggregate": True},
+        ],
+        "sentiment_distribution": {
+            "positive": 0, "neutral": 0, "negative": 0, "total": 0,
+            "mean": None, "threshold": 0.1,
+        },
+        "first_mention_steal_share": {
+            "total_responses": 0,
+            "subject_first_count": 0,
+            "stolen_count": 0,
+            "no_first_count": 0,
+            "stealers": [],
+        },
+        "mention_quality": {
+            "total_mentioned": 0,
+            "solo": {"count": 0, "share": 0.0},
+            "paired": {"count": 0, "share": 0.0},
+            "group": {"count": 0, "share": 0.0},
+        },
+        "cross_platform_divergence": {
+            "total_multi_platform": 0,
+            "agreed": 0,
+            "diverged": 0,
+            "alignment_score": None,
+            "divergent_prompts": [],
+        },
+        "per_prompt_coverage": [],
+        "topic_trajectories": [],
+        "snapshot_diff": None,
         "meta": {
             "latest_refresh_id": None,
             "last_refresh_at": None,
@@ -2968,6 +3131,974 @@ def _platform_recall_for_refresh(
     return out
 
 
+def _rank_distribution_for_refresh(
+    cur, refresh_run_id: int,
+) -> list[dict[str, Any]]:
+    """Distribution of where the subject lands among entities listed in
+    AI answers, on unnamed-layer responses where the subject is
+    mentioned. Buckets are 1, 2, 3, and 4+ — the long tail past 3 is
+    rare enough that splitting 4 vs 5 vs 6+ adds noise without insight.
+
+    Returned as an ordered list so the frontend can render the four
+    buckets in fixed position regardless of which buckets had data
+    in this snapshot:
+      [
+        {"rank": 1, "label": "#1",  "n": int, "share": float},
+        {"rank": 2, "label": "#2",  "n": int, "share": float},
+        {"rank": 3, "label": "#3",  "n": int, "share": float},
+        {"rank": 4, "label": "#4+", "n": int, "share": float, "is_aggregate": True},
+      ]
+
+    `share` is the share of mentioned-responses at that rank (so the
+    four shares sum to 1.0 when total_mentioned > 0). Tiles with n=0
+    still render — the absence of a #1 bar is signal too.
+    """
+    cur.execute(
+        """
+        SELECT sm.mention_rank
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+          AND sm.subject_mentioned = TRUE
+          AND sm.mention_rank IS NOT NULL
+        """,
+        (refresh_run_id,),
+    )
+    ranks = [int(r[0]) for r in cur.fetchall()]
+    total = len(ranks)
+    buckets = {1: 0, 2: 0, 3: 0, 4: 0}  # 4 is the 4+ bucket
+    for r in ranks:
+        if r <= 3:
+            buckets[r] += 1
+        else:
+            buckets[4] += 1
+    return [
+        {
+            "rank": 1,
+            "label": "#1",
+            "n": buckets[1],
+            "share": (buckets[1] / total) if total else 0.0,
+        },
+        {
+            "rank": 2,
+            "label": "#2",
+            "n": buckets[2],
+            "share": (buckets[2] / total) if total else 0.0,
+        },
+        {
+            "rank": 3,
+            "label": "#3",
+            "n": buckets[3],
+            "share": (buckets[3] / total) if total else 0.0,
+        },
+        {
+            "rank": 4,
+            "label": "#4+",
+            "n": buckets[4],
+            "share": (buckets[4] / total) if total else 0.0,
+            "is_aggregate": True,
+        },
+    ]
+
+
+def _per_platform_kpis_for_refresh(
+    cur, refresh_run_id: int,
+) -> list[dict[str, Any]]:
+    """Per-platform breakdown of the four headline visibility metrics
+    in a single query. Replaces the need for the UI to assemble the
+    matrix from four separate per-platform endpoints.
+
+    Each row:
+      {
+        name: <display name, e.g. "ChatGPT">,
+        slug: <model.slug>,
+        n_responses: int,           # unnamed-layer count, the denominator
+        mention_rate: float | None, # 0..1, unnamed-layer only
+        avg_rank: float | None,     # mean rank when mentioned, unnamed-layer
+        first_mention_rate: float | None,  # 0..1, share at rank 1, unnamed-layer
+        avg_sentiment: float | None,       # -1..+1, ALL layers (matches headline KPI)
+      }
+
+    Methodology note: mention_rate / avg_rank / first_mention_rate are
+    computed on the unnamed layer only (same as the headline AI Recall
+    metric — named-layer responses trivially mention the subject since
+    the prompt names them). avg_sentiment uses ALL layers, matching
+    the headline avg_sentiment KPI's methodology, so a reader who
+    compares a row's sentiment to the headline KPI sees the same
+    number.
+    """
+    cur.execute(
+        """
+        SELECT
+          m.slug,
+          COUNT(*) FILTER (WHERE p.layer = 'unnamed') AS n_unnamed,
+          AVG(CASE WHEN sm.subject_mentioned THEN 1.0 ELSE 0.0 END)
+            FILTER (WHERE p.layer = 'unnamed') AS mention_rate,
+          AVG(sm.mention_rank::numeric)
+            FILTER (WHERE p.layer = 'unnamed'
+                    AND sm.subject_mentioned = TRUE
+                    AND sm.mention_rank IS NOT NULL) AS avg_rank,
+          AVG(CASE WHEN sm.subject_mentioned AND sm.mention_rank = 1
+                   THEN 1.0 ELSE 0.0 END)
+            FILTER (WHERE p.layer = 'unnamed') AS first_mention_rate,
+          AVG((s.scores->>'sentiment')::numeric) AS avg_sentiment
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN models m ON m.id = mr.model_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT scores
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND scores IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) s ON TRUE
+        WHERE mr.refresh_run_id = %s AND mr.success = TRUE
+        GROUP BY m.slug
+        """,
+        (refresh_run_id,),
+    )
+    display = {
+        "chatgpt": "ChatGPT",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "perplexity": "Perplexity",
+    }
+    rows = cur.fetchall()
+    out: list[dict[str, Any]] = []
+    for slug, n_unnamed, mention_rate, avg_rank, first_rate, avg_sent in rows:
+        out.append({
+            "name": display.get(slug, slug),
+            "slug": slug,
+            "n_responses": int(n_unnamed or 0),
+            "mention_rate": float(mention_rate) if mention_rate is not None else None,
+            "avg_rank": float(avg_rank) if avg_rank is not None else None,
+            "first_mention_rate": float(first_rate) if first_rate is not None else None,
+            "avg_sentiment": float(avg_sent) if avg_sent is not None else None,
+        })
+    # Sort by mention_rate desc so the strongest-coverage platform leads
+    # the matrix (consistent with platform_recall's ordering).
+    out.sort(key=lambda r: (r["mention_rate"] is None, -(r["mention_rate"] or 0.0)))
+    return out
+
+
+def _platform_topic_matrix_for_refresh(
+    cur, refresh_run_id: int, setup_inputs: dict[str, Any],
+) -> dict[str, Any]:
+    """Platform × Topic mention-rate matrix for the Visibility hub.
+
+    Reuses the same prompt → topic resolution as
+    `_topic_coverage_for_refresh` (which derives topic labels from
+    template variables resolved against the subject's setup_inputs),
+    then groups responses by (model_slug, topic_label) so each cell
+    is a true intersection mention rate, not a marginal.
+
+    Returned shape (frontend renders as a heatmap):
+      {
+        platforms: [
+          {slug: "chatgpt", name: "ChatGPT", n_responses: <total across topics>},
+          ...
+        ],
+        topics: [
+          {label: "...", source_field: "..."},
+          ...
+        ],
+        # Cell list (sparse — only populated combos appear). Frontend
+        # builds the dense grid by joining on platform_slug + topic_label.
+        cells: [
+          {platform_slug, topic_label, mention_rate, n_responses, n_mentioned},
+          ...
+        ],
+      }
+
+    Topics are sorted by total prompt volume desc so the most-
+    populated columns sit on the left (matches _topic_coverage's
+    ordering); platforms sort by total mention rate desc (matches
+    _platform_recall's ordering).
+
+    Methodology matches AI Recall — unnamed-layer only, latest-non-
+    null extraction per response.
+    """
+    cur.execute(
+        """
+        SELECT
+          m.slug,
+          p.id, p.template,
+          sm.subject_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN models m ON m.id = mr.model_id
+        JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return {"platforms": [], "topics": [], "cells": []}
+
+    # cells: {(slug, topic_label): {n_responses, n_mentioned, source_field}}
+    cells: dict[tuple[str, str], dict[str, Any]] = {}
+    # Per-platform / per-topic marginals for ordering.
+    platform_totals: dict[str, dict[str, int]] = {}
+    topic_totals: dict[str, dict[str, Any]] = {}
+
+    for slug, _prompt_id, template, mentioned in rows:
+        topic = _topic_for_prompt(template, setup_inputs)
+        if topic is None:
+            continue
+        label, source_field = topic
+
+        key = (slug, label)
+        cell = cells.setdefault(
+            key,
+            {"n_responses": 0, "n_mentioned": 0, "source_field": source_field},
+        )
+        cell["n_responses"] += 1
+        if mentioned:
+            cell["n_mentioned"] += 1
+
+        p_agg = platform_totals.setdefault(slug, {"n_responses": 0, "n_mentioned": 0})
+        p_agg["n_responses"] += 1
+        if mentioned:
+            p_agg["n_mentioned"] += 1
+
+        t_agg = topic_totals.setdefault(
+            label, {"n_responses": 0, "source_field": source_field},
+        )
+        t_agg["n_responses"] += 1
+
+    display = {
+        "chatgpt": "ChatGPT", "gemini": "Gemini",
+        "claude": "Claude", "perplexity": "Perplexity",
+    }
+    platforms = sorted(
+        (
+            {
+                "slug": slug,
+                "name": display.get(slug, slug),
+                "n_responses": agg["n_responses"],
+            }
+            for slug, agg in platform_totals.items()
+        ),
+        key=lambda r: -(
+            (platform_totals[r["slug"]]["n_mentioned"] / r["n_responses"])
+            if r["n_responses"] else 0.0
+        ),
+    )
+    topics = sorted(
+        (
+            {"label": label, "source_field": agg["source_field"]}
+            for label, agg in topic_totals.items()
+        ),
+        key=lambda t: -topic_totals[t["label"]]["n_responses"],
+    )
+
+    cell_list = [
+        {
+            "platform_slug": slug,
+            "topic_label": label,
+            "n_responses": cell["n_responses"],
+            "n_mentioned": cell["n_mentioned"],
+            "mention_rate": (
+                cell["n_mentioned"] / cell["n_responses"]
+                if cell["n_responses"] else None
+            ),
+        }
+        for (slug, label), cell in cells.items()
+    ]
+    return {"platforms": platforms, "topics": topics, "cells": cell_list}
+
+
+def _mention_quality_for_refresh(
+    cur, refresh_run_id: int,
+) -> dict[str, Any]:
+    """When the subject IS mentioned, how crowded is the company they
+    keep? Splits mentioned-responses into:
+      - solo:   subject is the only entity AI named
+      - paired: subject + 1-2 named competitors
+      - group:  subject + 3 or more named competitors
+
+    A 100% mention rate where every mention is "in a list of 8 other
+    figures" tells a very different story than a 60% mention rate
+    where most are solo callouts. This split surfaces that
+    distinction.
+
+    Returns:
+      {
+        total_mentioned: int,           # responses where subject was mentioned
+        solo: {count, share},
+        paired: {count, share},         # 1-2 co-named competitors
+        group: {count, share},          # 3+ co-named competitors
+      }
+    """
+    cur.execute(
+        """
+        SELECT sm.competitors_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+            SELECT subject_mentioned, competitors_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+          AND sm.subject_mentioned = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    solo = paired = group = 0
+    for (comps_raw,) in cur.fetchall():
+        comps = _maybe_json(comps_raw) or []
+        unique_names: set[str] = set()
+        if isinstance(comps, list):
+            for c in comps:
+                if not isinstance(c, dict):
+                    continue
+                name = c.get("name")
+                if isinstance(name, str) and name:
+                    unique_names.add(name)
+        n_others = len(unique_names)
+        if n_others == 0:
+            solo += 1
+        elif n_others <= 2:
+            paired += 1
+        else:
+            group += 1
+    total = solo + paired + group
+    return {
+        "total_mentioned": total,
+        "solo": {
+            "count": solo,
+            "share": (solo / total) if total else 0.0,
+        },
+        "paired": {
+            "count": paired,
+            "share": (paired / total) if total else 0.0,
+        },
+        "group": {
+            "count": group,
+            "share": (group / total) if total else 0.0,
+        },
+    }
+
+
+def _cross_platform_divergence_for_refresh(
+    cur, refresh_run_id: int,
+) -> dict[str, Any]:
+    """How aligned are the platforms? For each prompt that ran on
+    more than one platform, do all platforms either all mention the
+    subject or all miss? Or do they disagree?
+
+    Alignment score = agreed / total_multi_platform_prompts. A high
+    score means coverage gaps are systemic (every platform misses
+    the same topic); a low score means platform-specific blind spots
+    (one platform misses while others hit).
+
+    Returns:
+      {
+        total_multi_platform: int,
+        agreed: int,
+        diverged: int,
+        alignment_score: float | None,
+        divergent_prompts: [
+          {prompt_id, template, rendered, topic_label,
+           platform_states: [{slug, name, mentioned}]}
+        ]  # top 5 most-divergent (sorted by mention spread)
+      }
+
+    Single-platform prompts are excluded from the denominator — they
+    can't agree or disagree with themselves.
+    """
+    cur.execute(
+        """
+        SELECT
+          p.id, p.template,
+          mr.rendered_prompt,
+          m.slug,
+          sm.subject_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN models m ON m.id = mr.model_id
+        JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    display = {
+        "chatgpt": "ChatGPT", "gemini": "Gemini",
+        "claude": "Claude", "perplexity": "Perplexity",
+    }
+    prompts: dict[int, dict[str, Any]] = {}
+    for prompt_id, template, rendered, slug, mentioned in cur.fetchall():
+        p = prompts.setdefault(
+            prompt_id,
+            {"template": template, "rendered": rendered or "", "states": {}},
+        )
+        if not p["rendered"] and rendered:
+            p["rendered"] = rendered
+        p["states"][slug] = bool(mentioned)
+
+    total_multi = 0
+    agreed = 0
+    divergent: list[dict[str, Any]] = []
+    for pid, p in prompts.items():
+        states = p["states"]
+        if len(states) < 2:
+            continue
+        total_multi += 1
+        truthy = [v for v in states.values() if v]
+        # Agreed = all mention OR all miss.
+        all_agree = len(truthy) == 0 or len(truthy) == len(states)
+        if all_agree:
+            agreed += 1
+        else:
+            divergent.append({
+                "prompt_id": pid,
+                "template": p["template"],
+                "rendered": p["rendered"] or p["template"],
+                "platform_states": [
+                    {
+                        "slug": slug,
+                        "name": display.get(slug, slug),
+                        "mentioned": mentioned,
+                    }
+                    for slug, mentioned in sorted(states.items())
+                ],
+                # Spread = absolute distance from "all agree", used
+                # only for sort — keeps the table consistent run-to-run.
+                "_spread": min(len(truthy), len(states) - len(truthy)),
+            })
+    divergent.sort(key=lambda d: -d["_spread"])
+    # Strip the sort-only field before returning.
+    for d in divergent:
+        d.pop("_spread", None)
+
+    return {
+        "total_multi_platform": total_multi,
+        "agreed": agreed,
+        "diverged": total_multi - agreed,
+        "alignment_score": (agreed / total_multi) if total_multi else None,
+        "divergent_prompts": divergent[:5],
+    }
+
+
+def _first_mention_steal_share(
+    cur, refresh_run_id: int,
+) -> dict[str, Any]:
+    """When the subject doesn't land at rank #1, who does? Aggregates
+    rank-1 occurrences across unnamed-layer responses, attributing
+    each "steal" (a rank-1 entity that isn't the subject) to the
+    named competitor.
+
+    Returns:
+      {
+        total_responses: int,           # all unnamed-layer responses
+        subject_first_count: int,       # responses where subject was #1
+        stolen_count: int,              # responses where a competitor was #1
+        no_first_count: int,            # responses with no rank-1 entity
+        stealers: [
+          {name, count, share, sample_prompts: [str, ...]}
+        ]  # top 5 desc by count
+      }
+
+    `share` is share of all unnamed responses (consistent denominator
+    with subject_first / first-mention rate, so a reader can compare
+    "you won 20% of first mentions" against "Stephen Miller stole
+    35%").
+    """
+    cur.execute(
+        """
+        SELECT
+          p.template,
+          sm.subject_mentioned,
+          sm.mention_rank,
+          sm.competitors_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank, competitors_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND (
+                subject_mentioned IS NOT NULL
+                OR competitors_mentioned IS NOT NULL
+              )
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    rows = cur.fetchall()
+    total = len(rows)
+    if total == 0:
+        return {
+            "total_responses": 0,
+            "subject_first_count": 0,
+            "stolen_count": 0,
+            "no_first_count": 0,
+            "stealers": [],
+        }
+
+    subject_first = 0
+    stolen = 0
+    no_first = 0
+    stealers: dict[str, dict[str, Any]] = {}
+
+    for template, subj_mentioned, rank, comps_raw in rows:
+        if subj_mentioned and rank == 1:
+            subject_first += 1
+            continue
+        comps = _maybe_json(comps_raw) or []
+        if not isinstance(comps, list):
+            no_first += 1
+            continue
+        rank_one_name: str | None = None
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            r = c.get("rank")
+            if isinstance(r, (int, float)) and int(r) == 1:
+                name = c.get("name")
+                if isinstance(name, str) and name:
+                    rank_one_name = name
+                    break
+        if rank_one_name is None:
+            no_first += 1
+            continue
+        stolen += 1
+        entry = stealers.setdefault(
+            rank_one_name, {"count": 0, "sample_prompts": []},
+        )
+        entry["count"] += 1
+        # Cap samples at 3 distinct prompt templates per stealer so
+        # the UI can show "examples" without unbounded list growth.
+        if (
+            len(entry["sample_prompts"]) < 3
+            and template not in entry["sample_prompts"]
+        ):
+            entry["sample_prompts"].append(template)
+
+    stealer_list = sorted(
+        (
+            {
+                "name": name,
+                "count": d["count"],
+                "share": d["count"] / total,
+                "sample_prompts": d["sample_prompts"],
+            }
+            for name, d in stealers.items()
+        ),
+        key=lambda s: -s["count"],
+    )
+
+    return {
+        "total_responses": total,
+        "subject_first_count": subject_first,
+        "stolen_count": stolen,
+        "no_first_count": no_first,
+        "stealers": stealer_list[:5],
+    }
+
+
+def _per_prompt_coverage(
+    cur, refresh_run_id: int, setup_inputs: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Per-prompt per-platform mention status for the Visibility hub's
+    coverage table — one row per tracked unnamed-layer prompt, one
+    cell per platform showing whether the subject surfaced and at
+    what rank.
+
+    Returns a list of:
+      {
+        prompt_id, template, topic_label,
+        platform_results: [
+          {slug, name, present: bool, mentioned: bool | None, rank: int | null}
+        ]
+      }
+
+    `present` distinguishes "platform didn't run this prompt" from
+    "platform ran it but didn't mention the subject" (which would
+    otherwise both render as a blank cell). Rows are sorted with
+    fully-missed prompts first (highest-priority gaps), then
+    partially-covered, then fully-covered — so the actionable rows
+    sit at the top of the table.
+    """
+    cur.execute(
+        """
+        SELECT
+          p.id, p.template,
+          mr.rendered_prompt,
+          m.slug,
+          sm.subject_mentioned,
+          sm.mention_rank
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN models m ON m.id = mr.model_id
+        JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+
+    display = {
+        "chatgpt": "ChatGPT", "gemini": "Gemini",
+        "claude": "Claude", "perplexity": "Perplexity",
+    }
+    prompts: dict[int, dict[str, Any]] = {}
+    all_slugs: set[str] = set()
+
+    for prompt_id, template, rendered, slug, mentioned, rank in cur.fetchall():
+        p = prompts.setdefault(
+            prompt_id,
+            {"template": template, "rendered": rendered or "", "slugs": {}},
+        )
+        # Prefer a non-empty rendered prompt if we haven't captured
+        # one yet — same prompt id should render identically across
+        # platforms, so any populated one is fine.
+        if not p["rendered"] and rendered:
+            p["rendered"] = rendered
+        p["slugs"][slug] = {
+            "mentioned": bool(mentioned),
+            "rank": int(rank) if rank is not None else None,
+        }
+        all_slugs.add(slug)
+
+    # Stable column order: canonical 4 first, then any other slugs.
+    platform_order = ["chatgpt", "claude", "gemini", "perplexity"]
+    ordered_slugs = [s for s in platform_order if s in all_slugs]
+    for s in sorted(all_slugs):
+        if s not in ordered_slugs:
+            ordered_slugs.append(s)
+
+    rows: list[dict[str, Any]] = []
+    for prompt_id, p in prompts.items():
+        topic = _topic_for_prompt(p["template"], setup_inputs)
+        topic_label = topic[0] if topic else None
+        platform_results = []
+        for slug in ordered_slugs:
+            cell = p["slugs"].get(slug)
+            platform_results.append({
+                "slug": slug,
+                "name": display.get(slug, slug),
+                "present": cell is not None,
+                "mentioned": cell["mentioned"] if cell else None,
+                "rank": cell["rank"] if cell else None,
+            })
+        rows.append({
+            "prompt_id": prompt_id,
+            "template": p["template"],
+            "rendered": p["rendered"] or p["template"],
+            "topic_label": topic_label,
+            "platform_results": platform_results,
+        })
+
+    def _sort_key(row: dict[str, Any]) -> tuple[int, str]:
+        present = [c for c in row["platform_results"] if c["present"]]
+        if not present:
+            bucket = 3  # no coverage at all → degenerate, push down
+        elif not any(c["mentioned"] for c in present):
+            bucket = 0  # fully missed across all present platforms
+        elif not all(c["mentioned"] for c in present):
+            bucket = 1  # mixed
+        else:
+            bucket = 2  # fully covered
+        return (bucket, row["template"])
+
+    rows.sort(key=_sort_key)
+    return rows
+
+
+def _topic_trajectories(
+    cur,
+    refresh_ids: list[int],
+    setup_inputs: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Per-topic mention rate per refresh, aligned to the same
+    refresh order as `_trajectory_for_subject` — powers the
+    Visibility hub's Topic Trends chart (one faint line per topic
+    over time, answering "which topic is rising/falling" instead of
+    just "which topic is weakest right now").
+
+    Returns: [{label, source_field, mention_rate: [float|None per refresh]}, ...]
+    Topics ranked by total appearances across the window so the
+    most-populated topics get the most-readable lines.
+    """
+    if not refresh_ids:
+        return []
+
+    cur.execute(
+        """
+        SELECT mr.refresh_run_id, p.template, sm.subject_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s)
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_ids,),
+    )
+
+    # per_refresh[rid][label] = {n_resp, n_mentioned, source_field}
+    per_refresh: dict[int, dict[str, dict[str, Any]]] = {}
+    topic_total: dict[str, dict[str, Any]] = {}
+
+    for rid, template, mentioned in cur.fetchall():
+        topic = _topic_for_prompt(template, setup_inputs)
+        if topic is None:
+            continue
+        label, source_field = topic
+        agg = per_refresh.setdefault(rid, {}).setdefault(
+            label,
+            {"n_resp": 0, "n_mentioned": 0, "source_field": source_field},
+        )
+        agg["n_resp"] += 1
+        if mentioned:
+            agg["n_mentioned"] += 1
+        t_agg = topic_total.setdefault(
+            label, {"n_resp": 0, "source_field": source_field},
+        )
+        t_agg["n_resp"] += 1
+
+    ordered_labels = sorted(
+        topic_total.keys(), key=lambda t: -topic_total[t]["n_resp"],
+    )
+
+    out: list[dict[str, Any]] = []
+    for label in ordered_labels:
+        rates: list[float | None] = []
+        for rid in refresh_ids:
+            agg = per_refresh.get(rid, {}).get(label)
+            if agg and agg["n_resp"] > 0:
+                rates.append(agg["n_mentioned"] / agg["n_resp"])
+            else:
+                rates.append(None)
+        out.append({
+            "label": label,
+            "source_field": topic_total[label]["source_field"],
+            "mention_rate": rates,
+        })
+    return out
+
+
+def _snapshot_diff(
+    cur,
+    latest_refresh_id: int,
+    prior_refresh_id: int | None,
+    setup_inputs: dict[str, Any],
+    current_competitive: list[dict[str, Any]],
+    current_recall: float | None,
+    *,
+    min_delta: float = 0.05,
+    risk_frame_threshold: float = 0.5,
+) -> dict[str, Any] | None:
+    """Diff between the latest and prior snapshot — what changed.
+    Powers the top-of-page banner on the Visibility hub so a
+    returning user sees "since your last snapshot, here's the new
+    information" instead of having to compare numbers against a
+    remembered baseline.
+
+    Returns None when there's no prior snapshot to compare against.
+
+    Categories surfaced:
+      - overall_recall_delta: pp change in subject's overall AI Recall
+      - topic_changes: top 3 biggest topic-level mention-rate swings
+        (gain or loss, both directions; ranked by absolute delta)
+      - competitor_changes: top 3 biggest competitor SoV swings
+      - prior_refresh_at: date string for the "Since X" header
+
+    A change must move at least `min_delta` (5pp) to surface — keeps
+    noise from sub-prompt jitter out of the banner.
+    """
+    if not prior_refresh_id:
+        return None
+
+    cur.execute(
+        "SELECT completed_at FROM refresh_runs WHERE id = %s",
+        (prior_refresh_id,),
+    )
+    row = cur.fetchone()
+    prior_completed = row[0] if row else None
+    prior_refresh_at = (
+        prior_completed.isoformat() if prior_completed else None
+    )
+
+    # Overall mention rate delta
+    prior_kpis = _compute_kpis_for_refresh(
+        cur, prior_refresh_id, risk_frame_threshold,
+    )
+    prior_recall = prior_kpis.get("ai_recall")
+    overall_delta: float | None
+    if current_recall is not None and prior_recall is not None:
+        overall_delta = current_recall - prior_recall
+    else:
+        overall_delta = None
+
+    # Topic-level deltas
+    current_topics = _topic_coverage_for_refresh(
+        cur, latest_refresh_id, setup_inputs,
+    )
+    prior_topics = _topic_coverage_for_refresh(
+        cur, prior_refresh_id, setup_inputs,
+    )
+    prior_topic_rate = {
+        t["label"]: t["ai_recall"] for t in prior_topics
+    }
+    topic_changes: list[dict[str, Any]] = []
+    for t in current_topics:
+        cur_v = t["ai_recall"]
+        prior_v = prior_topic_rate.get(t["label"])
+        if cur_v is None or prior_v is None:
+            continue
+        delta = cur_v - prior_v
+        if abs(delta) >= min_delta:
+            topic_changes.append({
+                "label": t["label"],
+                "current_rate": cur_v,
+                "prior_rate": prior_v,
+                "delta": delta,
+            })
+    topic_changes.sort(key=lambda x: -abs(x["delta"]))
+
+    # Competitor SoV deltas — use the focal subject's name to
+    # resolve the prior competitive snapshot. SoV definition here
+    # matches `_read_competitive_snapshot` (per-entity appearance
+    # rate) so prior and current numbers live in the same units.
+    subject_name = next(
+        (c["name"] for c in current_competitive if c.get("is_subject")),
+        None,
+    )
+    competitor_changes: list[dict[str, Any]] = []
+    if subject_name:
+        prior_competitive = _read_competitive_snapshot(
+            cur, prior_refresh_id, subject_name,
+        )
+        prior_sov = {c["name"]: c["sov"] for c in prior_competitive}
+        for c in current_competitive:
+            if c.get("is_subject"):
+                continue
+            prior_v = prior_sov.get(c["name"])
+            if prior_v is None:
+                continue
+            delta = c["sov"] - prior_v
+            if abs(delta) >= min_delta:
+                competitor_changes.append({
+                    "name": c["name"],
+                    "current_sov": c["sov"],
+                    "prior_sov": prior_v,
+                    "delta": delta,
+                })
+        competitor_changes.sort(key=lambda x: -abs(x["delta"]))
+
+    return {
+        "prior_refresh_at": prior_refresh_at,
+        "overall_recall_delta": overall_delta,
+        "topic_changes": topic_changes[:3],
+        "competitor_changes": competitor_changes[:3],
+    }
+
+
+def _sentiment_distribution_for_refresh(
+    cur, refresh_run_id: int, *, threshold: float = 0.1,
+) -> dict[str, Any]:
+    """Pos/Neu/Neg counts for the SENTIMENT-OF-MENTIONS lens — how does
+    AI talk about the subject when it talks about them at all.
+
+    Scope: named-layer responses (prompt names the subject → answer is
+    about them) PLUS unnamed-layer responses where the subject was
+    actually mentioned. Pure-noise unnamed responses where the subject
+    didn't appear at all are excluded, since their sentiment score is
+    sentiment about the topic in general, not about the subject.
+
+    Threshold of ±0.1 around 0 marks the neutral band, matching the
+    convention used by the avg_sentiment color thresholds in the UI.
+    """
+    cur.execute(
+        f"""
+        SELECT
+          COUNT(*) FILTER (WHERE (s.scores->>'sentiment')::numeric > %s) AS positive,
+          COUNT(*) FILTER (WHERE (s.scores->>'sentiment')::numeric BETWEEN -%s AND %s) AS neutral,
+          COUNT(*) FILTER (WHERE (s.scores->>'sentiment')::numeric < -%s) AS negative,
+          COUNT(*) FILTER (WHERE (s.scores->>'sentiment') IS NOT NULL) AS total,
+          AVG((s.scores->>'sentiment')::numeric) AS mean
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT scores
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND scores IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) s ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND mr.success = TRUE
+          AND (p.layer = 'named' OR sm.subject_mentioned = TRUE)
+        """,
+        (threshold, threshold, threshold, threshold, refresh_run_id),
+    )
+    row = cur.fetchone()
+    pos, neu, neg, total, mean = row if row else (0, 0, 0, 0, None)
+    return {
+        "positive": int(pos or 0),
+        "neutral": int(neu or 0),
+        "negative": int(neg or 0),
+        "total": int(total or 0),
+        "mean": float(mean) if mean is not None else None,
+        "threshold": threshold,
+    }
+
+
 def _kpis_per_refresh_bulk(
     cur, refresh_ids: list[int], risk_frame_threshold: float,
 ) -> dict[int, dict[str, float | None]]:
@@ -3075,6 +4206,238 @@ def _kpis_per_refresh_bulk(
     return out
 
 
+def _sov_and_top_result_per_refresh_bulk(
+    cur, refresh_ids: list[int],
+) -> dict[int, dict[str, float | None]]:
+    """Per-refresh Share of Voice + Top Result Rate, in one query.
+
+    Share of Voice (pie-share definition): of all entity mentions
+    across unnamed-layer responses in a refresh, what fraction is the
+    focal subject. Pulls competitor names from `competitors_mentioned`
+    JSONB and dedupes within each response (a single response that
+    lists the same competitor twice shouldn't double-count). This
+    differs from `competitive[].sov` (which is subject_mentions /
+    total_responses — effectively a per-entity mention rate); the
+    pie-share definition is what gets surfaced on the Visibility
+    Trend chart so a reader sees "of the entity-pie, what slice is
+    me" change over time.
+
+    Top Result Rate: share of unnamed-layer responses where the
+    subject was mentioned at rank 1. Matches the methodology behind
+    `competitive[].first_mention_rate` on the current snapshot, so
+    the trend tab and the snapshot column read the same.
+
+    Returns `{refresh_id: {share_of_voice, top_result_rate}}`;
+    refreshes with no unnamed-layer responses get None for both.
+    """
+    out: dict[int, dict[str, float | None]] = {
+        rid: {"share_of_voice": None, "top_result_rate": None}
+        for rid in refresh_ids
+    }
+    if not refresh_ids:
+        return out
+
+    cur.execute(
+        """
+        SELECT
+          mr.refresh_run_id,
+          sm.subject_mentioned,
+          sm.mention_rank,
+          sm.competitors_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank, competitors_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND (
+                subject_mentioned IS NOT NULL
+                OR competitors_mentioned IS NOT NULL
+              )
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s)
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_ids,),
+    )
+
+    # Per-refresh accumulators: total_responses (denominator for top
+    # result rate), subj_mentions (numerator for pie SoV), and
+    # comp_mentions (deduped competitor appearances; combines with
+    # subj_mentions to form the pie denominator).
+    agg: dict[int, dict[str, int]] = {}
+    for rid, subj_mentioned, rank, comps_raw in cur.fetchall():
+        a = agg.setdefault(
+            rid,
+            {"total": 0, "subj_mentions": 0, "comp_mentions": 0, "firsts": 0},
+        )
+        a["total"] += 1
+        if subj_mentioned:
+            a["subj_mentions"] += 1
+            if rank == 1:
+                a["firsts"] += 1
+        # Dedupe competitor names within this response — the extractor
+        # occasionally repeats the same name in a single structured-
+        # output list, and the snapshot code dedupes the same way.
+        comps = _maybe_json(comps_raw) or []
+        if isinstance(comps, list):
+            seen: set[str] = set()
+            for c in comps:
+                if not isinstance(c, dict):
+                    continue
+                name = c.get("name")
+                if not isinstance(name, str) or not name or name in seen:
+                    continue
+                seen.add(name)
+            a["comp_mentions"] += len(seen)
+
+    for rid, a in agg.items():
+        if a["total"] > 0:
+            out[rid]["top_result_rate"] = a["firsts"] / a["total"]
+        entity_total = a["subj_mentions"] + a["comp_mentions"]
+        if entity_total > 0:
+            out[rid]["share_of_voice"] = a["subj_mentions"] / entity_total
+
+    return out
+
+
+def _competitor_trajectories(
+    cur, refresh_ids: list[int], *, top_n: int = 3,
+) -> list[dict[str, Any]]:
+    """Per-week metric arrays for the top competitor entities, aligned
+    to the same refresh order as `_trajectory_for_subject`. Same
+    three metrics (mention_rate, share_of_voice, top_result_rate)
+    using the same methodology, so the Visibility Trend chart can
+    render lighter overlay lines for competitors on each tab.
+
+    Competitor selection: top N by total appearances across the full
+    refresh window — not just the latest snapshot. A competitor that
+    dominated one week and vanished the next won't make the cut, so
+    the chart shows the persistent rivals rather than fly-bys.
+
+    SoV uses the pie-share definition (matches
+    `_sov_and_top_result_per_refresh_bulk`): per-refresh competitor's
+    deduped appearances ÷ (subject mentions + sum of all deduped
+    competitor appearances). Same denominator as the subject's SoV
+    line so all lines on the SoV tab live in the same pie.
+
+    Returned shape, length = refresh_ids count, aligned to that order:
+      [
+        {
+          name: <competitor name>,
+          mention_rate: [float | None, ...],
+          share_of_voice: [float | None, ...],
+          top_result_rate: [float | None, ...],
+        },
+        ...
+      ]
+    """
+    if not refresh_ids:
+        return []
+
+    cur.execute(
+        """
+        SELECT
+          mr.refresh_run_id,
+          sm.subject_mentioned,
+          sm.competitors_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank, competitors_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND (
+                subject_mentioned IS NOT NULL
+                OR competitors_mentioned IS NOT NULL
+              )
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s)
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_ids,),
+    )
+
+    # Per-refresh accumulators. `by_name[name] = {appears, firsts}`
+    # is populated by deduping competitor names within each response
+    # (same dedupe rule as _read_competitive_snapshot and
+    # _sov_and_top_result_per_refresh_bulk).
+    per_refresh: dict[int, dict[str, Any]] = {}
+    for rid, subj_mentioned, comps_raw in cur.fetchall():
+        agg = per_refresh.setdefault(
+            rid,
+            {
+                "total_resp": 0,
+                "subj_mentions": 0,
+                "comp_total": 0,
+                "by_name": {},
+            },
+        )
+        agg["total_resp"] += 1
+        if subj_mentioned:
+            agg["subj_mentions"] += 1
+        comps = _maybe_json(comps_raw) or []
+        if not isinstance(comps, list):
+            continue
+        seen_in_resp: set[str] = set()
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("name")
+            if not isinstance(name, str) or not name or name in seen_in_resp:
+                continue
+            seen_in_resp.add(name)
+            entry = agg["by_name"].setdefault(name, {"appears": 0, "firsts": 0})
+            entry["appears"] += 1
+            r = c.get("rank")
+            if isinstance(r, (int, float)) and int(r) == 1:
+                entry["firsts"] += 1
+        agg["comp_total"] += len(seen_in_resp)
+
+    # Top N by total appearances across the full window.
+    total_appearances: dict[str, int] = {}
+    for agg in per_refresh.values():
+        for name, e in agg["by_name"].items():
+            total_appearances[name] = total_appearances.get(name, 0) + e["appears"]
+    top_names = [
+        name for name, _ in sorted(
+            total_appearances.items(), key=lambda kv: -kv[1],
+        )[:top_n]
+    ]
+
+    out: list[dict[str, Any]] = []
+    for name in top_names:
+        mr_arr: list[float | None] = []
+        sov_arr: list[float | None] = []
+        trr_arr: list[float | None] = []
+        for rid in refresh_ids:
+            agg = per_refresh.get(rid)
+            if not agg:
+                mr_arr.append(None)
+                sov_arr.append(None)
+                trr_arr.append(None)
+                continue
+            entry = agg["by_name"].get(name)
+            appears = entry["appears"] if entry else 0
+            firsts = entry["firsts"] if entry else 0
+            total_resp = agg["total_resp"]
+            entity_total = agg["subj_mentions"] + agg["comp_total"]
+            mr_arr.append(appears / total_resp if total_resp else None)
+            sov_arr.append(appears / entity_total if entity_total else None)
+            trr_arr.append(firsts / total_resp if total_resp else None)
+        out.append({
+            "name": name,
+            "mention_rate": mr_arr,
+            "share_of_voice": sov_arr,
+            "top_result_rate": trr_arr,
+        })
+    return out
+
+
 def _trajectory_for_subject(
     cur, subject_id: int, *, weeks: int, risk_frame_threshold: float,
 ) -> dict[str, Any]:
@@ -3114,6 +4477,13 @@ def _trajectory_for_subject(
     risk_frame_rate = [kpi_map.get(rid, {}).get("risk_frame_rate") for rid in refresh_ids]
     citation_rate = [kpi_map.get(rid, {}).get("citation_rate") for rid in refresh_ids]
 
+    # Pie-share SoV + Top Result Rate per refresh (one extra query).
+    # These unlock the SoV / Top Result tabs on the Visibility Trend
+    # chart so all three metrics there ship with real time series.
+    sov_map = _sov_and_top_result_per_refresh_bulk(cur, refresh_ids)
+    share_of_voice = [sov_map.get(rid, {}).get("share_of_voice") for rid in refresh_ids]
+    top_result_rate = [sov_map.get(rid, {}).get("top_result_rate") for rid in refresh_ids]
+
     return {
         "weeks": weeks_labels,
         "refresh_ids": refresh_ids,
@@ -3122,6 +4492,8 @@ def _trajectory_for_subject(
         "avg_sentiment": avg_sentiment,
         "risk_frame_rate": risk_frame_rate,
         "citation_rate": citation_rate,
+        "share_of_voice": share_of_voice,
+        "top_result_rate": top_result_rate,
     }
 
 
