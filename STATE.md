@@ -1,32 +1,176 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-17 evening**
-> — dashboard polish + landing copy iteration day. The big themes today:
+> A pulse-check of where the project sits **as of 2026-05-21**
+> — Visibility hub restructure day. The big themes:
 >
-> - **Overview hero consolidation** — Strategic Takeaways collapsed
->   inline; Recommended Actions removed from Overview (still rendered
->   on the /recommendations spoke); Dominant Narrative shrunk and
->   destrungered; generic subtitle paragraph dropped.
-> - **Sources polish** — `www.` prefix stripped at the canonical-domain
->   layer; "Unknown" → "Other"; source name + ExternalLink icon now
->   one clickable target; donut palette widened (lighter top end) and
->   spread evenly across N slices.
-> - **Hub-and-spokes start** — first spoke wired (`/recommendations`);
->   Sidebar threaded with `subjectId` + `activeSection` props,
->   real hrefs for built spokes, "Soon" pill on the rest.
-> - **Landing iteration** — platforms strip + mid-CTA + mock preview
->   (parallel session); placeholders filled; Problem section split
->   into two paragraphs; hero headline tightened; closing CTA copy
->   finalized; Methodology footer link wired to the McKinsey citation.
+> - **Visibility spoke fully rebuilt as a SaaS-style executive
+>   dashboard.** Eight numbered sections — AI Visibility Briefing
+>   → 01 Trend → 02 Platforms → 03 Topics → 04 Position → 05
+>   Competitive (tabbed Overview / Co-Mentions / Ownership). Two
+>   phase headers ("Where you stand now", "The competitive
+>   landscape") group sections into a two-act story. Floating
+>   right-rail SectionNav with IntersectionObserver scroll-spy
+>   lets readers jump between sections; `xl:pr-44` on `<main>`
+>   reserves a corridor so the nav doesn't overlap content.
+> - **Major backend depth: seven new rollups on `SubjectOverview`.**
+>   `subject_set_benchmarks` (cross-subject KPI averages for "vs
+>   subject-set avg" annotations), `topic_leaderboard` (per-topic
+>   leader + per-(topic, entity) mention/rank/first stats, plus
+>   `subject_rank_buckets` for the Answer Position topic dropdown),
+>   `co_mention_frequency`, `per_platform_entity_sov`, richer
+>   5-bucket `rank_distribution` (including Not mentioned),
+>   `per_topic.entities` for the Prominence topic-scope filter.
+>   All in `dashboard/lib/queries.py`; same prompt → topic
+>   resolution as `_topic_coverage_for_refresh` so labels align
+>   across the page.
+> - **Topic-scope dropdowns** on Answer Position and the Prominence
+>   table — URL-driven (`?position_topic=…`, `?prominence_topic=…`)
+>   so the page stays server-rendered and the scopes are
+>   bookmarkable. Independent params; both can be set
+>   simultaneously without colliding.
+> - **Competitive section tabs** (Overview / Co-Mentions /
+>   Ownership) fold three views into one section, URL-driven
+>   (`?competitive_tab=…`). Saves ~1000px of vertical real estate
+>   at the default tab; non-default tabs are one click away.
+> - **Composite Competitive Index** in the Prominence table —
+>   0-100 score = equal-weighted blend of SoV + first-mention
+>   share + rank-position score (rank 1 = 1.0, rank 10+ = 0).
+>   Table now sorts by Score; tooltip on the column header walks
+>   through the formula.
+> - **Briefing KPI strip** carries polarity hints (`↑ higher is
+>   better` / `↓ lower is better`) and cross-subject benchmark
+>   lines ("vs 70% subject-set avg, 12 subjects") under each tile.
+>   All four KPIs colored by threshold (success / warning /
+>   neutral) using polarity-aware semantics.
+> - **Overview page**: TrajectoryStrip promoted from
+>   bottom-of-page to right under the hero, with an "Open
+>   Visibility deep-dive" cross-link in the SectionTitle right
+>   slot. Reading flow: hero → trends → deeper sections.
+> - **Misc fixes**: Clerk UserButton hydration mismatch fixed via
+>   `next/dynamic({ ssr: false })`; Recharts `width(-1)/height(-1)`
+>   warnings killed with numeric `height={N}` + `minWidth={1}`;
+>   `CompetitorBarsFromData` SoV axis formatter multiplies by
+>   100 (was rendering 0..1 raw as ".25%").
 >
-> Builds on the 2026-05-16 dual QA pass cycles (13 commits closing
-> runtime safety gaps, concurrency races, validation false positives,
-> visual correctness) and the 2026-05-15 Recommended Actions LLM
-> refactor + role-grounding fix + Hero refactor / topic-gap headline /
-> Wikipedia source merging / Risk Frame Rate credibility fix.
+> Removed along the way: standalone Tone / Evidence Drawer /
+> Prompt-Level Evidence / Cross-Platform Consistency / Topic
+> Battleground sections; standalone Co-Mentions and Ownership
+> sections (folded into Competitive tabs). `TopicTrends.tsx`
+> deleted entirely.
+>
+> Builds on the 2026-05-17 Overview hero consolidation + Sources
+> polish + hub-and-spokes wiring; 2026-05-16 dual QA passes;
+> 2026-05-15 Recommended Actions LLM refactor.
 >
 > Read this first if you're a fresh Claude Code session picking up
 > work. Update when state shifts meaningfully.
+
+---
+
+## Latest session (2026-05-21) — Visibility hub restructure
+
+Shipped in commit **`a6aa0e8`** ("Visibility hub: SaaS-style
+restructure + competitive depth + benchmarks"). 14 files,
+3067 ins / 2498 del.
+
+### Backend (`dashboard/lib/queries.py`)
+
+Seven new keys on `SubjectOverview` returned by
+`get_subject_overview()` (and matching empty shells in
+`_empty_overview()`):
+
+| Key | What it carries |
+|---|---|
+| `subject_set_benchmarks` | `{n_subjects, ai_mention_rate_avg, avg_mention_rank_avg, first_mention_rate_avg}` — cross-subject KPI averages computed in one bulk query over each subject's latest completed refresh. Powers the "vs subject-set avg" caption on the Briefing KPI tiles. |
+| `topic_leaderboard[i]` | Per-topic leader + per-(topic, entity) prominence. Each row has `topic_label`, `n_responses`, `subject_rate`, `leader_name`, `leader_rate`, `subject_is_leader`, `gap_to_leader`, `top_competitors`, `entities[]` (full per-entity data: name, mentions, sov, avg_rank, first_mention_rate), and `subject_rank_buckets` (5-bucket distribution scoped to this topic — same shape as top-level `rank_distribution`). |
+| `co_mention_frequency` | `{subject_mention_count, co_mentions: [{name, count, share}]}` — denominator is subject-mention responses, not all responses. Distinct from SoV. |
+| `per_platform_entity_sov` | `{platforms, entities, cells}` — top-N entities × platforms grid with each entity's SoV per platform (subject always force-included in entities). |
+| `rank_distribution` | **Shape changed**: now `{total_responses, n_mentioned, buckets: [Rank 1 / Ranks 2-3 / Ranks 4-5 / Rank 6+ / Not mentioned]}` (5 buckets, normalized to total responses). The old 4-bucket array (#1/#2/#3/#4+) is gone. |
+| `topic_leaderboard[i].entities[j].avg_rank` etc. | The richer per-(topic, entity) shape inside topic_leaderboard powers both the Battleground (now removed) and the Prominence topic-scope dropdown. |
+
+All seven derive from `response_extractions` data that already
+exists — no ETL changes, no new tables. Reuses the same
+prompt → topic resolution as `_topic_coverage_for_refresh`
+(via `_topic_for_prompt`), so labels align across sections.
+
+**Helpers added** (all in `dashboard/lib/queries.py`):
+`_subject_set_benchmarks`, `_topic_leaderboard_for_refresh` (extended),
+`_co_mention_frequency_for_refresh`, `_per_platform_entity_sov_for_refresh`,
+and the rewritten `_rank_distribution_for_refresh`.
+
+### Frontend (`web/app/subjects/[id]/visibility/`)
+
+| File | Role |
+|---|---|
+| `page.tsx` | Server component. Reads `?compare`, `?prominence_topic`, `?position_topic`, `?competitive_tab` from `searchParams`. Renders Briefing + numbered sections. |
+| `TrendOverTime.tsx` | Client. Simplified — generic `overlays` prop, no tabs. Subject + top-3 competitor overlay lines (distinct hues), custom multi-series tooltip. |
+| `FilterBar.tsx` | Client. Now just the Compare-to dropdown (Platform/Topic filters removed when Prompt-Level Evidence section was cut). Non-sticky to avoid overlapping the page Header. |
+| `SectionNav.tsx` | Client. Floating right-rail jump nav, xl+ only. Uses `IntersectionObserver` (rootMargin `-40% 0px -50% 0px`) for scroll-spy. Five entries: Trend / Platforms / Topics / Position / Competitive. |
+| `CompetitiveScatter.tsx` | Client. Recharts `ScatterChart` for Position vs Share panel inside Competitive Visibility. X-axis (Avg Rank) reversed so "best position" sits left. |
+| `CompetitiveTabs.tsx` | Client. Tab strip inside Competitive section. URL-driven `?competitive_tab=` (overview / co-mentions / ownership). |
+| `TopicProminenceFilter.tsx` | Client. `<select>` that pushes `?prominence_topic=…`. Drives the topic-scoped Prominence table. |
+| `TopicPositionFilter.tsx` | Client. Same pattern, pushes `?position_topic=…`. Drives the topic-scoped Answer Position histogram + Avg Rank callout. |
+
+**Deleted**: `TopicTrends.tsx` (per-topic trend lines, replaced
+by the consolidated Topic Visibility section's per-topic lists).
+
+### URL state surface
+
+The Visibility page now reads four independent query params:
+
+```
+?compare=<competitor name>          → Compare card under hero
+?prominence_topic=<topic label>     → Scopes the Prominence table
+?position_topic=<topic label>       → Scopes the Answer Position histogram
+?competitive_tab=co-mentions|ownership   → Switches Competitive section tab
+                                       (omitted = "overview" default)
+```
+
+All pushed via `router.replace(...){ scroll: false }` so changing
+a filter doesn't yank the page to the top. Hub remains
+bookmarkable; the page itself is server-rendered.
+
+### Overview page (`web/app/subjects/[id]/page.tsx`)
+
+`TrajectoryStrip` (the "Visibility Trends" section with three
+mini-cards for AI Mention Rate / Average Tone / Citation Rate)
+was promoted from the bottom of the page to right under the
+hero. Its `SectionTitle.right` slot now carries an
+**"Open Visibility deep-dive →"** button linking to
+`/subjects/${subjectId}/visibility`. Reading flow now goes:
+hero → trends → deeper sections.
+
+### Misc bug fixes shipped in the same commit
+
+- **Clerk `<UserButton>` hydration mismatch** (`Header.tsx`):
+  imported via `next/dynamic(..., { ssr: false })` so the
+  server emits an empty slot and the client mounts the button
+  after hydration — eliminates the `data-clerk-component=UserButton`
+  div diff that triggered the warning.
+- **Recharts `width(-1)/height(-1)` warnings** (`TrendOverTime.tsx`
+  and `CompetitiveScatter.tsx`): `ResponsiveContainer` now
+  uses `height={N}` (numeric, e.g., 260) + `minWidth={1}` instead
+  of `height="100%"`, so it doesn't depend on parent measurement
+  at first mount.
+- **CompetitorBarsFromData SoV axis** (`Charts.tsx`): added
+  `tickFormatter={(v) => `${Math.round(v * 100)}%`}` — the bars
+  use 0..1 share data but the `unit="%"` prop was just appending
+  "%" to the raw decimals (".25%", ".5%"). Domain pinned to
+  `[0, 1]` so the chart always shows the full pie.
+
+### Behavior changes that may affect external callers
+
+The `rank_distribution` field on `SubjectOverview` is **no
+longer an array**. It's `{total_responses, n_mentioned, buckets:
+[...]}`. Anything consuming `data.rank_distribution.map(...)`
+will throw. Migrate to `data.rank_distribution.buckets.map(...)`.
+
+If uvicorn `--reload` fails to pick up new fields on a
+`SubjectOverview` shape change, kill and restart — `--reload`
+sometimes caches module-level imports across reloads in this
+codebase. Both this stretch and the prior big push (e164e61)
+hit this; the live API only served the new fields after a
+hard restart.
 
 ---
 
