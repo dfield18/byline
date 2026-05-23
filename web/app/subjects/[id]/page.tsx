@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
-import { OverviewSectionNav } from "./OverviewSectionNav";
+import { OverviewSubNav } from "./OverviewSubNav";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
@@ -141,7 +141,9 @@ function getKpiValueColor(
     | "avg_tone"
     | "risk_frame_rate"
     | "weakest_topic_recall"
-    | "citation_rate",
+    | "citation_rate"
+    | "net_sentiment"
+    | "top_result_rate",
   value: number | null,
 ): string {
   if (value === null) return "text-foreground";
@@ -190,6 +192,25 @@ function getKpiValueColor(
       // a configured site that AI is essentially ignoring.
       if (value >= 0.2) return "text-success";
       if (value > 0 && value < 0.05) return "text-warning";
+      return "text-foreground";
+    case "net_sentiment":
+      // Signed integer count: positive_responses − negative_responses
+      // per snapshot (±0.1 neutral band excluded from both counts).
+      // Net positive → success; net negative → warning; ties stay
+      // neutral. Magnitude varies with response volume so we don't
+      // ladder by absolute threshold — direction is the signal.
+      if (value > 0) return "text-success";
+      if (value < 0) return "text-warning";
+      return "text-foreground";
+    case "top_result_rate":
+      // 0..1 — higher is better. Real-world range is lower than
+      // overall mention rate: top-of-mind first-rank share usually
+      // tops out around 30-40% even for dominant entities, since
+      // most answers list multiple peers. Softer ladder than
+      // mention_rate: green at ≥25% (strong top-of-mind), warning
+      // when AI essentially never leads with the subject (<5%).
+      if (value >= 0.25) return "text-success";
+      if (value < 0.05) return "text-warning";
       return "text-foreground";
   }
 }
@@ -365,21 +386,20 @@ function splitBottomLine(text: string): { title: string; body: string | null } {
 function BottomLineBlock({ text }: { text: string }) {
   const { title, body } = splitBottomLine(text);
   return (
-    // Hero-tier treatment — no left-border accent (kept reserved for
-    // the secondary Supporting Takeaways below), larger title (reads
-    // as the executive headline, distinct from the smaller takeaways
-    // beneath), and more breathing room above. text-wrap:balance
-    // splits the title evenly across lines instead of dropping a
-    // single word onto a second line.
-    <div className="mt-6">
+    // Vitals-tier treatment — verdict sentence sits between subject
+    // title and the KPI strip. text-wrap:balance splits the title
+    // evenly across lines instead of dropping a single word onto a
+    // second line. Topic-recall mini-bars moved out to Band 2 ("the
+    // gap") so the verdict reads as one beat, not two stacked beats.
+    <div className="mt-4">
       <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-primary">
         Bottom line
       </div>
-      <div className="mt-1.5 text-[19px] md:text-[21px] font-semibold leading-snug tracking-tight text-foreground [text-wrap:balance]">
+      <div className="mt-1.5 text-[17px] md:text-[18px] font-medium leading-[1.4] tracking-tight text-foreground [text-wrap:balance] max-w-[90%]">
         {title}
       </div>
       {body && (
-        <p className="mt-2 text-[14px] text-foreground/75 leading-relaxed [text-wrap:balance]">
+        <p className="mt-2 text-[14px] text-foreground/75 leading-relaxed [text-wrap:balance] max-w-[90%]">
           {body}
         </p>
       )}
@@ -387,103 +407,13 @@ function BottomLineBlock({ text }: { text: string }) {
   );
 }
 
-function DominantNarrativePanel({
-  clusters,
-}: {
-  clusters: SubjectOverview["narrative_clusters"];
-}) {
-  if (clusters.length === 0) {
-    return (
-      <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12 lg:pt-20">
-        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
-          Narrative mix
-        </div>
-        <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
-          Recurring AI framings — each bar is the share of responses
-          in that theme.
-        </p>
-        <p className="mt-3 text-[13px] text-foreground/55 leading-relaxed">
-          No narrative clustering available for this snapshot yet. Run the
-          cross-analyzer pass to populate this panel.
-        </p>
-      </div>
-    );
-  }
-  // Heuristic semantic coloring: negative-framing cluster names get the
-  // warning treatment so the panel reads as "this is a risk frame", not
-  // "this is just another bucket". Falls back to position-based opacity
-  // for clusters without obvious framing.
-  const isNegative = (name: string) =>
-    /polarizing|adversarial|criticism|controversy|risk|scandal/i.test(name);
-
-  return (
-    <div className="lg:col-span-2 lg:border-l lg:border-border/50 lg:pl-12 lg:pt-20">
-      {/* Renamed from "Dominant narrative" → "Narrative mix" + the
-          eyebrow is one notch smaller / lighter than the left-column
-          eyebrows so this panel reads as supporting context rather
-          than a competing focal point against the AI Narrative Brief.
-          The previous H2 that displayed {top.name} above the bars
-          was removed earlier — the same name appears as the first
-          bar at the same percentage, producing a literal duplication. */}
-      <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
-        Narrative mix
-      </div>
-      <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
-        Recurring AI framings — each bar is the share of responses
-        in that theme.
-      </p>
-
-      <ul className="mt-6 space-y-5">
-        {clusters.slice(0, 4).map((c, i) => {
-          // Bar width = absolute share (0..1 → 0..100%). The remaining
-          // track visually represents the share not covered by named
-          // clusters, which is intentional — clusters aren't required
-          // to sum to 100%.
-          const barWidth = c.share * 100;
-          const negative = isNegative(c.name);
-          // Lowered opacity ramp (was 1.0 / 0.75 / 0.55 / 0.45) so even
-          // the top bar reads as muted-blue rather than full primary —
-          // keeps the panel in a supporting-data register, not
-          // competing with the brief's primary-tinted eyebrows. Warning
-          // negatives still pop because they need to flag a risk frame.
-          const opacity =
-            i === 0 ? 0.6 : i === 1 ? 0.45 : i === 2 ? 0.3 : 0.2;
-          return (
-            <li key={c.name} title={c.description}>
-              <div className="flex items-center justify-between text-[12.5px] mb-1">
-                <span className="text-foreground/65">
-                  {c.name}
-                </span>
-                <span className="text-foreground/55 tabular-nums text-[11.5px]">
-                  {Math.round(c.share * 100)}%
-                </span>
-              </div>
-              <div className="relative h-1 w-full rounded-full bg-muted/80 overflow-hidden">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full"
-                  style={{
-                    width: `${barWidth}%`,
-                    background: negative ? "var(--warning)" : "var(--primary)",
-                    opacity: negative ? 0.75 : opacity,
-                  }}
-                />
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-// Per-topic mention rate as a horizontal bar list. Sorts strongest →
-// weakest; the lowest bar gets the warning accent so the gap reads as
-// the actionable signal — UNLESS there's no real gap (single topic,
-// or all topics tied at the same rate), in which case no bar gets the
-// warning treatment. Topics whose ai_recall is null (no scored
-// responses yet) drop out entirely rather than render as 0% — would
-// be misleading.
-function TopicRecallChart({
+// Compact per-topic mention-rate bars rendered directly under the
+// Bottom Line copy. Folded in from the standalone "Topic Recall"
+// section because the Bottom Line prose already cites these numbers —
+// the bars reinforce the sentence without claiming a separate
+// section. Same color tiers + weakest-topic warning treatment as the
+// old TopicRecallChart so visual semantics carry over.
+function TopicRecallInline({
   topics,
 }: {
   topics: SubjectOverview["topic_coverage"];
@@ -493,94 +423,242 @@ function TopicRecallChart({
     .slice()
     .sort((a, b) => (b.ai_recall ?? 0) - (a.ai_recall ?? 0));
   if (sorted.length === 0) return null;
-  // Use findWeakestTopic so the chart highlights the same topic as
-  // the Hero's Weakest Topic Recall tile subtitle on ties (first-wins).
-  // Prior implementation used sorted[length-1] which is last-wins —
-  // user-visible inconsistency on tied snapshots.
   const weakestTopic = findWeakestTopic(sorted);
-  // Only mark a bar as "weakest" when a real gap exists — skip the
-  // warning treatment entirely for single-topic snapshots or when
-  // every topic ties at the same rate. Float tolerance for the tie
-  // check (DB aggregation can produce micro-differences).
   const TIE_EPSILON = 0.001;
   const hasRealGap =
     sorted.length > 1 &&
     !sorted.every(
       (t) =>
-        Math.abs((t.ai_recall ?? 0) - (sorted[0].ai_recall ?? 0)) <
-        TIE_EPSILON,
+        Math.abs((t.ai_recall ?? 0) - (sorted[0].ai_recall ?? 0)) < TIE_EPSILON,
     );
   return (
-    <section>
-      <SectionTitle
-        eyebrow="Topic Recall"
-        title="Mention rate by topic in this snapshot"
-        description="Per-topic share of AI answers that mention this subject — sorted from strongest to weakest. The lowest bar is the largest visibility gap."
-        className="mb-4"
-      />
-      <Card className="p-5 md:p-6">
-        <div className="space-y-4">
-          {sorted.map((t) => {
-            const pct = Math.round((t.ai_recall ?? 0) * 100);
-            const isWeakest = hasRealGap && t === weakestTopic;
-            // Recall-tier coloring so a reader can spot strong
-            // vs gap topics at a glance without scanning the
-            // percent column:
-            //   ≥70% → success (green) — strong coverage
-            //   40-70% → primary (blue) — middle of the pack
-            //   <40% → warning (orange) — visibility gap
-            // The "weakest" flag forces warning on top of these
-            // tiers so the worst topic always reads as the gap
-            // even when its absolute rate sits above the warning
-            // threshold (e.g. all four topics at 80%+ — the
-            // weakest still deserves the warning treatment as a
-            // relative-to-set signal).
-            const tierColor =
-              pct >= 70
-                ? "var(--success)"
-                : pct >= 40
-                  ? "var(--primary)"
-                  : "var(--warning)";
-            const barColor = isWeakest ? "var(--warning)" : tierColor;
-            return (
-              <div
-                key={t.label}
-                className="grid grid-cols-[1fr_56px] items-center gap-x-4"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-baseline gap-2 mb-1.5">
-                    <span
-                      className="text-sm font-medium text-foreground/85 truncate"
-                      title={`${t.n_responses} prompt response${t.n_responses === 1 ? "" : "s"} for this topic`}
-                    >
-                      {capitalizeFirst(t.label)}
-                    </span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${pct}%`,
-                        background: barColor,
-                        // Value-derived opacity so a 100% bar reads
-                        // darker than a 50% bar — width alone wasn't
-                        // enough visual differentiation between
-                        // high- and mid-recall topics.
-                        opacity: isWeakest ? 0.75 : 0.4 + (pct / 100) * 0.45,
-                      }}
-                    />
-                  </div>
+    <div className="mt-5">
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-2.5">
+        Mention rate by topic
+      </div>
+      <div className="space-y-2.5">
+        {sorted.map((t) => {
+          const pct = Math.round((t.ai_recall ?? 0) * 100);
+          const isWeakest = hasRealGap && t === weakestTopic;
+          const tierColor =
+            pct >= 70
+              ? "var(--success)"
+              : pct >= 40
+                ? "var(--primary)"
+                : "var(--warning)";
+          const barColor = isWeakest ? "var(--warning)" : tierColor;
+          return (
+            <div
+              key={t.label}
+              className="grid grid-cols-[1fr_44px] items-center gap-x-3"
+            >
+              <div className="min-w-0">
+                <div className="text-[12px] text-foreground/80 truncate mb-1">
+                  {capitalizeFirst(t.label)}
                 </div>
-                <span className="text-sm font-semibold text-foreground tabular-nums text-right">
-                  {pct}%
-                </span>
+                <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${pct}%`,
+                      background: barColor,
+                      opacity: isWeakest ? 0.75 : 0.4 + (pct / 100) * 0.45,
+                    }}
+                  />
+                </div>
               </div>
-            );
-          })}
-        </div>
-      </Card>
-    </section>
+              <span className="text-[12px] font-semibold text-foreground tabular-nums text-right">
+                {pct}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
+}
+
+function CompetitiveSharePanel({
+  competitive,
+}: {
+  competitive: SubjectOverview["competitive"];
+}) {
+  if (competitive.length === 0) {
+    return (
+      <div className="lg:border-l lg:border-border/50 lg:pl-12 lg:pt-20">
+        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
+          Share of Voice (% of answers)
+        </div>
+        <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
+          % of answers mentioning each tracked entity.
+        </p>
+        <p className="mt-3 text-[13px] text-foreground/55 leading-relaxed">
+          No competitive entities tracked for this snapshot yet.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="lg:border-l lg:border-border/50 lg:pl-12 lg:pt-20">
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
+        Share of Voice (% of answers)
+      </div>
+      <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
+        % of answers mentioning each tracked entity.
+      </p>
+      <div className="mt-5">
+        <CompetitorBarsFromData
+          data={pickTopWithSubject(competitive, 5).map((c) => ({
+            name: c.name,
+            sov: c.sov,
+            is_subject: c.is_subject,
+          }))}
+          height={340}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Top-N by SoV with the subject always included. If the subject sits
+// outside the top N, drop the lowest-ranked non-subject row to make
+// room so the searched-for entity stays visible.
+function pickTopWithSubject(
+  rows: SubjectOverview["competitive"],
+  n: number,
+): SubjectOverview["competitive"] {
+  const sorted = rows.slice().sort((a, b) => b.sov - a.sov);
+  const top = sorted.slice(0, n);
+  if (top.some((c) => c.is_subject)) return top;
+  const subject = sorted.find((c) => c.is_subject);
+  if (!subject) return top;
+  return [...sorted.slice(0, n - 1), subject];
+}
+
+// Compact stat card matching the Vitals KPI tile language: small
+// muted eyebrow, large value, optional supporting line. Used in the
+// Competitive band's right column so the chart and the stats read
+// from the same visual family.
+function StatCard({
+  label,
+  value,
+  valueTone,
+  sub,
+  spark,
+}: {
+  label: string;
+  value: string;
+  valueTone?: "success" | "warning" | "neutral";
+  sub?: React.ReactNode;
+  spark?: React.ReactNode;
+}) {
+  const valueColor =
+    valueTone === "success"
+      ? "text-success"
+      : valueTone === "warning"
+        ? "text-warning"
+        : "text-foreground";
+  return (
+    <div className="rounded-md bg-muted/40 px-3.5 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+        {label}
+      </div>
+      <div className={`mt-1 text-[22px] font-medium tracking-tight tabular-nums ${valueColor}`}>
+        {value}
+      </div>
+      {spark && <div className="mt-1.5">{spark}</div>}
+      {sub && (
+        <div className="mt-0.5 text-[11.5px] text-foreground/60 leading-snug">
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Tiny inline sparkline for use inside a compact StatCard. Hand-
+// rolled SVG (no recharts) so it stays at ~22px tall without the
+// axis-label overhead MiniSpark carries. Skips null segments and
+// connects only adjacent finite points; renders nothing if there
+// aren't at least two finite values.
+function TinySpark({
+  values,
+  color = "var(--primary)",
+}: {
+  values: (number | null)[];
+  color?: string;
+}) {
+  const numeric = values.filter((v): v is number => v !== null && Number.isFinite(v));
+  if (numeric.length < 2) return null;
+  const min = Math.min(...numeric);
+  const max = Math.max(...numeric);
+  const range = max - min || 1;
+  const w = 120;
+  const h = 22;
+  const pad = 2;
+  const step = (w - pad * 2) / (values.length - 1);
+  const path: string[] = [];
+  let lastWasNull = false;
+  values.forEach((v, i) => {
+    if (v === null || !Number.isFinite(v)) {
+      lastWasNull = true;
+      return;
+    }
+    const x = pad + i * step;
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    path.push(path.length === 0 || lastWasNull ? `M${x},${y}` : `L${x},${y}`);
+    lastWasNull = false;
+  });
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      className="w-full h-[22px]"
+      aria-hidden
+    >
+      <path d={path.join(" ")} fill="none" stroke={color} strokeWidth={1.5} />
+    </svg>
+  );
+}
+
+// Derive the competitive position stats from the chart's own
+// data array. Returned values match exactly what the bars show
+// — same sort, same rounding rules — so the stack and the chart
+// can never drift out of sync.
+type CompetitivePositionStats = {
+  rank: number | null;
+  peerCount: number;
+  gapPp: number | null;
+  comparatorName: string | null;
+  isLeader: boolean;
+};
+function deriveCompetitivePosition(
+  rows: SubjectOverview["competitive"],
+): CompetitivePositionStats {
+  const sorted = rows.slice().sort((a, b) => b.sov - a.sov);
+  const peerCount = sorted.length;
+  const subjectIdx = sorted.findIndex((c) => c.is_subject);
+  if (subjectIdx === -1) {
+    return { rank: null, peerCount, gapPp: null, comparatorName: null, isLeader: false };
+  }
+  const rank = subjectIdx + 1;
+  const subject = sorted[subjectIdx];
+  const isLeader = rank === 1;
+  // Rank #1: compare downward against the runner-up so the stat
+  // reads "ahead of X by N pts" rather than the nonsensical
+  // "−0 pts behind myself". Otherwise compare upward to leader.
+  if (isLeader) {
+    const runnerUp = sorted[1];
+    if (!runnerUp) {
+      return { rank, peerCount, gapPp: null, comparatorName: null, isLeader };
+    }
+    const gapPp = Math.round((subject.sov - runnerUp.sov) * 100);
+    return { rank, peerCount, gapPp, comparatorName: runnerUp.name, isLeader };
+  }
+  const leader = sorted[0];
+  const gapPp = Math.round((subject.sov - leader.sov) * 100);
+  return { rank, peerCount, gapPp, comparatorName: leader.name, isLeader };
 }
 
 function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajectory"] }) {
@@ -592,7 +670,7 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
     // `kind` drives the conditional value coloring via getKpiValueColor.
     // Uses the same thresholds the Hero KPI tiles use, so the same
     // metric carries identical color semantics across both surfaces.
-    colorKind: "mention_rate" | "avg_tone" | "citation_rate";
+    colorKind: "mention_rate" | "avg_tone" | "top_result_rate";
   }[] = [
     {
       title: "AI Mention Rate",
@@ -605,15 +683,15 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
       title: "Average Tone",
       values: trajectory.avg_sentiment,
       format: (v) => formatTonePct(v),
-      tooltip: "Average tone of AI answers about this subject across each weekly snapshot. Range −100% (most negative) to +100% (most positive); 0% is neutral. Sustained shifts here reflect changes in how AI characterizes the subject — favorable or critical.",
+      tooltip: "Average tone — the mean sentiment score across all AI answers in this snapshot, weighted by intensity. Range −100% to +100%; 0% is neutral. Measures how favorably AI characterizes the subject when it does mention them.",
       colorKind: "avg_tone",
     },
     {
-      title: "Citation Rate (mentioning own site)",
-      values: trajectory.citation_rate,
+      title: "Top Result Rate",
+      values: trajectory.top_result_rate,
       format: (v) => formatPct(v, 0),
-      tooltip: "Share of AI answers that cite the subject's canonical website (e.g., campaign homepage or org domain), plotted across each weekly snapshot. Higher is better. Subjects without a canonical URL configured will show 0% throughout.",
-      colorKind: "citation_rate",
+      tooltip: "Share of AI answers where this subject is named FIRST among all entities mentioned. A top-of-mind signal. Distinct from Mention Rate (any mention, anywhere in the answer) — Top Result Rate measures whether AI leads with this subject when it lists entities.",
+      colorKind: "top_result_rate",
     },
   ];
 
@@ -633,7 +711,10 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
           ? "text-muted-foreground"
           : getKpiValueColor(m.colorKind, latestValue);
         return (
-          <Card key={m.title} className="p-5">
+          // Flat tile — no Card wrapper. Matches the page's flatter
+          // editorial register (Sources, Evidence section header).
+          // Visual separation comes from the grid gap, not borders.
+          <div key={m.title}>
             <div className="flex items-center justify-between gap-2">
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
                 {m.title}
@@ -651,25 +732,20 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
                 format={m.format}
               />
             </div>
-            <div className="mt-3 pt-3 border-t border-border text-xs text-foreground/70 leading-relaxed">
-              {notMeasured ? (
-                <>This metric isn&apos;t measured for this subject.</>
-              ) : (
-                <>
-                  {trajectory.weeks.length} weekly snapshot{trajectory.weeks.length === 1 ? "" : "s"};
-                  most recent is {formatRefreshKind(trajectory.is_historical[trajectory.is_historical.length - 1] ?? false)}.
-                </>
-              )}
-            </div>
-          </Card>
+            {/* Per-tile footer reserved for the "not measured" case
+                only — the section-level description already carries
+                the snapshot count + live/historical legend, so
+                repeating it three times across tiles was dead text. */}
+            {notMeasured && (
+              <div className="mt-3 pt-3 border-t border-border text-xs text-foreground/70 leading-relaxed">
+                This metric isn&apos;t measured for this subject.
+              </div>
+            )}
+          </div>
         );
       })}
     </div>
   );
-}
-
-function formatRefreshKind(isHistorical: boolean): string {
-  return isHistorical ? "an estimated retrospective" : "a live snapshot";
 }
 
 function MiniSpark({
@@ -701,9 +777,18 @@ function MiniSpark({
     );
   }
   if (numericValues.length < 2) {
+    // Single data point — render a dot at the value instead of a
+    // "need more snapshots" placeholder, which read as a broken tile
+    // when it sat beside two fully-rendered sparklines. The tile's
+    // headline value already carries the number; this just gives the
+    // chart area a non-empty visual + a count of how much data
+    // backs that value.
     return (
-      <div className="h-[120px] flex items-center justify-center text-[11px] text-muted-foreground">
-        Need more snapshots for a trend line
+      <div className="h-[120px] flex flex-col items-center justify-center gap-2 px-3">
+        <div className="h-1.5 w-1.5 rounded-full bg-primary" />
+        <div className="text-[11px] text-muted-foreground leading-relaxed text-center">
+          1 of {values.length} snapshots scored so far
+        </div>
       </div>
     );
   }
@@ -941,12 +1026,31 @@ function EvidenceCard({ card }: { card: SubjectOverview["evidence_cards"][number
 
   const frameAbsent =
     card.mention_status?.mentioned === false;
+  // Always render the Frame footer so the three cards line up
+  // even when the cross-analyzer didn't tag a frame on one quote.
+  // Previously we hid the row when null, which made one card
+  // visibly shorter than the others and read as a dropped field;
+  // the em-dash placeholder is honest about "no frame tagged"
+  // while keeping the cards structurally identical.
   const frameLabel = frameAbsent
     ? "Absent from answer"
-    : (card.frame_label || "—");
+    : card.frame_label && card.frame_label.trim() !== ""
+      ? card.frame_label
+      : "—";
+  const frameValueClass =
+    frameLabel === "—"
+      ? "text-foreground/40 font-medium"
+      : frameAbsent
+        ? "text-warning font-semibold"
+        : "text-foreground font-semibold";
 
   return (
-    <Card className="flex min-h-[160px] flex-col justify-between p-4">
+    // h-full lets the card fill the grid cell's row height (grid
+    // items default to align-self: stretch), so the three cards in
+    // the row come out equal-height even when their excerpts differ
+    // in length. The Frame footer below uses mt-auto to stay pinned
+    // to the bottom regardless of how short the body content is.
+    <Card className="flex h-full flex-col p-4">
       <div>
         {/* Top row: model name (left) + type/mention badge (right).
             Aligned identically across all cards via mb-3 spacing. */}
@@ -993,13 +1097,12 @@ function EvidenceCard({ card }: { card: SubjectOverview["evidence_cards"][number
         </p>
       </div>
 
-      {/* Bottom: frame label. Pushed to card bottom by parent
-          justify-between so all "Frame:" rows align across cards. */}
-      <div className="mt-4 pt-3 border-t border-border/60 text-xs font-medium text-foreground/70">
-        Frame:{" "}
-        <span className={frameAbsent ? "text-warning font-semibold" : "text-foreground font-semibold"}>
-          {frameLabel}
-        </span>
+      {/* Frame footer — always rendered (em-dash placeholder when
+          missing) so the three cards in a row align identically.
+          mt-auto pushes it to the bottom of the card regardless of
+          how much body content sits above it. */}
+      <div className="mt-auto pt-3 border-t border-border/60 text-xs font-medium text-foreground/70">
+        Frame: <span className={frameValueClass}>{frameLabel}</span>
       </div>
     </Card>
   );
@@ -1141,31 +1244,24 @@ export default async function SubjectOverviewPage({
   // when their data exists (Trends needs ≥2 trajectory weeks,
   // Evidence + Competition require non-empty payloads) — filter the
   // item list to match so the rail can't point at a missing anchor.
+  // Five-band narrative layout: Vitals → Gap → Competitive → Sources → Evidence.
+  // Band ids match the section ids below. Conditional bands (Gap needs at least
+  // one finite topic recall; Competitive needs at least one competitor row;
+  // Evidence needs at least one quote) drop out of both the nav and the page
+  // when their data is empty so the rail never points at a missing anchor.
   const overviewSectionNavItems: { id: string; label: string; num: string }[] = [];
-  overviewSectionNavItems.push({ id: "hero", label: "Overview", num: "01" });
-  if (data.evidence_cards.length > 0) {
+  overviewSectionNavItems.push({ id: "vitals", label: "Vitals", num: "01" });
+  if (data.topic_coverage.some(_hasFiniteRecall)) {
     overviewSectionNavItems.push({
-      id: "evidence",
-      label: "Evidence",
+      id: "gap",
+      label: "Gap",
       num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
     });
   }
-  if (data.trajectory.weeks.length >= 2) {
-    overviewSectionNavItems.push({
-      id: "trends",
-      label: "Trends",
-      num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
-    });
-  }
-  overviewSectionNavItems.push({
-    id: "topics",
-    label: "Topics",
-    num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
-  });
   if (data.competitive.length > 0) {
     overviewSectionNavItems.push({
-      id: "competition",
-      label: "Competition",
+      id: "competitive",
+      label: "Competitive",
       num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
     });
   }
@@ -1174,6 +1270,13 @@ export default async function SubjectOverviewPage({
     label: "Sources",
     num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
   });
+  if (data.evidence_cards.length > 0) {
+    overviewSectionNavItems.push({
+      id: "evidence",
+      label: "Evidence",
+      num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
+    });
+  }
 
   // Empty state: subject exists but has no completed refresh yet. The
   // normal page would render mostly empty cards and "—" values. Show
@@ -1195,7 +1298,7 @@ export default async function SubjectOverviewPage({
             backLabel="All subjects"
             refreshSlot={<RefreshButton subjectId={subjectId} />}
           />
-          <main className="flex-1 px-4 md:px-12 py-6 space-y-16 max-w-[1500px] w-full mx-auto">
+          <main className="flex-1 px-4 md:px-12 py-6 space-y-16 max-w-[1280px] w-full mx-auto">
             <Card className="relative overflow-hidden p-10 md:p-14 border-border/60">
               <div
                 className="absolute inset-0 pointer-events-none"
@@ -1268,19 +1371,28 @@ export default async function SubjectOverviewPage({
           refreshSlot={<RefreshButton subjectId={subjectId} />}
         />
 
-        <main className="flex-1 px-4 md:px-12 xl:pr-44 py-6 space-y-16 max-w-[1500px] w-full mx-auto">
-          {/* Filters slot intentionally not passed — the rail
-              shows just the Jump To nav on the Overview spoke. The
-              VisibilityTopicFilter / VisibilityPlatformFilter
-              dropdowns still live on every other spoke (Visibility,
-              Narrative, Competition, Prompts), so the global
-              ?topic= / ?platform= URL params are still settable
-              there and persist when the reader returns to Overview. */}
-          <OverviewSectionNav items={overviewSectionNavItems} />
+        {/* Horizontal sticky sub-nav pinned directly under the Header.
+            Replaces the prior right-rail OverviewSectionNav, which
+            forced every band to render in a ~80%-width grid column
+            and left an empty right gutter. With the sub-nav in the
+            header stack, the content area below can use the full
+            available width up to `max-w-[1280px]`. */}
+        <OverviewSubNav items={overviewSectionNavItems} />
 
-          {/* HERO */}
-          <section id="hero" className="scroll-mt-20">
-            <Card className="relative overflow-hidden p-6 md:p-8 border-border/60">
+        <main className="flex-1 px-4 md:px-12 py-6 max-w-[1280px] w-full mx-auto">
+          <div className="space-y-10 min-w-0">
+
+          {/* BAND 1 — VITALS. Executive summary: who, the verdict
+              sentence, and the three headline metrics in one card.
+              Replaces the old hero (which had absorbed SoV bars,
+              mention-rate-by-topic, takeaways, and the recommended
+              move into a single overloaded surface). The Visibility
+              Trends section that used to repeat the same three KPIs
+              below has been removed — its content moved here, and
+              the "Open Visibility deep-dive →" link sits in the
+              strip footer for readers who want the full breakdown. */}
+          <section id="vitals" className="scroll-mt-28">
+            <Card className="relative overflow-hidden p-6 md:p-7 border-border/60">
               <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
@@ -1288,150 +1400,312 @@ export default async function SubjectOverviewPage({
                     "linear-gradient(135deg, color-mix(in oklab, var(--primary) 5%, transparent) 0%, color-mix(in oklab, var(--primary) 1.5%, transparent) 35%, transparent 70%)",
                 }}
               />
-
-              <div className="relative grid lg:grid-cols-5 gap-8 lg:gap-12">
-                {/* LEFT: title + callouts. KPIs live below the grid
-                    as a full-width strip so the two columns can end
-                    at similar heights. */}
-                <div className="lg:col-span-3 flex flex-col">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-2">
-                    AI Narrative Brief
-                  </div>
-                  <h1 className="font-display text-[28px] md:text-[32px] font-semibold leading-[1.1] tracking-[-0.02em] text-foreground">
-                    {data.subject_name}
-                  </h1>
-                  {/* Generic subtitle paragraph removed — "How major
-                      AI platforms describe X across voter-facing and
-                      public-affairs prompts" was boilerplate that
-                      didn't earn its line. The Bottom Line below is
-                      the actual headline; surfacing it sooner makes
-                      the hero punchier. */}
-
-                  {/* Bottom Line — diagnostic finding. Visually
-                      parallels the Strongest Asset takeaway below
-                      (same eyebrow weight, left-border accent, bold
-                      title + regular body) so the two read as a
-                      coherent pair instead of competing treatments.
-                      Slightly larger type than Strongest Asset since
-                      this is the lead claim. */}
-                  {effectiveBottomLine && (
-                    <BottomLineBlock text={effectiveBottomLine} />
-                  )}
-
-                  {/* Supporting takeaways tier — visually subordinate
-                      to the Bottom Line above. Same content as before
-                      (Strongest Asset + Opposition Frame + Recommended
-                      Move), now grouped under a single muted divider
-                      with reduced type so the eye reads them as
-                      "supporting context" rather than co-equal headlines
-                      competing with the Bottom Line. The thin top
-                      border marks the visual tier transition without
-                      adding a heavy section header. message_gap is
-                      still filtered out since the Bottom Line surfaces
-                      the gap directly. */}
-                  {(data.strategic_takeaways.some(
-                    (i) => i.kind !== "message_gap",
-                  ) ||
-                    data.recommended_actions?.primary) && (
-                    <div className="mt-7 pt-5 border-t border-border/40 space-y-3.5">
-                      {data.strategic_takeaways
-                        .filter((item) => item.kind !== "message_gap")
-                        .map((item) => {
-                          const accent =
-                            item.tone === "warning" ? "border-l-warning"
-                            : item.tone === "primary" ? "border-l-primary"
-                            : "border-l-foreground/30";
-                          const eyebrowColor =
-                            item.tone === "warning" ? "text-warning"
-                            : item.tone === "primary" ? "text-primary"
-                            : "text-foreground/55";
-                          return (
-                            <div
-                              key={item.kind}
-                              className={`pl-3 border-l-2 ${accent}`}
-                            >
-                              <div
-                                className={`text-[10px] font-semibold uppercase tracking-[0.06em] ${eyebrowColor}`}
-                              >
-                                {item.eyebrow}
-                              </div>
-                              <div className="mt-0.5 text-[13px] font-semibold text-foreground leading-snug">
-                                {item.title}
-                              </div>
-                              <p className="mt-0.5 text-[12.5px] text-foreground/70 leading-relaxed">
-                                {item.body}
-                              </p>
-                            </div>
-                          );
-                        })}
-
-                      {/* Recommended Move — last in the supporting
-                          tier. Full action set + Regenerate controls
-                          live on the /recommendations spoke; this
-                          block surfaces just the primary action with
-                          a "View all" handoff when alternatives exist. */}
-                      {data.recommended_actions?.primary && (
-                        <div className="pl-3 border-l-2 border-l-primary">
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">
-                            Recommended move
-                          </div>
-                          <div className="mt-0.5 text-[13px] font-semibold text-foreground leading-snug">
-                            {data.recommended_actions.primary.action}
-                          </div>
-                          {data.recommended_actions.secondary.length > 0 && (
-                            <Link
-                              href={`/subjects/${subjectId}/recommendations`}
-                              className="mt-1.5 inline-flex items-center gap-1 text-[11.5px] font-medium text-primary hover:text-primary/80 transition-colors"
-                            >
-                              View all recommendations
-                              <ArrowRight className="h-3 w-3" aria-hidden />
-                            </Link>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Fallback when no Bottom Line could be synthesized */}
-                  {!effectiveBottomLine && (
-                    <div className="mt-6 rounded-md border border-dashed border-border/70 bg-muted/30 px-5 py-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/45">
-                        Executive summary
-                      </div>
-                      <p className="mt-1.5 text-[13px] text-foreground/55 leading-relaxed max-w-xl">
-                        Not enough signal in this snapshot to synthesize a
-                        bottom line yet. Take another snapshot or wait for
-                        more data to accumulate.
-                      </p>
-                    </div>
-                  )}
-
+              <div className="relative">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-1.5">
+                  AI Narrative Brief
                 </div>
+                <h1 className="font-display text-[22px] font-medium leading-[1.15] tracking-[-0.02em] text-foreground">
+                  {data.subject_name}
+                </h1>
 
-                {/* RIGHT: Dominant narrative — ranked clusters */}
-                <DominantNarrativePanel
-                  clusters={data.narrative_clusters}
-                />
+                {effectiveBottomLine && (
+                  <BottomLineBlock text={effectiveBottomLine} />
+                )}
+
+                {!effectiveBottomLine && (
+                  <div className="mt-4 rounded-md border border-dashed border-border/70 bg-muted/30 px-5 py-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/45">
+                      Executive summary
+                    </div>
+                    <p className="mt-1.5 text-[13px] text-foreground/55 leading-relaxed max-w-xl">
+                      Not enough signal in this snapshot to synthesize a
+                      bottom line yet. Take another snapshot or wait for
+                      more data to accumulate.
+                    </p>
+                  </div>
+                )}
+
+                {/* KPI strip — three time-series tiles. Same component
+                    that used to live in the standalone Visibility Trends
+                    section; moved here so vitals read together and the
+                    page doesn't repeat them twice. */}
+                {data.trajectory.weeks.length >= 1 && (
+                  <div className="mt-6 pt-5 border-t border-border/40">
+                    <TrajectoryStrip trajectory={data.trajectory} />
+                    {data.trajectory.weeks.length >= 2 && (
+                      <div className="mt-3 flex justify-end">
+                        <Link
+                          href={`/subjects/${subjectId}/visibility`}
+                          className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                        >
+                          Open Visibility deep-dive
+                          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              {/* HeroKpis tile strip retired — its four metrics
-                  (Unprompted mentions, Positive vs negative, Weakest
-                  topic visibility, % citing own site) all duplicated
-                  signals already shown below: AI Mention Rate /
-                  Average Tone / Citation Rate sparklines on the
-                  Visibility Trends strip and the weakest topic on
-                  the TopicRecallChart's warning-toned bar. */}
             </Card>
           </section>
 
-          {/* EVIDENCE — Phase 3c wiring */}
+          {/* BAND 2 — GAP & FIX. Problem and solution adjacent.
+              Left card: the topic-coverage gap (where AI under-
+              mentions the subject). Right card: the recommended
+              move that closes it. Pairs read as one editorial beat. */}
+          {(data.topic_coverage.some(_hasFiniteRecall) ||
+            data.recommended_actions?.primary) && (
+            <section id="gap" className="scroll-mt-28">
+              {/* 3-up: Gap (warning) → Strongest asset (success) → Fix (primary).
+                  The trio reads as one weakness ↔ strength ↔ action beat.
+                  Strongest asset was relocated here from the Competitive
+                  band so the Competitive band can be just chart + stats. */}
+              {(() => {
+                const strongestAsset = data.strategic_takeaways.find(
+                  (item) => item.kind === "strongest_asset",
+                );
+                return (
+                  <div className="grid md:grid-cols-3 gap-4">
+                    {/* The gap */}
+                    {data.topic_coverage.some(_hasFiniteRecall) && (
+                      <Card className="p-6 border-border/60">
+                        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-warning mb-3">
+                          The gap · mention rate by topic
+                        </div>
+                        <TopicRecallInline topics={data.topic_coverage} />
+                      </Card>
+                    )}
+
+                    {/* Strongest asset — success-toned to contrast the
+                        warning-toned gap card on its left. Renders the
+                        same title + body the takeaway carries; the
+                        eyebrow ("STRONGEST ASSET") is forced to the
+                        success color regardless of the takeaway's own
+                        tone field so this card always reads as the
+                        "what's working" beat in the trio. */}
+                    {strongestAsset && (
+                      <Card className="p-6 border-border/60">
+                        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-success mb-3">
+                          {strongestAsset.eyebrow}
+                        </div>
+                        <div className="text-[14px] font-medium text-foreground leading-snug">
+                          {strongestAsset.title}
+                        </div>
+                        <p className="mt-1.5 text-[12.5px] text-foreground/70 leading-relaxed">
+                          {strongestAsset.body}
+                        </p>
+                      </Card>
+                    )}
+
+                    {/* The fix. Primary-tinted card so it reads
+                        as the actionable callout. */}
+                    {data.recommended_actions?.primary && (
+                      <Card className="p-6 border border-primary/30 bg-primary/[0.04]">
+                        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-primary mb-3">
+                          The fix · recommended move
+                        </div>
+                        <div className="text-[14px] font-medium text-foreground leading-snug">
+                          {data.recommended_actions.primary.action}
+                        </div>
+                        {data.recommended_actions.secondary.length > 0 && (
+                          <Link
+                            href={`/subjects/${subjectId}/recommendations`}
+                            className="mt-3 inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                          >
+                            View all {1 + data.recommended_actions.secondary.length} recommendations
+                            <ArrowRight className="h-3 w-3" aria-hidden />
+                          </Link>
+                        )}
+                      </Card>
+                    )}
+                  </div>
+                );
+              })()}
+            </section>
+          )}
+
+          {/* BAND 3 — COMPETITIVE STANDING. SoV bars on the left,
+              competitive-position stat stack (rank, gap-to-leader,
+              SoV trend) on the right with a thin divider. Stats are
+              derived from the SAME data.competitive array that feeds
+              the chart, so the two surfaces can never disagree. */}
+          {data.competitive.length > 0 && (
+            <section id="competitive" className="scroll-mt-28">
+              <Card className="p-6 border-border/60">
+                <div className="grid lg:grid-cols-[1.4fr_1fr] gap-7 items-center">
+                  <div className="min-w-0">
+                    <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+                      Share of voice
+                    </div>
+                    {/* Subtitle declares the top-N truncation so the
+                        visible bar count and the "of N tracked entities"
+                        denominator in the stat stack on the right
+                        agree to the reader. Both numbers come from
+                        data.competitive.length — no hardcoded totals. */}
+                    <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
+                      {data.competitive.length > 5
+                        ? `Top 5 of ${data.competitive.length} tracked entities by share of voice.`
+                        : "% of answers mentioning each tracked entity."}
+                    </p>
+                    <div className="mt-4 max-w-[640px]">
+                      <CompetitorBarsFromData
+                        data={pickTopWithSubject(data.competitive, 5).map((c) => ({
+                          name: c.name,
+                          sov: c.sov,
+                          is_subject: c.is_subject,
+                        }))}
+                        height={280}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Competitive position stat stack — three cards that
+                      interpret the chart on the left. Rank and gap
+                      are derived from the SAME `data.competitive`
+                      array that feeds the bars (via deriveCompetitivePosition)
+                      so the chart and the stats can never drift.
+                      SoV trend pulls from trajectory.share_of_voice
+                      (the entity-pie share, the same definition the
+                      chart bars represent), not competitive[].sov,
+                      so the trend and the chart agree on what
+                      "share of voice" means.
+                      TODO: opposition_frame takeaway dropped from
+                      Overview in this restructure — surfaces on the
+                      Narrative spoke; revisit if a Band-2 fourth
+                      slot becomes warranted. */}
+                  {(() => {
+                    const stats = deriveCompetitivePosition(data.competitive);
+                    const sovSeries = data.trajectory.share_of_voice;
+                    const sovFinite = sovSeries.filter(
+                      (v): v is number => v !== null && Number.isFinite(v),
+                    );
+                    const latestSov =
+                      sovFinite.length > 0 ? sovFinite[sovFinite.length - 1] : null;
+                    const priorSov =
+                      sovFinite.length >= 2 ? sovFinite[sovFinite.length - 2] : null;
+                    const sovDeltaPp =
+                      latestSov !== null && priorSov !== null
+                        ? Math.round((latestSov - priorSov) * 100)
+                        : null;
+                    const trendCardEligible = sovFinite.length >= 2;
+                    return (
+                      <div className="lg:border-l lg:border-border/40 lg:pl-7 space-y-3.5">
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+                          Competitive position
+                        </div>
+
+                        {stats.rank !== null && (
+                          <StatCard
+                            label="Rank in peer set"
+                            value={`#${stats.rank}`}
+                            sub={
+                              <span>
+                                of{" "}
+                                <span className="tabular-nums">
+                                  {stats.peerCount}
+                                </span>{" "}
+                                tracked entities
+                              </span>
+                            }
+                          />
+                        )}
+
+                        {stats.gapPp !== null && (
+                          <StatCard
+                            label="Gap to leader"
+                            value={
+                              stats.isLeader
+                                ? stats.gapPp > 0
+                                  ? `+${stats.gapPp} pts`
+                                  : "Leads"
+                                : `${stats.gapPp} pts`
+                            }
+                            valueTone={
+                              stats.isLeader
+                                ? "success"
+                                : stats.gapPp < 0
+                                  ? "warning"
+                                  : "neutral"
+                            }
+                            sub={
+                              stats.isLeader
+                                ? stats.gapPp > 0 && stats.comparatorName
+                                  ? `ahead of ${stats.comparatorName}`
+                                  : "leads the field"
+                                : stats.comparatorName
+                                  ? `behind ${stats.comparatorName}`
+                                  : null
+                            }
+                          />
+                        )}
+
+                        {trendCardEligible && (
+                          <StatCard
+                            label="Share-of-voice trend"
+                            value={
+                              sovDeltaPp === null
+                                ? "—"
+                                : sovDeltaPp > 0
+                                  ? `+${sovDeltaPp} pts`
+                                  : `${sovDeltaPp} pts`
+                            }
+                            valueTone={
+                              sovDeltaPp === null
+                                ? "neutral"
+                                : sovDeltaPp > 0
+                                  ? "success"
+                                  : sovDeltaPp < 0
+                                    ? "warning"
+                                    : "neutral"
+                            }
+                            spark={<TinySpark values={sovSeries} />}
+                            sub="vs last snapshot"
+                          />
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </Card>
+            </section>
+          )}
+
+          {/* SOURCES — wired. No Card wrapper so the section reads
+              as flat editorial content, matching the Trends + Evidence
+              treatment above. */}
+          <section id="sources" className="scroll-mt-28">
+            {/* SectionTitle moved INSIDE the left column so the
+                donut chart on the right starts at the same vertical
+                line as the section heading + description text,
+                rather than below the table header. Both columns
+                now begin at the top of the grid row. */}
+            <div className="grid lg:grid-cols-3 gap-8 items-start">
+              <div className="lg:col-span-2">
+                <SectionTitle
+                  eyebrow="Sources"
+                  title="Sources shaping AI answers"
+                  description={`The publications and pages most often cited or paraphrased in AI responses about ${data.subject_name}.`}
+                />
+                <SourcesList sources={data.sources.slice(0, 5)} />
+              </div>
+              <SourcesTypeMix sources={data.sources} />
+            </div>
+          </section>
+
+          {/* EVIDENCE — moved to the bottom so the page closes with
+              concrete quotes after the headline / trend / source
+              context above. */}
           {data.evidence_cards.length > 0 && (
-            <section id="evidence" className="scroll-mt-20">
+            <section id="evidence" className="scroll-mt-28">
               <SectionTitle
                 eyebrow="Evidence"
                 title="What AI is actually saying"
-                description="Verbatim quotes selected by the top-quotes cross-analyzer from the latest snapshot. Each card shows the originating prompt, the AI's exact words, and the narrative cluster it falls under."
+                description="What AI is actually saying when people ask about this subject — real quotes from this week's check."
               />
-              <div className="grid md:grid-cols-3 gap-4">
+              {/* items-stretch (default in grid, made explicit) + the
+                  Card's h-full + mt-auto footer combine to equalize
+                  card heights even when excerpt lengths differ. */}
+              <div className="grid md:grid-cols-3 gap-4 items-stretch">
                 {data.evidence_cards.slice(0, 3).map((card, i) => (
                   <EvidenceCard
                     key={`${card.model_response_id}-${i}`}
@@ -1442,327 +1716,9 @@ export default async function SubjectOverviewPage({
             </section>
           )}
 
-          {/* VISIBILITY TRENDS — promoted out of its previous
-              position-after-Competitive slot to sit directly under
-              the hero. Reads as the natural follow-up to the
-              KPI strip's snapshot values: "here's where you are
-              right now (hero) → here's how the headline metrics
-              have moved (trends) → drill into specifics below."
-              SectionTitle's right slot carries a cross-link into
-              the Visibility deep-dive spoke for readers who want
-              the full per-platform / per-topic analysis. */}
-          {data.trajectory.weeks.length >= 2 && (
-            <section id="trends" className="scroll-mt-20">
-              <SectionTitle
-                eyebrow="Visibility Trends"
-                title="How visibility has shifted"
-                description={
-                  data.trajectory.weeks.length === 2
-                    ? "Early trend — 2 snapshots. Open circles are backfilled estimates; filled are real-time."
-                    : `Headline metrics across the last ${data.trajectory.weeks.length} snapshots. Open circles are backfilled estimates; filled are real-time.`
-                }
-                right={
-                  <Link
-                    href={`/subjects/${subjectId}/visibility`}
-                    className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-card px-3 py-1.5 text-[12.5px] font-medium text-foreground/85 transition-colors hover:border-primary/50 hover:bg-accent/40"
-                  >
-                    Open Visibility deep-dive
-                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-                  </Link>
-                }
-              />
-              <TrajectoryStrip trajectory={data.trajectory} />
-              {/* "What changed" footer — same pattern the Visibility
-                  + Competition spokes use. Surfaces the overall
-                  mention-rate delta + top 3 topic movers across the
-                  trend window so a reader sees movement at a glance
-                  without having to read the sparkline shapes. Logic
-                  inlined here (rather than imported from the
-                  Visibility spoke) to keep this page self-contained. */}
-              {(() => {
-                const weeks = data.trajectory.weeks;
-                const aiRecall = data.trajectory.ai_recall;
-                // First + last MEASURED indices across the visible
-                // window, not just last-two-snapshots. Lets the footer
-                // describe the chart's whole window without dropping
-                // when a backfill gap leaves one endpoint null.
-                const measuredEndpoints = (
-                  arr: (number | null)[],
-                ): [number, number] | null => {
-                  let first = -1;
-                  let last = -1;
-                  for (let i = 0; i < arr.length; i++) {
-                    const v = arr[i];
-                    if (v !== null && Number.isFinite(v)) {
-                      if (first === -1) first = i;
-                      last = i;
-                    }
-                  }
-                  return first !== -1 &&
-                    last !== -1 &&
-                    first !== last
-                    ? [first, last]
-                    : null;
-                };
-                const endpoints = measuredEndpoints(aiRecall);
-                const fmtDate = (iso: string | null): string | null => {
-                  if (!iso) return null;
-                  const d = new Date(iso);
-                  return Number.isNaN(d.getTime())
-                    ? null
-                    : d.toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      });
-                };
-                // Build delta list. Overall recall leads when present;
-                // topic movers follow, sorted by absolute magnitude
-                // desc, capped at top 3. Same 1pp overall / 5pp topic
-                // floors the Visibility spoke uses so micro-jitter
-                // doesn't surface.
-                type Delta = {
-                  label: string;
-                  deltaPp: number;
-                  kind: "overall" | "topic";
-                };
-                const deltas: Delta[] = [];
-                let latestIso: string | null = null;
-                let priorIso: string | null = null;
-                if (endpoints) {
-                  const [priorIdx, latestIdx] = endpoints;
-                  latestIso = weeks[latestIdx] ?? null;
-                  priorIso = weeks[priorIdx] ?? null;
-                  const cur = aiRecall[latestIdx];
-                  const pri = aiRecall[priorIdx];
-                  if (
-                    cur !== null &&
-                    pri !== null &&
-                    Number.isFinite(cur) &&
-                    Number.isFinite(pri)
-                  ) {
-                    const d = (cur as number) - (pri as number);
-                    if (Math.abs(d) >= 0.01) {
-                      deltas.push({
-                        label: "Overall mention rate",
-                        deltaPp: Math.round(d * 100),
-                        kind: "overall",
-                      });
-                    }
-                  }
-                  const topicMovers: Delta[] = [];
-                  for (const t of data.topic_trajectories) {
-                    const tEnds = measuredEndpoints(t.mention_rate);
-                    if (!tEnds) continue;
-                    const [pIdx, lIdx] = tEnds;
-                    const tc = t.mention_rate[lIdx];
-                    const tp = t.mention_rate[pIdx];
-                    if (
-                      tc === null ||
-                      tp === null ||
-                      !Number.isFinite(tc) ||
-                      !Number.isFinite(tp)
-                    )
-                      continue;
-                    const d = (tc as number) - (tp as number);
-                    if (Math.abs(d) < 0.05) continue;
-                    topicMovers.push({
-                      label: capitalizeFirst(t.label),
-                      deltaPp: Math.round(d * 100),
-                      kind: "topic",
-                    });
-                  }
-                  topicMovers.sort(
-                    (a, b) => Math.abs(b.deltaPp) - Math.abs(a.deltaPp),
-                  );
-                  deltas.push(...topicMovers.slice(0, 3));
-                }
-                const latestStr = fmtDate(latestIso);
-                const priorStr = fmtDate(priorIso);
-                const eyebrow =
-                  latestStr && priorStr
-                    ? `What changed · ${priorStr} → ${latestStr}`
-                    : latestStr
-                      ? `What changed · since ${latestStr}`
-                      : "What changed";
-                return (
-                  <div className="mt-8 border-t border-border/60 pt-5">
-                    <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
-                      {eyebrow}
-                    </div>
-                    {deltas.length > 0 ? (
-                      <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2.5">
-                        {deltas.map((d) => (
-                          <li
-                            key={`${d.kind}:${d.label}`}
-                            className="inline-flex max-w-full items-baseline gap-2"
-                          >
-                            <span
-                              className={`max-w-[260px] truncate text-[13px] ${
-                                d.kind === "overall"
-                                  ? "font-medium text-foreground"
-                                  : "text-foreground/80"
-                              }`}
-                              title={d.label}
-                            >
-                              {d.label}
-                            </span>
-                            <span
-                              className={`shrink-0 text-[13px] font-semibold tabular-nums ${
-                                d.deltaPp > 0
-                                  ? "text-success"
-                                  : d.deltaPp < 0
-                                    ? "text-warning"
-                                    : "text-foreground/65"
-                              }`}
-                            >
-                              {d.deltaPp === 0
-                                ? "0 pp"
-                                : `${d.deltaPp > 0 ? "+" : ""}${d.deltaPp} pp`}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="mt-3 text-[13px] leading-relaxed text-foreground/80">
-                        Headline metrics held steady across the trend
-                        window.
-                      </p>
-                    )}
-                  </div>
-                );
-              })()}
-            </section>
-          )}
-
-          {/* TOPIC RECALL — horizontal bar chart that surfaces the
-              per-topic mention rate distribution. Sits directly under
-              the hero card so the headline "weakest topic" tile is
-              immediately followed by the full ranking. The
-              audit-style topics table in Analysis Scope below
-              remains unchanged. Wrapped in <div id="topics"> so the
-              right-rail jump nav can target it without modifying
-              the inner TopicRecallChart component. */}
-          <div id="topics" className="scroll-mt-20">
-            <TopicRecallChart topics={data.topic_coverage} />
           </div>
 
-          {/* COMPETITIVE SNAPSHOT — Phase 4 wiring */}
-          {data.competitive.length > 0 && (
-            <section id="competition" className="scroll-mt-20">
-            <Card className="p-6">
-              <SectionTitle
-                eyebrow="Competitive Snapshot"
-                title={`How ${data.subject_name} compares to peers`}
-                description={`Share of voice and visibility against the top entities AI surfaces when asked about ${data.subject_name}'s topic areas. Pulled from unnamed-layer responses in this snapshot.`}
-                right={<Pill tone="primary">{data.competitive.length} entities tracked</Pill>}
-              />
-              <div className="grid md:grid-cols-2 gap-8">
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-foreground/65 mb-3">
-                    Share of Voice (% of answers)
-                  </div>
-                  {/* CompetitorBarsFromData expects sov as a 0..1
-                      fraction (its XAxis is domain={[0,1]} and the
-                      tickFormatter multiplies × 100 for the "%"
-                      ticks). Passing already-multiplied integers
-                      pushed the X-axis ceiling to 9000% — fixed by
-                      passing the raw fraction. Height matches the
-                      ~7-row table on the right so the two halves
-                      of the Snapshot card align bottom-to-bottom. */}
-                  <CompetitorBarsFromData
-                    data={data.competitive.map((c) => ({
-                      name: c.name,
-                      sov: c.sov,
-                      is_subject: c.is_subject,
-                    }))}
-                    height={320}
-                  />
-                </div>
-                <div>
-                  {/* No overflow-x-auto — table now fits cleanly with
-                      tightened padding. Long entity names truncate
-                      gracefully via min-w-0 + truncate on the entity
-                      cell rather than triggering a horizontal scroll. */}
-                  <table className="w-full text-sm table-fixed">
-                    <thead>
-                      <tr className="text-left text-[11px] uppercase tracking-wider text-foreground/65 border-b border-border">
-                        <th className="px-2 py-2 font-medium">Entity</th>
-                        <th className="px-2 py-2 font-medium text-right w-16">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            Share
-                            <KpiTooltipIcon text="Share of voice — the percentage of relevant AI responses where this entity is mentioned at all. Higher means the entity is consistently surfaced when AI answers questions about this subject's topic areas." />
-                          </span>
-                        </th>
-                        <th className="px-2 py-2 font-medium text-right w-20">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            Avg Pos
-                            <KpiTooltipIcon text="Average position when mentioned (1 = first entity named, 2 = second, etc.). Lower numbers mean AI tends to mention this entity earlier in its responses — a sign of prominence." />
-                          </span>
-                        </th>
-                        <th className="px-2 py-2 font-medium text-right w-24">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            First Mention
-                            <KpiTooltipIcon
-                              text="Share of responses where this entity is the first one named. A top-of-mind signal — high values mean AI consistently leads with this entity when discussing the subject's topic areas."
-                              align="right"
-                            />
-                          </span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.competitive.map((c) => (
-                        <tr
-                          key={c.name}
-                          className={`border-b border-border/60 ${
-                            c.is_subject ? "bg-primary/5" : "hover:bg-accent/40"
-                          } transition-colors`}
-                        >
-                          <td className="px-2 py-2.5">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className={`truncate ${c.is_subject ? "font-semibold" : "font-medium"}`}>
-                                {c.name}
-                              </span>
-                              {c.is_subject && <Pill tone="primary">You</Pill>}
-                            </div>
-                          </td>
-                          <td className="px-2 py-2.5 text-right font-mono">
-                            {Math.round(c.sov * 100)}%
-                          </td>
-                          <td className="px-2 py-2.5 text-right font-mono">
-                            {c.avg_rank !== null ? c.avg_rank.toFixed(1) : "—"}
-                          </td>
-                          <td className="px-2 py-2.5 text-right font-mono">
-                            {Math.round(c.first_mention_rate * 100)}%
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </Card>
-            </section>
-          )}
-
-          {/* SOURCES — wired */}
-          <section id="sources" className="scroll-mt-20">
-          <Card className="p-6">
-            <SectionTitle
-              eyebrow="Sources"
-              title="Sources shaping AI answers"
-              description={`The publications and pages most often cited or paraphrased in AI responses about ${data.subject_name}.`}
-            />
-            <div className="grid lg:grid-cols-3 gap-8 items-start">
-              <div className="lg:col-span-2">
-                <SourcesList sources={data.sources} />
-              </div>
-              <SourcesTypeMix sources={data.sources} />
-            </div>
-          </Card>
-          </section>
-
-          <footer className="pt-6 pb-8 border-t border-border/40">
+          <footer className="mt-12 pt-6 pb-8 border-t border-border/40">
             <p className="text-center text-[11.5px] text-foreground/70 leading-relaxed">
               Based on{" "}
               <span className="font-semibold text-foreground/80 tabular-nums">
