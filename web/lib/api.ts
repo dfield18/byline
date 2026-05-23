@@ -745,6 +745,13 @@ export type SubjectOverview = {
   };
   evidence_cards: {
     model_response_id: number;
+    // Carries the underlying prompt so the Overview Evidence card
+    // can lazy-fetch the full per-platform AI response via the
+    // existing /api/subjects/{id}/prompts/{promptId}/responses
+    // route — the cross-analyzer's quoted excerpt is often
+    // truncated mid-sentence, and the full response is what
+    // readers actually want when they click "Show full quote".
+    prompt_id: number;
     model_slug: string;
     slot: string;
     dimension: string;
@@ -766,10 +773,94 @@ export type SubjectOverview = {
   };
 };
 
-export const getSubjectOverview = (subjectId: number, weeks = 12) =>
-  apiGet<SubjectOverview>(
+// Defensive normalizer for the trajectory object. Every per-snapshot
+// series in `trajectory` is rendered by the Overview spoke's KPI
+// strip, sparklines, and stat stack via index-aligned lookups
+// against `trajectory.weeks` — so if any series array drifts out of
+// sync with `weeks.length` (a backend bug producing e.g. a 5-element
+// ai_recall while weeks has 6), the latest value silently binds to
+// the wrong date. This caps that failure mode at the API boundary:
+// any series shorter than weeks is left-padded with nulls (older
+// snapshots assumed missing); any series longer is right-truncated.
+// A console.warn surfaces the discrepancy in dev without breaking
+// the page in prod.
+//
+// Series enumerated explicitly (not via Object.keys) so new fields
+// added to the trajectory type don't silently bypass normalization
+// when the type changes — TypeScript will flag the missing entry
+// here on next build.
+function normalizeTrajectory(t: SubjectOverview["trajectory"]): SubjectOverview["trajectory"] {
+  const target = t.weeks.length;
+  const numericSeries = [
+    "ai_recall",
+    "avg_sentiment",
+    "risk_frame_rate",
+    "citation_rate",
+    "directional_lean",
+    "criticism_severity",
+    "certainty",
+    "net_sentiment",
+    "share_of_voice",
+    "top_result_rate",
+  ] as const;
+  const out = { ...t } as SubjectOverview["trajectory"] & Record<string, unknown>;
+  // refresh_ids + is_historical are non-nullable (number / boolean
+  // arrays). On mismatch we still align length but pad with sentinels
+  // (-1 for refresh_ids, false for is_historical) so downstream code
+  // doesn't have to handle undefined indices.
+  if (t.refresh_ids.length !== target) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        `trajectory.refresh_ids length mismatch (${t.refresh_ids.length} vs weeks ${target}); normalizing.`,
+      );
+    }
+    out.refresh_ids = padOrTruncate(t.refresh_ids, target, -1);
+  }
+  if (t.is_historical.length !== target) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        `trajectory.is_historical length mismatch (${t.is_historical.length} vs weeks ${target}); normalizing.`,
+      );
+    }
+    out.is_historical = padOrTruncate(t.is_historical, target, false);
+  }
+  for (const key of numericSeries) {
+    const series = t[key];
+    if (!Array.isArray(series)) continue;
+    if (series.length === target) continue;
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        `trajectory.${key} length mismatch (${series.length} vs weeks ${target}); normalizing.`,
+      );
+    }
+    out[key] = padOrTruncate(series, target, null);
+  }
+  return out as SubjectOverview["trajectory"];
+}
+
+// Force an array to `target` length: pad the FRONT with `fill` when
+// shorter (older snapshots assumed missing — keeps the newest
+// entries aligned to the right edge, matching how the UI reads
+// "latest = last index"); right-truncate when longer (drops newest
+// beyond what weeks covers — the alternative, dropping oldest,
+// would shift the latest value's date alignment).
+function padOrTruncate<T>(arr: T[], target: number, fill: T): T[] {
+  if (arr.length === target) return arr;
+  if (arr.length < target) {
+    return [...Array(target - arr.length).fill(fill), ...arr];
+  }
+  return arr.slice(arr.length - target);
+}
+
+export const getSubjectOverview = async (
+  subjectId: number,
+  weeks = 12,
+): Promise<SubjectOverview> => {
+  const raw = await apiGet<SubjectOverview>(
     `/api/subjects/${subjectId}/overview?weeks=${weeks}`,
   );
+  return { ...raw, trajectory: normalizeTrajectory(raw.trajectory) };
+};
 
 // Per-platform full response text for a single prompt on the
 // subject's latest completed refresh. Used by the Prompts spoke's

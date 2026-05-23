@@ -2323,10 +2323,16 @@ def _read_evidence_cards(
 
     # Bulk-fetch the source-response context for all the quoted
     # responses in one query: rendered prompt + layer + mention status.
+    # prompt_id pulled into the SELECT so each evidence card carries
+    # the prompt it came from — the Overview's Evidence card "Show
+    # full AI response" affordance uses it to lazy-fetch the full
+    # per-platform response text via the existing
+    # /api/subjects/{id}/prompts/{promptId}/responses route.
     cur.execute(
         """
         SELECT
           mr.id,
+          mr.prompt_id,
           mr.rendered_prompt,
           p.layer,
           sm.subject_mentioned,
@@ -2360,7 +2366,7 @@ def _read_evidence_cards(
         mr_id = q.get("model_response_id")
         if not isinstance(mr_id, int) or mr_id not in by_id:
             continue
-        _, rendered_prompt, layer, mentioned, rank = by_id[mr_id]
+        _, prompt_id, rendered_prompt, layer, mentioned, rank = by_id[mr_id]
 
         prompt_key = (rendered_prompt or "").strip().lower()
         if prompt_key in seen_prompts:
@@ -2380,6 +2386,7 @@ def _read_evidence_cards(
 
         cards.append({
             "model_response_id": mr_id,
+            "prompt_id": prompt_id,
             "model_slug": q.get("model_slug", "?"),
             "slot": q.get("slot", ""),
             "dimension": q.get("dimension", ""),

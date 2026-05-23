@@ -19,6 +19,14 @@ import {
 import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { OverviewSubNav } from "./OverviewSubNav";
+import { EvidenceExcerpt } from "./EvidenceExcerpt";
+import type { IconType } from "react-icons";
+import {
+  SiOpenai,
+  SiAnthropic,
+  SiGooglegemini,
+  SiPerplexity,
+} from "react-icons/si";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
@@ -223,7 +231,17 @@ function getKpiValueColor(
 function _hasFiniteRecall(
   t: SubjectOverview["topic_coverage"][number],
 ): boolean {
-  return t.ai_recall !== null && Number.isFinite(t.ai_recall);
+  // n_responses > 0 is the load-bearing check: the backend can
+  // return topic rows with {n_responses: 0, ai_recall: 0} when a
+  // topic is configured but no responses have scored it yet. A
+  // finite ai_recall isn't enough — a 0% bar in the Gap card
+  // reads as "AI never mentions this topic" when the truth is "we
+  // haven't measured this topic yet". Both conditions must hold.
+  return (
+    t.n_responses > 0 &&
+    t.ai_recall !== null &&
+    Number.isFinite(t.ai_recall)
+  );
 }
 
 // Lowest-recall topic in this snapshot, or null when no topic has a
@@ -277,6 +295,24 @@ function buildGapBottomLine(
   ) {
     return null;
   }
+  // If the weakest's rate ties with at least one OTHER topic
+  // (within TIE_EPSILON), there's no unambiguous "weakest" to
+  // name — findWeakestTopic's choice depends on backend insertion
+  // order in topic_coverage, so the named topic in the verdict
+  // could shift snapshot-to-snapshot without the data actually
+  // changing. Defer to the server bottom_line in that case so a
+  // tied-for-weakest situation doesn't produce flicker.
+  const weakestIsTied = others.some(
+    (t) =>
+      Math.abs((t.ai_recall ?? 0) - (weakest.ai_recall ?? 0)) <
+      TIE_EPSILON,
+  );
+  if (weakestIsTied) return null;
+  // Guard against an empty/whitespace weakest label — without it,
+  // the verdict prints as "...but only 50% on ." (bare period with
+  // a trailing space) which reads as a render bug. Defer to the
+  // server bottom_line when topic labels are missing data.
+  if (!weakest.label || !weakest.label.trim()) return null;
   const weakestPct = Math.round((weakest.ai_recall ?? 0) * 100);
 
   // Plain-English phrasing structured so the strong-coverage half
@@ -291,13 +327,31 @@ function buildGapBottomLine(
   // visually distinct.
   if (others.length === 1) {
     const other = others[0];
+    // Same empty-label guard for the comparator topic.
+    if (!other.label || !other.label.trim()) return null;
     const otherPct = Math.round((other.ai_recall ?? 0) * 100);
+    // Skip the verdict when rounding collapses the two sides of the
+    // contrast to the same number — sentence would read "in N%...
+    // but only N% on Y" which contradicts itself visually even when
+    // a real (sub-rounding) gap exists. Server bottom_line takes
+    // over via the gapBottomLine ?? data.bottom_line fallback.
+    if (otherPct === weakestPct) return null;
     return `AI mentions ${subjectName} in ${otherPct}% of answers about ${other.label} — but only ${weakestPct}% on ${weakest.label}.`;
   }
 
+  // Filter empty/whitespace labels out of the comparator before
+  // building the list — without this, "...about A, , and C" or
+  // similar misformatted strings would land in the verdict when
+  // even one other topic has a blank label. mean stays computed
+  // from ALL others (the numeric signal is still valid; only the
+  // naming is unreliable).
+  const namedOthers = others.filter((t) => t.label && t.label.trim());
+  if (namedOthers.length === 0) return null;
   const meanOthersPct = Math.round(
     (others.reduce((sum, t) => sum + (t.ai_recall ?? 0), 0) / others.length) * 100,
   );
+  // Same rounding-collapse guard for the multi-other case.
+  if (meanOthersPct === weakestPct) return null;
   // Comparator phrasing tries to name the topics inline so a reader
   // knows what the baseline contains. Topic labels can run long
   // ("figures shaping the current Republican administration"), so a
@@ -306,7 +360,7 @@ function buildGapBottomLine(
   // inline; bucket longer ones into "and N more". Fall back to a
   // pure count when nothing's short enough, or when there are too
   // many total to list cleanly.
-  const comparator = formatComparator(others.map((t) => t.label));
+  const comparator = formatComparator(namedOthers.map((t) => t.label));
   // When formatComparator returns "N other tracked topics" (too
   // many labels to name inline cleanly), rephrase to "every other
   // tracked topic" — the digit prefix reads awkwardly after the
@@ -429,6 +483,97 @@ function hasRealVisibilityGap(
   );
 }
 
+// Shared row used by both the Gap card (TopicRecallInline) and the
+// Strongest Asset card (StrongestTopicsList). Keeps the two cards
+// visually parallel — same row dimensions, same label/bar/percent
+// treatment — so they only differ in sort direction and which row
+// gets the highlight override.
+//
+// `highlight` semantics:
+//   "weakest" → force warning tone at higher opacity (Gap card)
+//   "strongest" → force success tone at higher opacity (Asset card)
+//   null → use natural tier color (success ≥70 / primary ≥40 / warning)
+function TopicBarRow({
+  label,
+  pct,
+  highlight,
+  tone,
+}: {
+  label: string;
+  pct: number;
+  highlight: "weakest" | "strongest" | null;
+  // Optional explicit semantic tone for the bar — takes precedence
+  // over `highlight` when set. Used by the Top Narratives card
+  // where each cluster's bar should reflect its mean SENTIMENT
+  // (favorable / critical / neutral), not its position in the
+  // sort. Leave undefined for the Gap card to keep the existing
+  // highlight + tier-color behavior.
+  tone?: "success" | "warning" | "neutral";
+}) {
+  const tierColor =
+    pct >= 70
+      ? "var(--success)"
+      : pct >= 40
+        ? "var(--primary)"
+        : "var(--warning)";
+  const toneColor =
+    tone === "success"
+      ? "var(--success)"
+      : tone === "warning"
+        ? "var(--warning)"
+        : tone === "neutral"
+          ? "var(--primary)"
+          : null;
+  const barColor =
+    toneColor ??
+    (highlight === "weakest"
+      ? "var(--warning)"
+      : highlight === "strongest"
+        ? "var(--success)"
+        : tierColor);
+  // When an explicit tone is set OR a highlight is active, render
+  // at consistent opacity (0.85) so the bar carries its semantic
+  // signal cleanly. Otherwise fall back to the value-derived
+  // opacity ramp so a 100% bar reads darker than a 50% one.
+  const opacity =
+    tone !== undefined || highlight !== null
+      ? 0.85
+      : 0.4 + (pct / 100) * 0.45;
+  return (
+    <div className="grid grid-cols-[1fr_44px] items-center gap-x-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 text-[12px] text-foreground/80 mb-1">
+          {/* Sentiment dot — colorblind-friendly tone indicator
+              that pairs with the bar color. Only rendered when an
+              explicit tone is set (i.e. narrative-cluster context),
+              so the Gap card rows aren't visually crowded. */}
+          {toneColor && (
+            <span
+              aria-hidden
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ background: toneColor }}
+            />
+          )}
+          <span className="truncate">{capitalizeFirst(label)}</span>
+        </div>
+        <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${pct}%`,
+              background: barColor,
+              opacity,
+            }}
+          />
+        </div>
+      </div>
+      <span className="text-[12px] font-semibold text-foreground tabular-nums text-right">
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
 function TopicRecallInline({
   topics,
 }: {
@@ -454,41 +599,105 @@ function TopicRecallInline({
       <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-2.5">
         Mention rate by topic
       </div>
+      {(() => {
+        // When multiple topics tie for weakest (within TIE_EPSILON),
+        // highlight ALL of them in warning tone rather than singling
+        // out one based on backend insertion order. Without this,
+        // the orange override would flicker between tied bars
+        // snapshot-to-snapshot even though the underlying data
+        // didn't change.
+        const weakestRate = weakestTopic?.ai_recall ?? null;
+        const isAtWeakestRate = (t: typeof sorted[number]) =>
+          weakestRate !== null &&
+          Math.abs((t.ai_recall ?? 0) - weakestRate) < TIE_EPSILON;
+        return (
+          <div className="space-y-2.5">
+            {sorted.map((t) => (
+              <TopicBarRow
+                key={t.label}
+                label={t.label}
+                pct={Math.round((t.ai_recall ?? 0) * 100)}
+                highlight={
+                  hasRealGap && isAtWeakestRate(t) ? "weakest" : null
+                }
+              />
+            ))}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// Strongest-asset companion to TopicRecallInline. Sorts topics
+// descending and shows the top entries (the ones at the ceiling
+// tier — ≥70% — capped at 4 rows so the card doesn't dominate).
+// Mirrors the Gap card's row format exactly via the shared
+// TopicBarRow component; only differs in sort direction (descending)
+// and which row gets the highlight override (the strongest, in
+// success). Renders nothing when there isn't a clear strongest
+// (all topics tie within TIE_EPSILON or there are no topics at all).
+// Top narrative clusters list for the Band 2 middle card. Replaces
+// the prior StrongestTopicsList, which duplicated the same per-
+// topic mention rates that the Gap card on its left already shows
+// — same data, opposite sort. The narrative clusters surface a
+// genuinely different dimension: the AI's RECURRING FRAMINGS
+// (e.g. "Progressive Policy Advocate", "Foreign Policy Critique")
+// and how often they appear, rather than which topics generated
+// the responses. Visually parallels the Gap card via the shared
+// TopicBarRow component — same row layout, label + bar + %.
+// Top row gets the success-tone highlight to anchor the card as
+// the "what AI is saying" beat in Band 2.
+function TopNarrativesList({
+  clusters,
+}: {
+  clusters: SubjectOverview["narrative_clusters"];
+}) {
+  const sorted = clusters
+    .slice()
+    .sort((a, b) => b.share - a.share)
+    .slice(0, 4);
+  if (sorted.length === 0) return null;
+  return (
+    <div className="mt-4">
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-2.5">
+        Cluster share of responses
+      </div>
       <div className="space-y-2.5">
-        {sorted.map((t) => {
-          const pct = Math.round((t.ai_recall ?? 0) * 100);
-          const isWeakest = hasRealGap && t === weakestTopic;
-          const tierColor =
-            pct >= 70
-              ? "var(--success)"
-              : pct >= 40
-                ? "var(--primary)"
-                : "var(--warning)";
-          const barColor = isWeakest ? "var(--warning)" : tierColor;
+        {sorted.map((c) => {
+          // Clamp share to [0, 1] before converting to a percentage —
+          // defensive against backend float round-off that could
+          // produce tiny negatives, or model math glitches that
+          // would push a cluster's share above 100% (cluster
+          // overlap double-counting, etc). Without this, the bar
+          // width can overflow its track or render visually broken.
+          const safeShare = Math.max(0, Math.min(1, c.share));
+          // Tone the bar by the cluster's mean sentiment (not by
+          // share rank). Resolves the "Adversarial Critique" bar
+          // painted the same green as "Progressive Champion" — the
+          // share alone tells the reader WHAT framings dominate
+          // but not WHETHER each is favorable or critical. ±0.1
+          // neutral band matches the same threshold the backend
+          // uses to compute net_sentiment counts, so the bar
+          // coloring agrees with how the analyzer classified each
+          // response. Null sentiment_mean → neutral (no
+          // responses scored).
+          const tone: "success" | "warning" | "neutral" =
+            c.sentiment_mean === null
+              ? "neutral"
+              : c.sentiment_mean > 0.1
+                ? "success"
+                : c.sentiment_mean < -0.1
+                  ? "warning"
+                  : "neutral";
           return (
-            <div
-              key={t.label}
-              className="grid grid-cols-[1fr_44px] items-center gap-x-3"
-            >
-              <div className="min-w-0">
-                <div className="text-[12px] text-foreground/80 truncate mb-1">
-                  {capitalizeFirst(t.label)}
-                </div>
-                <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${pct}%`,
-                      background: barColor,
-                      opacity: isWeakest ? 0.75 : 0.4 + (pct / 100) * 0.45,
-                    }}
-                  />
-                </div>
-              </div>
-              <span className="text-[12px] font-semibold text-foreground tabular-nums text-right">
-                {pct}%
-              </span>
-            </div>
+            <TopicBarRow
+              key={c.name}
+              label={c.name}
+              pct={Math.round(safeShare * 100)}
+              highlight={null}
+              tone={tone}
+            />
           );
         })}
       </div>
@@ -529,7 +738,12 @@ function CompetitiveSharePanel({
         <CompetitorBarsFromData
           data={pickTopWithSubject(competitive, 5).map((c) => ({
             name: c.name,
-            sov: c.sov,
+            // Defensive floor at 0: float arithmetic in the backend
+            // can occasionally produce tiny negatives (e.g.
+            // −1e−16) from subtraction round-off. The chart
+            // computes bar width from this value, so a negative
+            // would render visually broken.
+            sov: Math.max(0, c.sov),
             is_subject: c.is_subject,
           }))}
           height={340}
@@ -539,9 +753,16 @@ function CompetitiveSharePanel({
   );
 }
 
-// Top-N by SoV with the subject always included. If the subject sits
-// outside the top N, drop the lowest-ranked non-subject row to make
+// Top-N by SoV with the subject force-included when they're outside
+// the natural top N. Drops the lowest-ranked non-subject row to make
 // room so the searched-for entity stays visible.
+//
+// Exception: when the subject's SoV is zero (or negligibly small),
+// force-inserting them displaces a peer that actually has data with
+// a bar that renders as an empty highlighted track — looks like a
+// broken row to the reader. In that case we keep the natural top N
+// and let the Competitive Position stat stack carry the "subject
+// not yet mentioned" signal via its rank/gap cards instead.
 function pickTopWithSubject(
   rows: SubjectOverview["competitive"],
   n: number,
@@ -551,6 +772,10 @@ function pickTopWithSubject(
   if (top.some((c) => c.is_subject)) return top;
   const subject = sorted.find((c) => c.is_subject);
   if (!subject) return top;
+  // Don't displace a peer with real data with an empty-bar subject.
+  // Epsilon-bound rather than strict > 0 so float round-off can't
+  // sneak a "0.0000001 mention" subject into the chart.
+  if (subject.sov < SOV_TIE_EPSILON) return top;
   return [...sorted.slice(0, n - 1), subject];
 }
 
@@ -609,9 +834,19 @@ function TinySpark({
 }) {
   const numeric = values.filter((v): v is number => v !== null && Number.isFinite(v));
   if (numeric.length < 2) return null;
-  const min = Math.min(...numeric);
-  const max = Math.max(...numeric);
-  const range = max - min || 1;
+  // Asymmetric padding to match MiniSpark (40% below, 15% above)
+  // so the line never grazes the chart floor. TinySpark has no
+  // axis labels so the misread is less load-bearing than on the
+  // KPI sparklines, but the visual treatment should be consistent
+  // across the page — a flat line at the bottom edge of one
+  // sparkline reads differently than the same flat line floating
+  // mid-chart elsewhere.
+  const dataMin = Math.min(...numeric);
+  const dataMax = Math.max(...numeric);
+  const rawRange = dataMax - dataMin || 1;
+  const plotMin = dataMin - rawRange * 0.4;
+  const plotMax = dataMax + rawRange * 0.15;
+  const range = plotMax - plotMin || 1;
   const w = 120;
   const h = 22;
   const pad = 2;
@@ -624,7 +859,7 @@ function TinySpark({
       return;
     }
     const x = pad + i * step;
-    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    const y = h - pad - ((v - plotMin) / range) * (h - pad * 2);
     path.push(path.length === 0 || lastWasNull ? `M${x},${y}` : `L${x},${y}`);
     lastWasNull = false;
   });
@@ -650,7 +885,19 @@ type CompetitivePositionStats = {
   gapPp: number | null;
   comparatorName: string | null;
   isLeader: boolean;
+  // True when the subject's SoV ties (within SOV_TIE_EPSILON) with
+  // the entity immediately above them in the sort. Surfaced as
+  // "Tied for #N" in the rank stat so a reader doesn't see "#2 of
+  // 7" when the data actually shows two entities at the same SoV
+  // — the displayed rank would otherwise depend on insertion order
+  // in data.competitive and could shift snapshot to snapshot
+  // without the underlying data changing.
+  rankIsTied: boolean;
 };
+// 0..1 float epsilon for SoV equality. Matches the spirit of the
+// TIE_EPSILON used in topic-recall comparisons — DB aggregation
+// can produce micro-differences that aren't real signal.
+const SOV_TIE_EPSILON = 0.001;
 function deriveCompetitivePosition(
   rows: SubjectOverview["competitive"],
 ): CompetitivePositionStats {
@@ -658,25 +905,64 @@ function deriveCompetitivePosition(
   const peerCount = sorted.length;
   const subjectIdx = sorted.findIndex((c) => c.is_subject);
   if (subjectIdx === -1) {
-    return { rank: null, peerCount, gapPp: null, comparatorName: null, isLeader: false };
+    return {
+      rank: null,
+      peerCount,
+      gapPp: null,
+      comparatorName: null,
+      isLeader: false,
+      rankIsTied: false,
+    };
   }
   const rank = subjectIdx + 1;
   const subject = sorted[subjectIdx];
   const isLeader = rank === 1;
+  // Tie detection: subject's rank is "tied" when ANY adjacent
+  // entity in the sort has the same SoV. Check both directions so
+  // the leader case ("tied with the next entity below") and the
+  // non-leader case ("tied with the entity at this rank") both
+  // surface — without it the rank stat reads as a hard #N when
+  // the underlying data is ambiguous.
+  const above = subjectIdx > 0 ? sorted[subjectIdx - 1] : null;
+  const below = subjectIdx < sorted.length - 1 ? sorted[subjectIdx + 1] : null;
+  const rankIsTied =
+    (above !== null && Math.abs(above.sov - subject.sov) < SOV_TIE_EPSILON) ||
+    (below !== null && Math.abs(below.sov - subject.sov) < SOV_TIE_EPSILON);
   // Rank #1: compare downward against the runner-up so the stat
   // reads "ahead of X by N pts" rather than the nonsensical
   // "−0 pts behind myself". Otherwise compare upward to leader.
   if (isLeader) {
     const runnerUp = sorted[1];
     if (!runnerUp) {
-      return { rank, peerCount, gapPp: null, comparatorName: null, isLeader };
+      return {
+        rank,
+        peerCount,
+        gapPp: null,
+        comparatorName: null,
+        isLeader,
+        rankIsTied,
+      };
     }
     const gapPp = Math.round((subject.sov - runnerUp.sov) * 100);
-    return { rank, peerCount, gapPp, comparatorName: runnerUp.name, isLeader };
+    return {
+      rank,
+      peerCount,
+      gapPp,
+      comparatorName: runnerUp.name,
+      isLeader,
+      rankIsTied,
+    };
   }
   const leader = sorted[0];
   const gapPp = Math.round((subject.sov - leader.sov) * 100);
-  return { rank, peerCount, gapPp, comparatorName: leader.name, isLeader };
+  return {
+    rank,
+    peerCount,
+    gapPp,
+    comparatorName: leader.name,
+    isLeader,
+    rankIsTied,
+  };
 }
 
 function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajectory"] }) {
@@ -726,22 +1012,21 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
     <div className="grid md:grid-cols-3 gap-8 items-stretch">
       {metrics.map((m) => {
         const latestValue = m.values[m.values.length - 1] ?? null;
-        // Prior value = most recent finite value BEFORE the latest
-        // snapshot. Scanned right-to-left from index length-2 so a
-        // backfill gap immediately before the latest doesn't kill
-        // the delta — we fall through to the nearest measured
-        // predecessor.
-        let priorValue: number | null = null;
-        for (let i = m.values.length - 2; i >= 0; i--) {
-          const v = m.values[i];
-          if (v !== null && Number.isFinite(v)) {
-            priorValue = v;
-            break;
-          }
-        }
-        // Delta in percentage points. All three KPIs are on the
-        // ±1 / 0..1 scale (mention_rate, top_result_rate are 0..1;
-        // avg_tone is −1..+1), so multiplying by 100 yields pp
+        // Prior value = the IMMEDIATELY preceding snapshot only.
+        // Previously we scanned right-to-left through nulls to find
+        // the nearest finite predecessor, which produced a misleading
+        // "vs previous snapshot" delta when the actual preceding
+        // snapshot was a backfill gap (the delta would silently span
+        // 2+ snapshots). When the immediate predecessor isn't measured,
+        // we now show no delta at all — the label can't lie.
+        const rawPrior = m.values[m.values.length - 2];
+        const priorValue =
+          rawPrior !== null && rawPrior !== undefined && Number.isFinite(rawPrior)
+            ? rawPrior
+            : null;
+        // Delta in points. All three KPIs are on the ±1 / 0..1
+        // scale (mention_rate, top_result_rate are 0..1; avg_tone
+        // is −1..+1), so multiplying by 100 yields point deltas
         // consistently. Null when one endpoint is missing.
         const deltaPp =
           latestValue !== null &&
@@ -807,11 +1092,11 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
                         ? "text-warning"
                         : "text-muted-foreground"
                   }`}
-                  aria-label={`Change vs previous snapshot: ${deltaPp > 0 ? "up" : deltaPp < 0 ? "down" : "no change"} ${Math.abs(deltaPp)} percentage points`}
+                  aria-label={`Change vs previous snapshot: ${deltaPp > 0 ? "up" : deltaPp < 0 ? "down" : "no change"} ${Math.abs(deltaPp)} points`}
                   title="vs previous snapshot"
                 >
                   {deltaPp > 0 ? "↑" : deltaPp < 0 ? "↓" : ""}
-                  {Math.abs(deltaPp)} pp
+                  {Math.abs(deltaPp)} pts
                 </span>
               )}
             </div>
@@ -833,6 +1118,55 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
               </div>
             )}
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Per-platform mention-rate chip strip rendered under the Vitals
+// KPI sparklines. Each chip = one LLM platform with its mention
+// rate, color-toned by the same getKpiValueColor(mention_rate)
+// thresholds the cross-platform KPI value uses (≥50% success,
+// <20% warning, else neutral). Surfaces whether the headline
+// mention rate is universal or driven by a single platform —
+// otherwise indistinguishable to a reader of the Vitals KPI.
+// Hidden when only one platform is tracked (the per-platform
+// breakdown carries no extra signal vs the cross-platform
+// average) or when no platforms are returned.
+function PlatformBreakdownStrip({
+  platforms,
+}: {
+  platforms: SubjectOverview["platform_recall"];
+}) {
+  if (!platforms || platforms.length <= 1) return null;
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+        Mention rate by platform
+      </span>
+      {platforms.map((p) => {
+        const pct =
+          p.value === null || !Number.isFinite(p.value)
+            ? null
+            : Math.round(p.value * 100);
+        const valueColor =
+          pct === null ? "text-muted-foreground" : getKpiValueColor("mention_rate", p.value);
+        return (
+          <span
+            key={p.name}
+            className="inline-flex items-baseline gap-1.5 text-[12px] text-foreground/75 tabular-nums"
+            title={
+              p.n_responses
+                ? `${p.n_responses} response${p.n_responses === 1 ? "" : "s"} scored on ${p.name}`
+                : undefined
+            }
+          >
+            <span className="text-foreground/65">{p.name}</span>
+            <span className={`font-semibold ${valueColor}`}>
+              {pct === null ? "—" : `${pct}%`}
+            </span>
+          </span>
         );
       })}
     </div>
@@ -1091,7 +1425,27 @@ const MODEL_DISPLAY: Record<string, string> = {
   perplexity: "Perplexity",
 };
 
-function EvidenceCard({ card }: { card: SubjectOverview["evidence_cards"][number] }) {
+// Brand-mark icons via react-icons/si (CC0 simple-icons set) —
+// same package the landing page's "Platforms monitored" strip
+// uses, so the Evidence card now reads with the actual platform
+// glyph next to its name instead of a colored dot. Icons render
+// with currentColor so the muted-foreground treatment matches
+// the surrounding text rather than introducing brand-color
+// noise into the card.
+const MODEL_ICON: Record<string, IconType> = {
+  chatgpt: SiOpenai,
+  gemini: SiGooglegemini,
+  claude: SiAnthropic,
+  perplexity: SiPerplexity,
+};
+
+function EvidenceCard({
+  card,
+  subjectId,
+}: {
+  card: SubjectOverview["evidence_cards"][number];
+  subjectId: number;
+}) {
   // Unnamed-layer cards show the Mentioned/Not-mentioned badge;
   // named-layer cards show the quote type badge instead (mention
   // status is meaningless when the subject is in the prompt itself).
@@ -1157,16 +1511,36 @@ function EvidenceCard({ card }: { card: SubjectOverview["evidence_cards"][number
     // to the bottom regardless of how short the body content is.
     <Card className="flex h-full flex-col p-4">
       <div>
-        {/* Top row: model name (left) + type/mention badge (right).
-            Aligned identically across all cards via mb-3 spacing. */}
+        {/* Top row: model brand icon + name (left), type/mention
+            badge (right). Aligned identically across all cards via
+            mb-3 spacing. Icon is the platform's actual brand mark
+            (SiOpenai / SiGooglegemini / SiAnthropic / SiPerplexity
+            via react-icons/si), matching the landing page's
+            "Platforms monitored" strip — replaces the prior colored
+            dot which carried less identity signal. */}
         <div className="flex items-center justify-between gap-2 mb-3">
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
-            <span
-              className="h-1.5 w-1.5 rounded-full"
-              style={{ backgroundColor: MODEL_COLORS[MODEL_DISPLAY[card.model_slug]] || "var(--muted-foreground)" }}
-            />
-            {MODEL_DISPLAY[card.model_slug] || card.model_slug}
-          </span>
+          {(() => {
+            const Icon = MODEL_ICON[card.model_slug];
+            return (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
+                {Icon ? (
+                  <Icon
+                    className="h-3.5 w-3.5 text-foreground/70"
+                    aria-hidden
+                  />
+                ) : (
+                  // Fallback to the colored dot only when a slug
+                  // doesn't have a brand mark in MODEL_ICON yet
+                  // (new platforms added in future).
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: MODEL_COLORS[MODEL_DISPLAY[card.model_slug]] || "var(--muted-foreground)" }}
+                  />
+                )}
+                {MODEL_DISPLAY[card.model_slug] || card.model_slug}
+              </span>
+            );
+          })()}
           {pillNode}
         </div>
 
@@ -1191,15 +1565,19 @@ function EvidenceCard({ card }: { card: SubjectOverview["evidence_cards"][number
           &ldquo;{card.prompt_text}&rdquo;
         </div>
 
-        {/* AI's actual quote / paraphrased excerpt. line-clamp-4 keeps
-            cards visually even regardless of underlying excerpt length;
-            full text is in the rationale tooltip on hover. */}
-        <p
-          className="line-clamp-4 text-sm leading-relaxed text-foreground/80"
-          title={card.rationale}
-        >
-          {card.excerpt}
-        </p>
+        {/* AI's actual quote / paraphrased excerpt. Collapsed to
+            ~4 lines by default; users can click "Show full quote"
+            to reveal the rest (or click the truncated text itself).
+            Cards stay roughly equal-height in the collapsed state;
+            expanded cards grow taller — readers self-select which
+            quotes they want the full text of. */}
+        <EvidenceExcerpt
+          excerpt={card.excerpt}
+          rationale={card.rationale}
+          subjectId={subjectId}
+          promptId={card.prompt_id}
+          modelSlug={card.model_slug}
+        />
       </div>
 
       {/* Frame footer — always rendered (em-dash placeholder when
@@ -1541,6 +1919,20 @@ export default async function SubjectOverviewPage({
                 {data.trajectory.weeks.length >= 1 && (
                   <div className="mt-6 pt-5 border-t border-border/40">
                     <TrajectoryStrip trajectory={data.trajectory} />
+                    {/* Per-platform mention-rate strip — answers
+                        "is the verdict above driven by one platform
+                        or universal?" The Vitals KPIs are
+                        cross-platform averages; without this row a
+                        reader can't tell if a 90% Mention Rate is
+                        90% on ChatGPT + 90% on Gemini, or 100% on
+                        ChatGPT + 80% on Gemini. Reads from
+                        data.platform_recall (already on
+                        SubjectOverview). Each chip color-tones the
+                        rate by the same mention_rate thresholds the
+                        KPI value uses so the semantics match. */}
+                    <PlatformBreakdownStrip
+                      platforms={data.platform_recall}
+                    />
                     {data.trajectory.weeks.length >= 2 && (
                       <div className="mt-3 flex justify-end">
                         <Link
@@ -1570,9 +1962,6 @@ export default async function SubjectOverviewPage({
                   Strongest asset was relocated here from the Competitive
                   band so the Competitive band can be just chart + stats. */}
               {(() => {
-                const strongestAsset = data.strategic_takeaways.find(
-                  (item) => item.kind === "strongest_asset",
-                );
                 // items-stretch + h-full on each Card equalize the
                 // three cards' heights regardless of content length
                 // (the Gap card grows with topic rows; the others
@@ -1616,24 +2005,56 @@ export default async function SubjectOverviewPage({
                       );
                     })()}
 
-                    {/* Strongest asset — success-toned to contrast the
-                        warning-toned gap card on its left. Renders the
-                        same title + body the takeaway carries; the
-                        eyebrow ("STRONGEST ASSET") is forced to the
-                        success color regardless of the takeaway's own
-                        tone field so this card always reads as the
-                        "what's working" beat in the trio. */}
-                    {strongestAsset && (
+                    {/* Top narratives — replaces the prior "Strongest
+                        asset" content. The asset card showed a
+                        ranked list of top topics, which duplicated
+                        the data the Gap card on its left already
+                        renders (same topics, same mention rates,
+                        just opposite sort + opposite highlight). This
+                        card now surfaces a different dimension: the
+                        recurring AI framings (narrative clusters) and
+                        how often each appears across responses. Uses
+                        the shared TopicBarRow so the visual unit
+                        matches the Gap card exactly — only the data
+                        is different. */}
+                    {data.narrative_clusters.length > 0 && (
                       <Card className="flex h-full flex-col p-6 border-border/60">
-                        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-success mb-3">
-                          {strongestAsset.eyebrow}
+                        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-primary mb-3">
+                          Top narratives
                         </div>
-                        <div className="text-[14px] font-medium text-foreground leading-snug">
-                          {strongestAsset.title}
-                        </div>
-                        <p className="mt-1.5 text-[12.5px] text-foreground/70 leading-relaxed">
-                          {strongestAsset.body}
+                        <p className="text-[12.5px] text-foreground/70 leading-relaxed">
+                          Recurring AI framings of {data.subject_name}.
                         </p>
+                        <TopNarrativesList clusters={data.narrative_clusters} />
+                        {/* Shares are independent per cluster — a
+                            response can be tagged with multiple
+                            framings, or none — so they don't
+                            necessarily sum to 100%. Without this
+                            note a reader who totals the bars and
+                            finds 87% (or 110%) thinks the data is
+                            broken. */}
+                        <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
+                          Each share is independent; clusters may overlap, so the bars don&apos;t have to sum to 100%.
+                        </p>
+                        {/* Color legend pairs with the sentiment-toned
+                            bars + dots so the meaning of the colors
+                            doesn't have to be guessed. Kept terse —
+                            the eye picks up "green = favorable,
+                            orange = critical" in one glance. */}
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-1">
+                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--success)" }} />
+                            Favorable
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--primary)" }} />
+                            Neutral
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--warning)" }} />
+                            Critical
+                          </span>
+                        </div>
                       </Card>
                     )}
 
@@ -1677,21 +2098,36 @@ export default async function SubjectOverviewPage({
                     <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
                       Share of voice
                     </div>
-                    {/* Subtitle declares the top-N truncation so the
-                        visible bar count and the "of N tracked entities"
-                        denominator in the stat stack on the right
-                        agree to the reader. Both numbers come from
-                        data.competitive.length — no hardcoded totals. */}
+                    {/* Plain-language definition: who AI mentions
+                        most often when answering about this subject's
+                        topic areas. Defines "share of voice" inline
+                        so non-technical readers (the executive
+                        audience for this brief) don't need to know
+                        the marketing term — the sentence itself
+                        carries the meaning. The top-N truncation
+                        note appended only when applicable; both
+                        numbers come from data.competitive.length so
+                        bars + stat denominator + caption stay in
+                        sync. */}
                     <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
-                      {data.competitive.length > 5
-                        ? `Top 5 of ${data.competitive.length} tracked entities by share of voice.`
-                        : "% of answers mentioning each tracked entity."}
+                      How often each entity gets named in AI answers
+                      about {data.subject_name}&apos;s topic areas —
+                      a measure of who&apos;s dominating AI&apos;s
+                      coverage.
+                      {data.competitive.length > 5 && (
+                        <>
+                          {" "}Showing top 5 of {data.competitive.length} tracked entities.
+                        </>
+                      )}
                     </p>
                     <div className="mt-4 max-w-[640px]">
                       <CompetitorBarsFromData
                         data={pickTopWithSubject(data.competitive, 5).map((c) => ({
                           name: c.name,
-                          sov: c.sov,
+                          // Defensive floor at 0 — see CompetitiveSharePanel
+                          // comment for the rationale (float round-off
+                          // can produce tiny negatives).
+                          sov: Math.max(0, c.sov),
                           is_subject: c.is_subject,
                         }))}
                         height={280}
@@ -1716,18 +2152,37 @@ export default async function SubjectOverviewPage({
                   {(() => {
                     const stats = deriveCompetitivePosition(data.competitive);
                     const sovSeries = data.trajectory.share_of_voice;
-                    const sovFinite = sovSeries.filter(
-                      (v): v is number => v !== null && Number.isFinite(v),
-                    );
+                    // Trend uses the IMMEDIATELY preceding snapshot
+                    // only, not the most recent finite predecessor.
+                    // "vs last snapshot" in the sub-line should mean
+                    // "literally the snapshot before this one" — if
+                    // that snapshot has a backfill gap, we hide the
+                    // delta rather than silently span 2+ snapshots.
+                    // (Sparkline still renders the full series with
+                    // gap-aware path construction.)
+                    const rawLatestSov = sovSeries[sovSeries.length - 1];
+                    const rawPriorSov = sovSeries[sovSeries.length - 2];
                     const latestSov =
-                      sovFinite.length > 0 ? sovFinite[sovFinite.length - 1] : null;
+                      rawLatestSov !== null &&
+                      rawLatestSov !== undefined &&
+                      Number.isFinite(rawLatestSov)
+                        ? rawLatestSov
+                        : null;
                     const priorSov =
-                      sovFinite.length >= 2 ? sovFinite[sovFinite.length - 2] : null;
+                      rawPriorSov !== null &&
+                      rawPriorSov !== undefined &&
+                      Number.isFinite(rawPriorSov)
+                        ? rawPriorSov
+                        : null;
                     const sovDeltaPp =
                       latestSov !== null && priorSov !== null
                         ? Math.round((latestSov - priorSov) * 100)
                         : null;
-                    const trendCardEligible = sovFinite.length >= 2;
+                    // Card eligible when we can compute the trend
+                    // against the immediate predecessor. If only one
+                    // snapshot exists, or the predecessor isn't
+                    // measured, hide the card (rather than show "—").
+                    const trendCardEligible = sovDeltaPp !== null;
                     return (
                       <div className="lg:border-l lg:border-border/40 lg:pl-7 space-y-3.5">
                         <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
@@ -1737,7 +2192,18 @@ export default async function SubjectOverviewPage({
                         {stats.rank !== null && (
                           <StatCard
                             label="Rank in peer set"
-                            value={`#${stats.rank}`}
+                            // Tied case shows "Tied for #N" so a
+                            // reader doesn't see a hard rank when
+                            // the underlying SoV values are equal —
+                            // the displayed rank would otherwise
+                            // shift snapshot-to-snapshot based on
+                            // backend insertion order without the
+                            // data actually changing.
+                            value={
+                              stats.rankIsTied
+                                ? `Tied #${stats.rank}`
+                                : `#${stats.rank}`
+                            }
                             sub={
                               <span>
                                 of{" "}
@@ -1792,9 +2258,25 @@ export default async function SubjectOverviewPage({
                             />
                           )}
 
+                        {/* Renamed from "Share-of-voice trend" to
+                            disambiguate from the bar chart on the
+                            left. Two different definitions both
+                            colloquially called "share of voice":
+                              - Chart bars = competitive[].sov =
+                                subject_mentions / total_responses
+                                (a mention RATE).
+                              - This trend = trajectory.share_of_voice
+                                = subject_mentions / (subject +
+                                competitor mentions) (a pie SLICE of
+                                the tracked entities).
+                            Calling them both "share of voice" let a
+                            careful reader compute the bar's value
+                            and find it doesn't match this delta.
+                            "Entity-mix share" makes the denominator
+                            explicit in the label. */}
                         {trendCardEligible && (
                           <StatCard
-                            label="Share-of-voice trend"
+                            label="Entity-mix share trend"
                             value={
                               sovDeltaPp === null
                                 ? "—"
@@ -1812,7 +2294,7 @@ export default async function SubjectOverviewPage({
                                     : "neutral"
                             }
                             spark={<TinySpark values={sovSeries} />}
-                            sub="vs last snapshot"
+                            sub={`vs prior snapshot · subject's slice of all tracked-entity mentions`}
                           />
                         )}
                       </div>
@@ -1863,6 +2345,7 @@ export default async function SubjectOverviewPage({
                   <EvidenceCard
                     key={`${card.model_response_id}-${i}`}
                     card={card}
+                    subjectId={subjectId}
                   />
                 ))}
               </div>
