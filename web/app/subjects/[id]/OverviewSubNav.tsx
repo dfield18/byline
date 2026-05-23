@@ -21,6 +21,13 @@ type Item = { id: string; label: string; num: string };
 
 export function OverviewSubNav({ items }: { items: Item[] }) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Stable content-derived key so the IntersectionObserver only
+  // reattaches when the set of observed band ids ACTUALLY changes,
+  // not on every parent render that produces a fresh `items` array
+  // reference. Without this, the observer was tearing down +
+  // rebuilding on every Overview re-render even though the bands
+  // hadn't changed — minor perf, but free to fix.
+  const itemsKey = items.map((i) => i.id).join("|");
 
   useEffect(() => {
     const observed: HTMLElement[] = [];
@@ -43,6 +50,12 @@ export function OverviewSubNav({ items }: { items: Item[] }) {
         threshold: [0, 0.25, 0.5, 0.75, 1],
       },
     );
+    // itemsKey carries the same ids as `items`; reading `items`
+    // here is correct since it's the snapshot the observer was
+    // wired up against. ESLint exhaustive-deps may complain about
+    // missing `items` in the dep array — the content-stable key
+    // is the intentional dep, and items is referenced for the
+    // current snapshot.
     for (const item of items) {
       const el = document.getElementById(item.id);
       if (el) {
@@ -54,7 +67,8 @@ export function OverviewSubNav({ items }: { items: Item[] }) {
       for (const el of observed) observer.unobserve(el);
       observer.disconnect();
     };
-  }, [items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemsKey]);
 
   return (
     <nav

@@ -68,7 +68,14 @@ function deriveInitials(name: string): string {
 // Format helpers — keep all KPI formatting consistent across the page
 function formatPct(v: number | null, digits = 0): string {
   if (v === null) return "—";
-  return `${(v * 100).toFixed(digits)}%`;
+  // Clamp at 100%. The underlying fields (mention_rate,
+  // top_result_rate, share_of_voice, citation_rate) are all
+  // bounded fractions in 0..1; anything above that is a backend
+  // bug, and rendering "120%" would imply we don't trust our own
+  // numbers. Floor at 0 too for symmetry with the chart-side
+  // defensive guards.
+  const clamped = Math.max(0, Math.min(1, v));
+  return `${(clamped * 100).toFixed(digits)}%`;
 }
 
 // Uppercase only the first character. Used for topic labels which are
@@ -94,7 +101,11 @@ function formatTonePct(
   includeDirection = true,
 ): string {
   if (v === null) return "—";
-  const pct = v * 100;
+  // Clamp at ±1 — avg_sentiment is bounded in −1..+1 by definition;
+  // anything beyond is a backend bug, and displaying "+150% positive"
+  // would imply we don't trust our own scale.
+  const clamped = Math.max(-1, Math.min(1, v));
+  const pct = clamped * 100;
   if (Math.abs(pct) < 0.5) return "Neutral";
   const sign = pct > 0 ? "+" : "−";
   const base = `${sign}${Math.abs(pct).toFixed(digits)}%`;
@@ -169,8 +180,15 @@ function getKpiValueColor(
       // ±0.2 threshold left mild-negative values like −13% reading as
       // neutral-black while the change indicator next to them already
       // showed warning orange — visually inconsistent.
-      if (value > 0.005) return "text-success";
-      if (value < -0.005) return "text-warning";
+      //
+      // Inclusive ≥/≤ at the 0.005 boundary so the color flips at the
+      // exact same threshold formatTonePct uses (`Math.abs(pct) < 0.5`
+      // → "Neutral", anything else is "positive"/"negative"). With
+      // strict > the boundary value of 0.005 displayed as "+1%
+      // positive" but kept the neutral color — minor inconsistency
+      // but real.
+      if (value >= 0.005) return "text-success";
+      if (value <= -0.005) return "text-warning";
       return "text-foreground";
     case "risk_frame_rate":
       // 0..1 — lower is better
@@ -616,7 +634,7 @@ function TopicRecallInline({
               <TopicBarRow
                 key={t.label}
                 label={t.label}
-                pct={Math.round((t.ai_recall ?? 0) * 100)}
+                pct={Math.min(100, Math.round((t.ai_recall ?? 0) * 100))}
                 highlight={
                   hasRealGap && isAtWeakestRate(t) ? "weakest" : null
                 }
@@ -662,7 +680,13 @@ function TopNarrativesList({
           // would push a cluster's share above 100% (cluster
           // overlap double-counting, etc). Without this, the bar
           // width can overflow its track or render visually broken.
-          const safeShare = Math.max(0, Math.min(1, c.share));
+          // Finite check before clamp — Math.min/max propagate NaN,
+          // so a backend regression producing NaN share would land
+          // as a "NaN%" bar width without this guard. Same defensive
+          // pattern as CompetitorBarsFromData's sov guard.
+          const safeShare = Number.isFinite(c.share)
+            ? Math.max(0, Math.min(1, c.share))
+            : 0;
           // Tone the bar by the cluster's mean sentiment (not by
           // share rank). Resolves the "Adversarial Critique" bar
           // painted the same green as "Progressive Champion" — the
@@ -673,12 +697,18 @@ function TopNarrativesList({
           // coloring agrees with how the analyzer classified each
           // response. Null sentiment_mean → neutral (no
           // responses scored).
+          // Inclusive boundaries at ±0.1 so a cluster whose mean
+          // lands exactly on 0.1 (or −0.1) gets the matching tone
+          // rather than being silently rounded into neutral. Edge
+          // case but real: sentiment_mean is the bare mean of
+          // response scores, which on small clusters can resolve
+          // to exact 0.1.
           const tone: "success" | "warning" | "neutral" =
             c.sentiment_mean === null
               ? "neutral"
-              : c.sentiment_mean > 0.1
+              : c.sentiment_mean >= 0.1
                 ? "success"
-                : c.sentiment_mean < -0.1
+                : c.sentiment_mean <= -0.1
                   ? "warning"
                   : "neutral";
           return (
@@ -729,12 +759,15 @@ function CompetitiveSharePanel({
         <CompetitorBarsFromData
           data={pickTopWithSubject(competitive, 5).map((c) => ({
             name: c.name,
-            // Defensive floor at 0: float arithmetic in the backend
-            // can occasionally produce tiny negatives (e.g.
-            // −1e−16) from subtraction round-off. The chart
-            // computes bar width from this value, so a negative
-            // would render visually broken.
-            sov: Math.max(0, c.sov),
+            // Defensive: coerce non-finite values (NaN, Infinity)
+            // to 0 AND floor any tiny negatives from float round-off.
+            // Backend float arithmetic can produce −1e−16 from
+            // subtraction; analyzer bugs could also produce NaN
+            // (0/0 mention rate) or Infinity. The chart computes
+            // bar width from this value, so without the guard
+            // either would render visually broken ("NaN%" /
+            // negative width).
+            sov: Number.isFinite(c.sov) ? Math.max(0, c.sov) : 0,
             is_subject: c.is_subject,
           }))}
           height={340}
@@ -876,23 +909,38 @@ type CompetitivePositionStats = {
   gapPp: number | null;
   comparatorName: string | null;
   isLeader: boolean;
-  // True when the subject's SoV ties (within SOV_TIE_EPSILON) with
-  // the entity immediately above them in the sort. Surfaced as
-  // "Tied for #N" in the rank stat so a reader doesn't see "#2 of
-  // 7" when the data actually shows two entities at the same SoV
-  // — the displayed rank would otherwise depend on insertion order
-  // in data.competitive and could shift snapshot to snapshot
-  // without the underlying data changing.
+  // True when the subject's SoV rounds to within 0pp of an
+  // adjacent entity. Surfaced as "Tied #N" in the rank stat so a
+  // reader doesn't see "#2 of 7" when the data actually shows two
+  // entities at the same displayed SoV — the displayed rank would
+  // otherwise depend on insertion order in data.competitive and
+  // could shift snapshot to snapshot without the underlying data
+  // changing. Critically, this uses the SAME rounded-pp comparison
+  // that drives the gap value, so the rank label ("Lead over
+  // runner-up" / "Gap to leader") and the gap value ("Tied with X"
+  // / "+N pts") can never contradict.
   rankIsTied: boolean;
 };
-// 0..1 float epsilon for SoV equality. Matches the spirit of the
-// TIE_EPSILON used in topic-recall comparisons — DB aggregation
-// can produce micro-differences that aren't real signal.
+// 0..1 float epsilon retained for pickTopWithSubject (where the
+// chart-side check happens BEFORE rounding to pp, since the bar
+// chart's visual indicator of "subject has SoV worth showing"
+// should not depend on display-precision rounding). Tie detection
+// inside deriveCompetitivePosition uses a per-call rounded check
+// keyed to the display unit (pp) for consistency with the gap
+// value.
 const SOV_TIE_EPSILON = 0.001;
 function deriveCompetitivePosition(
   rows: SubjectOverview["competitive"],
 ): CompetitivePositionStats {
-  const sorted = rows.slice().sort((a, b) => b.sov - a.sov);
+  // Coerce non-finite SoVs to 0 before sort + arithmetic. The chart
+  // already does this at its input boundary; doing it here too
+  // keeps the stat stack from rendering "NaN pts" / "Infinity pts"
+  // on a backend regression that produces NaN (0/0) or Infinity.
+  const safeRows = rows.map((c) => ({
+    ...c,
+    sov: Number.isFinite(c.sov) ? c.sov : 0,
+  }));
+  const sorted = safeRows.slice().sort((a, b) => b.sov - a.sov);
   const peerCount = sorted.length;
   const subjectIdx = sorted.findIndex((c) => c.is_subject);
   if (subjectIdx === -1) {
@@ -908,17 +956,21 @@ function deriveCompetitivePosition(
   const rank = subjectIdx + 1;
   const subject = sorted[subjectIdx];
   const isLeader = rank === 1;
-  // Tie detection: subject's rank is "tied" when ANY adjacent
-  // entity in the sort has the same SoV. Check both directions so
-  // the leader case ("tied with the next entity below") and the
-  // non-leader case ("tied with the entity at this rank") both
-  // surface — without it the rank stat reads as a hard #N when
-  // the underlying data is ambiguous.
+  // Tie detection now driven by the SAME rounded-to-pp comparison
+  // the display uses. Previously rankIsTied used SOV_TIE_EPSILON
+  // (0.001 = 0.1pp) while the gap value was Math.round-ed (which
+  // collapses anything < 0.5pp to 0pp) — a 0.3pp gap produced
+  // `rankIsTied: false` (so the label said "Lead over runner-up" /
+  // "Gap to leader") AND `gapPp: 0` (so the value said "Tied with
+  // X"). Label and value contradicted. Driving both off the same
+  // rounded gap means they always agree.
   const above = subjectIdx > 0 ? sorted[subjectIdx - 1] : null;
   const below = subjectIdx < sorted.length - 1 ? sorted[subjectIdx + 1] : null;
+  const roundedPp = (a: number, b: number) =>
+    Math.round((a - b) * 100);
   const rankIsTied =
-    (above !== null && Math.abs(above.sov - subject.sov) < SOV_TIE_EPSILON) ||
-    (below !== null && Math.abs(below.sov - subject.sov) < SOV_TIE_EPSILON);
+    (above !== null && roundedPp(above.sov, subject.sov) === 0) ||
+    (below !== null && roundedPp(subject.sov, below.sov) === 0);
   // Rank #1: compare downward against the runner-up so the stat
   // reads "ahead of X by N pts" rather than the nonsensical
   // "−0 pts behind myself". Otherwise compare upward to leader.
@@ -934,7 +986,7 @@ function deriveCompetitivePosition(
         rankIsTied,
       };
     }
-    const gapPp = Math.round((subject.sov - runnerUp.sov) * 100);
+    const gapPp = roundedPp(subject.sov, runnerUp.sov);
     return {
       rank,
       peerCount,
@@ -945,7 +997,7 @@ function deriveCompetitivePosition(
     };
   }
   const leader = sorted[0];
-  const gapPp = Math.round((subject.sov - leader.sov) * 100);
+  const gapPp = roundedPp(subject.sov, leader.sov);
   return {
     rank,
     peerCount,
@@ -1136,16 +1188,22 @@ function PlatformBreakdownStrip({
       <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
         Mention rate by platform
       </span>
-      {platforms.map((p) => {
+      {platforms.map((p, idx) => {
         const pct =
           p.value === null || !Number.isFinite(p.value)
             ? null
-            : Math.round(p.value * 100);
+            // Clamp to [0, 100] for parity with formatPct on the
+            // KPI strip — defends against a backend regression
+            // returning a per-platform mention rate above 1.0.
+            : Math.min(100, Math.max(0, Math.round(p.value * 100)));
         const valueColor =
           pct === null ? "text-muted-foreground" : getKpiValueColor("mention_rate", p.value);
         return (
           <span
-            key={p.name}
+            // `${name}-${idx}` rather than `name` alone so a future
+            // backend regression returning two same-named platforms
+            // doesn't trigger a React key collision.
+            key={`${p.name}-${idx}`}
             className="inline-flex items-baseline gap-1.5 text-[12px] text-foreground/75 tabular-nums"
             title={
               p.n_responses
@@ -1277,9 +1335,14 @@ function MiniSpark({
     if (!iso) return "";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
+    // Force UTC formatting so a snapshot dated "2026-05-23" doesn't
+    // appear as "May 22" to viewers in PST (where 2026-05-23T00:00Z
+    // is 4pm PST the previous day). Backend stores snapshot dates
+    // in UTC; the label should match.
     return d.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
+      timeZone: "UTC",
     });
   };
   const firstIdx = measuredIndices[0];
@@ -1472,7 +1535,14 @@ function EvidenceCard({
   // unprompted framing. This is the visual bridge between a damning
   // quote and a low Unprompted Criticism Rate, which would otherwise
   // read as a contradiction.
-  const isSolicited = card.layer === "named";
+  //
+  // Treated as "anything that isn't unnamed" rather than strict
+  // equality with "named" so a future layer (e.g. "mixed",
+  // "comparative") that still solicits the subject in the prompt
+  // gets the same tag automatically. mention_status is only
+  // surfaced on unnamed-layer cards anyway, so the two pills
+  // remain mutually exclusive.
+  const isSolicited = card.layer !== "unnamed";
 
   const frameAbsent =
     card.mention_status?.mentioned === false;
@@ -1607,7 +1677,11 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
       </div>
       {sources.map((s, idx) => (
         <div
-          key={s.name}
+          // `${name}-${idx}` rather than `name` alone so a future
+          // regression returning two same-named sources doesn't
+          // trigger a React key collision (same defensive pattern
+          // PlatformBreakdownStrip uses).
+          key={`${s.name}-${idx}`}
           className="grid grid-cols-12 items-center gap-2 px-3 py-2.5 rounded-md hover:bg-accent/60 transition-colors text-sm"
         >
           <div className="col-span-6 flex items-center gap-2 min-w-0">
@@ -1960,8 +2034,30 @@ export default async function SubjectOverviewPage({
                 // space). mt-auto on the Fix card's "View all"
                 // link bottom-anchors the action while the content
                 // above sits at the top.
+                //
+                // Dynamic column count so that when Top Narratives
+                // (no clusters yet) or the Fix card (no recommended
+                // action) is absent, the remaining cards fill the
+                // row instead of stretching across an empty slot.
+                // gridColsClass picks 1/2/3 columns based on which
+                // cards will actually render. Computed here so the
+                // grid template matches the conditional render
+                // result one block down.
+                const gapCardEligible = data.topic_coverage.some(_hasFiniteRecall);
+                const narrativesCardEligible = data.narrative_clusters.length > 0;
+                const fixCardEligible = Boolean(data.recommended_actions?.primary);
+                const cardCount =
+                  (gapCardEligible ? 1 : 0) +
+                  (narrativesCardEligible ? 1 : 0) +
+                  (fixCardEligible ? 1 : 0);
+                const gridColsClass =
+                  cardCount === 3
+                    ? "md:grid-cols-3"
+                    : cardCount === 2
+                      ? "md:grid-cols-2"
+                      : "md:grid-cols-1";
                 return (
-                  <div className="grid md:grid-cols-3 gap-4 items-stretch">
+                  <div className={`grid ${gridColsClass} gap-4 items-stretch`}>
                     {/* The gap (or "Topic visibility" when every
                         topic ties). When there's no real gap to
                         surface (all topics within TIE_EPSILON of each
@@ -2118,7 +2214,7 @@ export default async function SubjectOverviewPage({
                           // Defensive floor at 0 — see CompetitiveSharePanel
                           // comment for the rationale (float round-off
                           // can produce tiny negatives).
-                          sov: Math.max(0, c.sov),
+                          sov: Number.isFinite(c.sov) ? Math.max(0, c.sov) : 0,
                           is_subject: c.is_subject,
                         }))}
                         height={280}

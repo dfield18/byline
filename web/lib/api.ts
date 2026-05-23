@@ -783,6 +783,30 @@ export type SubjectOverview = {
 // when the type changes — TypeScript will flag the missing entry
 // here on next build.
 function normalizeTrajectory(t: SubjectOverview["trajectory"]): SubjectOverview["trajectory"] {
+  // Defensive: backend type contract says `trajectory` is always
+  // present with a non-null `weeks` array, but a deployment skew
+  // or contract regression that returned undefined here would
+  // crash the entire Overview page with "Cannot read properties
+  // of undefined (reading 'length')". Coerce to an empty
+  // trajectory so the page degrades to its zero-snapshots
+  // empty-state branch instead of 500-ing.
+  if (!t || !Array.isArray(t.weeks)) {
+    return {
+      weeks: [],
+      refresh_ids: [],
+      is_historical: [],
+      ai_recall: [],
+      avg_sentiment: [],
+      risk_frame_rate: [],
+      citation_rate: [],
+      directional_lean: [],
+      criticism_severity: [],
+      certainty: [],
+      net_sentiment: [],
+      share_of_voice: [],
+      top_result_rate: [],
+    };
+  }
   const target = t.weeks.length;
   const numericSeries = [
     "ai_recall",

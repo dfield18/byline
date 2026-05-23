@@ -23,7 +23,23 @@
 import { useState } from "react";
 import type { PromptResponse } from "@/lib/api";
 
+// Truncation heuristics: line-clamp-4 clamps VISUAL lines, not
+// characters, so a single check on character count misses excerpts
+// that are short overall but contain paragraph breaks. We treat
+// the excerpt as truncated if EITHER the char count exceeds the
+// long-text threshold OR it contains enough newlines to push past
+// the 4-line clamp. line-clamp-4 counts wrapped + newline-broken
+// lines together, so 3+ explicit newlines basically guarantees
+// the 4-line clamp activates.
 const TRUNCATE_THRESHOLD_CHARS = 240;
+const TRUNCATE_NEWLINE_THRESHOLD = 3;
+
+function countNewlines(s: string): number {
+  // Match \n, \r\n, and \r so we catch any line-break convention
+  // that might appear in the raw AI response text.
+  const matches = s.match(/\r\n|\r|\n/g);
+  return matches ? matches.length : 0;
+}
 
 export function EvidenceExcerpt({
   excerpt,
@@ -42,7 +58,9 @@ export function EvidenceExcerpt({
   const [fullResponse, setFullResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isLong = excerpt.length > TRUNCATE_THRESHOLD_CHARS;
+  const isLong =
+    excerpt.length > TRUNCATE_THRESHOLD_CHARS ||
+    countNewlines(excerpt) >= TRUNCATE_NEWLINE_THRESHOLD;
 
   async function loadFullResponse() {
     if (fullResponse !== null || loading) return;
