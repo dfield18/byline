@@ -265,11 +265,9 @@ function buildGapBottomLine(
   const weakest = findWeakestTopic(withRecall)!;
   const others = withRecall.filter((t) => t !== weakest);
   // If the weakest's rate ties with every other topic's, there's no
-  // gap to surface — defer to the server bottom_line instead. Use
-  // float epsilon so DB-aggregation micro-differences (0.6666666 vs
-  // 0.6666667) don't bypass the tie check. Matches the TIE_EPSILON
-  // used in TopicRecallChart for consistency.
-  const TIE_EPSILON = 0.001;
+  // gap to surface — defer to the server bottom_line instead. Uses
+  // the module-level TIE_EPSILON so float micro-differences from DB
+  // aggregation (0.6666666 vs 0.6666667) don't bypass the check.
   if (
     others.every(
       (t) =>
@@ -281,15 +279,20 @@ function buildGapBottomLine(
   }
   const weakestPct = Math.round((weakest.ai_recall ?? 0) * 100);
 
-  // Plain-English phrasing so readers unfamiliar with "mention rate"
-  // and the topic abstraction can parse the sentence. "When asked
-  // about X, AI mentions Y in N% of answers" makes the metric self-
-  // describing: the topic is what AI is being asked about; the rate
-  // is the share of those answers that name the subject.
+  // Plain-English phrasing structured so the strong-coverage half
+  // and the weak-coverage half sit at OPPOSITE ends of the sentence
+  // with the contrast at the punchline. Prior template buried the
+  // gap topic in a leading "When asked about X" clause and pushed
+  // the comparator into a parenthetical at the end, making readers
+  // re-parse to figure out which percentage went with which topic.
+  // New shape: "AI mentions Y in N% of answers about [comparator]
+  // — but only M% on [weakest topic]." The em-dash split gives the
+  // BottomLineBlock a clean title clause + body clause to render
+  // visually distinct.
   if (others.length === 1) {
     const other = others[0];
     const otherPct = Math.round((other.ai_recall ?? 0) * 100);
-    return `When asked about ${weakest.label}, AI mentions ${subjectName} in only ${weakestPct}% of answers — compared to ${otherPct}% when asked about ${other.label}.`;
+    return `AI mentions ${subjectName} in ${otherPct}% of answers about ${other.label} — but only ${weakestPct}% on ${weakest.label}.`;
   }
 
   const meanOthersPct = Math.round(
@@ -304,20 +307,18 @@ function buildGapBottomLine(
   // pure count when nothing's short enough, or when there are too
   // many total to list cleanly.
   const comparator = formatComparator(others.map((t) => t.label));
-  // When formatComparator falls back to "N other tracked topics", it
-  // already carries the "other tracked topics" framing — don't double
-  // it up with a parenthetical. Otherwise wrap the named list so the
-  // reader knows those topic names ARE the comparison group.
+  // When formatComparator returns "N other tracked topics" (too
+  // many labels to name inline cleanly), rephrase to "every other
+  // tracked topic" — the digit prefix reads awkwardly after the
+  // preposition "about" in the new template ("answers about 5
+  // other tracked topics" is grammatical but stilted).
   const isPureCount = /^\d+ other tracked topics/.test(comparator);
-  const comparatorPhrase = isPureCount
-    ? comparator
-    : `other tracked topics (${comparator})`;
-  return `When asked about ${weakest.label}, AI mentions ${subjectName} in only ${weakestPct}% of answers — well below the ${meanOthersPct}% average across ${comparatorPhrase}.`;
+  const aboutPhrase = isPureCount ? "every other tracked topic" : comparator;
+  return `AI mentions ${subjectName} in ${meanOthersPct}% of answers about ${aboutPhrase} — but only ${weakestPct}% on ${weakest.label}.`;
 }
 
 // Plain-English list joiner: "A", "A and B", "A, B, and C", etc.
-const MAX_INLINE_LABEL_CHARS = 40;
-const MAX_INLINE_LABELS = 4;
+const MAX_INLINE_LABELS = 6;
 
 function joinList(labels: string[]): string {
   if (labels.length === 0) return "";
@@ -327,28 +328,19 @@ function joinList(labels: string[]): string {
 }
 
 // Builds the "comparator" phrase for the gap Bottom Line. Names
-// topics inline when their labels are short enough, buckets long
-// labels into "and N more", and falls back to a pure count when
-// inline naming would produce an unreadable sentence.
+// every topic inline regardless of individual label length —
+// hiding topics behind "and N more" loses concrete information
+// that's worth a longer sentence. Only falls back to a pure count
+// when there are SO many topics that the list would dominate the
+// verdict (>6). Prior version bucketed labels over 40 chars,
+// which collapsed common cases like "and 2 more" instead of
+// naming the actual topics.
 function formatComparator(labels: string[]): string {
-  const shortLabels = labels.filter(
-    (l) => l.length <= MAX_INLINE_LABEL_CHARS,
-  );
-  const longCount = labels.length - shortLabels.length;
-
-  // No short labels, or too many topics overall — pure count.
-  if (shortLabels.length === 0 || shortLabels.length > MAX_INLINE_LABELS) {
+  if (labels.length === 0) return "";
+  if (labels.length > MAX_INLINE_LABELS) {
     return `${labels.length} other tracked topics`;
   }
-  // All short and within the inline cap — name them all.
-  if (longCount === 0) {
-    return joinList(shortLabels);
-  }
-  // Mix: name the short ones, bucket the long ones.
-  const tail = `and ${longCount} more`;
-  return shortLabels.length === 1
-    ? `${shortLabels[0]} ${tail}`
-    : `${shortLabels.join(", ")}, ${tail}`;
+  return joinList(labels);
 }
 
 // Split a Bottom Line string into a bold title clause + a regular
@@ -386,16 +378,17 @@ function splitBottomLine(text: string): { title: string; body: string | null } {
 function BottomLineBlock({ text }: { text: string }) {
   const { title, body } = splitBottomLine(text);
   return (
-    // Vitals-tier treatment — verdict sentence sits between subject
-    // title and the KPI strip. text-wrap:balance splits the title
-    // evenly across lines instead of dropping a single word onto a
-    // second line. Topic-recall mini-bars moved out to Band 2 ("the
-    // gap") so the verdict reads as one beat, not two stacked beats.
-    <div className="mt-4">
+    // Vitals-tier treatment — verdict is now the FIRST thing inside
+    // the card (the subject H1 + "AI Narrative Brief" eyebrow that
+    // used to sit above were dropped because they duplicated the
+    // header's subject picker and the page chrome). text-wrap:
+    // balance splits the title evenly across lines instead of
+    // dropping a single word onto a second line.
+    <div>
       <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-primary">
         Bottom line
       </div>
-      <div className="mt-1.5 text-[17px] md:text-[18px] font-medium leading-[1.4] tracking-tight text-foreground [text-wrap:balance] max-w-[90%]">
+      <div className="mt-1.5 text-[16px] md:text-[17px] font-medium leading-[1.4] tracking-tight text-foreground [text-wrap:balance] max-w-[90%]">
         {title}
       </div>
       {body && (
@@ -413,6 +406,29 @@ function BottomLineBlock({ text }: { text: string }) {
 // the bars reinforce the sentence without claiming a separate
 // section. Same color tiers + weakest-topic warning treatment as the
 // old TopicRecallChart so visual semantics carry over.
+// Shared "is there actually a gap to surface?" check — true only
+// when there are 2+ topics with finite recall AND at least one
+// differs from the strongest by more than the tie epsilon. Used
+// by both the Band 2 card label (label + tone swap when no gap)
+// and TopicRecallInline (skip the weakest-bar warning override
+// when there's no weakest). Single source of truth so the two
+// surfaces can never disagree about whether a gap exists.
+const TIE_EPSILON = 0.001;
+function hasRealVisibilityGap(
+  topics: SubjectOverview["topic_coverage"],
+): boolean {
+  const withRecall = topics.filter(_hasFiniteRecall);
+  if (withRecall.length < 2) return false;
+  const sorted = withRecall
+    .slice()
+    .sort((a, b) => (b.ai_recall ?? 0) - (a.ai_recall ?? 0));
+  return !sorted.every(
+    (t) =>
+      Math.abs((t.ai_recall ?? 0) - (sorted[0].ai_recall ?? 0)) <
+      TIE_EPSILON,
+  );
+}
+
 function TopicRecallInline({
   topics,
 }: {
@@ -424,7 +440,9 @@ function TopicRecallInline({
     .sort((a, b) => (b.ai_recall ?? 0) - (a.ai_recall ?? 0));
   if (sorted.length === 0) return null;
   const weakestTopic = findWeakestTopic(sorted);
-  const TIE_EPSILON = 0.001;
+  // Same gap check the parent Band 2 card uses for its label swap —
+  // reads from the shared hasRealVisibilityGap helper conceptually.
+  // Kept inline here only because we already have `sorted` in scope.
   const hasRealGap =
     sorted.length > 1 &&
     !sorted.every(
@@ -664,6 +682,7 @@ function deriveCompetitivePosition(
 function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajectory"] }) {
   const metrics: {
     title: string;
+    subtitle?: string;
     values: (number | null)[];
     format: (v: number | null) => string;
     tooltip: string;
@@ -674,31 +693,62 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
   }[] = [
     {
       title: "AI Mention Rate",
+      // "across all topics" qualifier disambiguates this KPI from the
+      // topic-specific mention rate shown in the verdict and Gap card
+      // — fast readers saw "AI Mention Rate 90%" beside a verdict
+      // saying "mentioned in 50% of answers" and stalled. Average
+      // Tone + Top Result Rate are also all-topics figures but don't
+      // co-appear with a topic-specific number, so no qualifier
+      // needed there.
+      subtitle: "across all topics",
       values: trajectory.ai_recall,
       format: (v) => formatPct(v, 0),
       tooltip: "Share of AI answers that mention this subject on topic-area questions (where the prompt doesn't name them directly), plotted across each weekly snapshot. Higher is better. Rising means AI is more reliably surfacing the subject when asked about their topic areas.",
       colorKind: "mention_rate",
     },
     {
-      title: "Average Tone",
+      title: "Net Favorability",
       values: trajectory.avg_sentiment,
       format: (v) => formatTonePct(v),
-      tooltip: "Average tone — the mean sentiment score across all AI answers in this snapshot, weighted by intensity. Range −100% to +100%; 0% is neutral. Measures how favorably AI characterizes the subject when it does mention them.",
+      tooltip: "Net favorability — the mean sentiment score across all AI answers in this snapshot, weighted by intensity. Range −100% (most unfavorable) to +100% (most favorable); 0% is neutral. Measures how favorably AI characterizes the subject when it does mention them.",
       colorKind: "avg_tone",
     },
     {
-      title: "Top Result Rate",
+      title: "First Result Mentioned",
       values: trajectory.top_result_rate,
       format: (v) => formatPct(v, 0),
-      tooltip: "Share of AI answers where this subject is named FIRST among all entities mentioned. A top-of-mind signal. Distinct from Mention Rate (any mention, anywhere in the answer) — Top Result Rate measures whether AI leads with this subject when it lists entities.",
+      tooltip: "Share of AI answers where this subject is named FIRST among all entities mentioned. A top-of-mind signal. Distinct from Mention Rate (any mention, anywhere in the answer) — this measures whether AI leads with this subject when it lists entities.",
       colorKind: "top_result_rate",
     },
   ];
 
   return (
-    <div className="grid md:grid-cols-3 gap-4">
+    <div className="grid md:grid-cols-3 gap-8 items-stretch">
       {metrics.map((m) => {
         const latestValue = m.values[m.values.length - 1] ?? null;
+        // Prior value = most recent finite value BEFORE the latest
+        // snapshot. Scanned right-to-left from index length-2 so a
+        // backfill gap immediately before the latest doesn't kill
+        // the delta — we fall through to the nearest measured
+        // predecessor.
+        let priorValue: number | null = null;
+        for (let i = m.values.length - 2; i >= 0; i--) {
+          const v = m.values[i];
+          if (v !== null && Number.isFinite(v)) {
+            priorValue = v;
+            break;
+          }
+        }
+        // Delta in percentage points. All three KPIs are on the
+        // ±1 / 0..1 scale (mention_rate, top_result_rate are 0..1;
+        // avg_tone is −1..+1), so multiplying by 100 yields pp
+        // consistently. Null when one endpoint is missing.
+        const deltaPp =
+          latestValue !== null &&
+          Number.isFinite(latestValue) &&
+          priorValue !== null
+            ? Math.round((latestValue - priorValue) * 100)
+            : null;
         // "Not measured" when every snapshot returned null for this
         // metric (e.g. Citation Rate for a subject with no
         // canonical_url). Distinct from "no snapshots yet" — the
@@ -714,17 +764,58 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
           // Flat tile — no Card wrapper. Matches the page's flatter
           // editorial register (Sources, Evidence section header).
           // Visual separation comes from the grid gap, not borders.
-          <div key={m.title}>
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                {m.title}
+          // h-full + flex-col + mt-auto on the sparkline ensures
+          // the sparkline baselines align across all three tiles
+          // regardless of title-block height variance (e.g. one
+          // metric has a subtitle, two don't). Combined with the
+          // subtitle placeholder below, the title row is also
+          // height-equalized across the strip.
+          <div key={m.title} className="flex h-full flex-col">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
+                  {m.title}
+                </div>
+                {/* Subtitle slot reserved on EVERY tile (non-breaking
+                    space placeholder when empty) so the title block
+                    occupies the same vertical space across all three
+                    tiles. Without this, "AI Mention Rate / across
+                    all topics" pushes its value + sparkline down,
+                    misaligning the sparkline baselines with the
+                    other two tiles. */}
+                <div className="text-[10px] text-muted-foreground/75 lowercase mt-0.5">
+                  {m.subtitle || " "}
+                </div>
               </div>
               <KpiTooltipIcon text={m.tooltip} align="right" />
             </div>
-            <div className={`mt-1 text-2xl font-semibold tracking-tight ${valueColor}`}>
-              {notMeasured ? "—" : m.format(latestValue)}
+            <div className="mt-1 flex items-baseline gap-2">
+              <div className={`text-2xl font-semibold tracking-tight ${valueColor}`}>
+                {notMeasured ? "—" : m.format(latestValue)}
+              </div>
+              {/* Trend delta vs the previous snapshot. Reconciles the
+                  "green value + falling sparkline" misread: the value
+                  is still strong in absolute terms (success-toned by
+                  level), and the delta carries the directional signal
+                  (warning when falling, success when rising). */}
+              {!notMeasured && deltaPp !== null && (
+                <span
+                  className={`text-[12px] font-medium tabular-nums ${
+                    deltaPp > 0
+                      ? "text-success"
+                      : deltaPp < 0
+                        ? "text-warning"
+                        : "text-muted-foreground"
+                  }`}
+                  aria-label={`Change vs previous snapshot: ${deltaPp > 0 ? "up" : deltaPp < 0 ? "down" : "no change"} ${Math.abs(deltaPp)} percentage points`}
+                  title="vs previous snapshot"
+                >
+                  {deltaPp > 0 ? "↑" : deltaPp < 0 ? "↓" : ""}
+                  {Math.abs(deltaPp)} pp
+                </span>
+              )}
             </div>
-            <div className="mt-3">
+            <div className="mt-auto pt-3">
               <MiniSpark
                 values={m.values}
                 isHistorical={trajectory.is_historical}
@@ -792,15 +883,29 @@ function MiniSpark({
       </div>
     );
   }
-  const min = Math.min(...numericValues);
-  const max = Math.max(...numericValues);
-  const range = max - min || 1;
+  // Padded plot range so the line never grazes the top or bottom
+  // edge of the chart — readers were misreading a sparkline that
+  // bottomed out at 90% as "the value is 0%". Asymmetric buffer:
+  // heavier headroom BELOW the data (40%) so the lowest data
+  // point sits well above the chart floor, lighter buffer above
+  // (15%) since the top of a sparkline is less likely to be
+  // misread. Axis labels still show the actual data extremes
+  // (e.g. "90%" / "100%") — only the line's vertical position
+  // gets extra breathing room.
+  const dataMin = Math.min(...numericValues);
+  const dataMax = Math.max(...numericValues);
+  const min = dataMin;
+  const max = dataMax;
+  const rawRange = dataMax - dataMin || 1;
+  const plotMin = dataMin - rawRange * 0.4;
+  const plotMax = dataMax + rawRange * 0.15;
+  const range = plotMax - plotMin || 1;
   const w = 280;
   const h = 120;
   const pad = 6;
   const step = (w - pad * 2) / (values.length - 1);
   const yFor = (v: number | null) =>
-    v === null ? null : h - pad - ((v - min) / range) * (h - pad * 2);
+    v === null ? null : h - pad - ((v - plotMin) / range) * (h - pad * 2);
 
   // Build path; emit M (move) instead of L (line-to) after a null
   // so the line breaks at gaps. Prior implementation only skipped
@@ -1401,19 +1506,23 @@ export default async function SubjectOverviewPage({
                 }}
               />
               <div className="relative">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-1.5">
-                  AI Narrative Brief
-                </div>
-                <h1 className="font-display text-[22px] font-medium leading-[1.15] tracking-[-0.02em] text-foreground">
-                  {data.subject_name}
-                </h1>
-
+                {/* Subject H1 dropped — the subject name already
+                    appears in the page Header's subject picker, so
+                    duplicating it here cost vertical real estate and
+                    pushed the verdict below the fold. "AI Narrative
+                    Brief" eyebrow also dropped — the page chrome and
+                    sub-nav already establish what this surface is,
+                    and stacking it above "Bottom line" read as two
+                    consecutive headers for the same paragraph.
+                    BottomLineBlock's own "Bottom line" eyebrow now
+                    leads the card, the verdict sentence is the
+                    focal point. */}
                 {effectiveBottomLine && (
                   <BottomLineBlock text={effectiveBottomLine} />
                 )}
 
                 {!effectiveBottomLine && (
-                  <div className="mt-4 rounded-md border border-dashed border-border/70 bg-muted/30 px-5 py-4">
+                  <div className="rounded-md border border-dashed border-border/70 bg-muted/30 px-5 py-4">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/45">
                       Executive summary
                     </div>
@@ -1464,17 +1573,48 @@ export default async function SubjectOverviewPage({
                 const strongestAsset = data.strategic_takeaways.find(
                   (item) => item.kind === "strongest_asset",
                 );
+                // items-stretch + h-full on each Card equalize the
+                // three cards' heights regardless of content length
+                // (the Gap card grows with topic rows; the others
+                // were short and bottomed out with trailing empty
+                // space). mt-auto on the Fix card's "View all"
+                // link bottom-anchors the action while the content
+                // above sits at the top.
                 return (
-                  <div className="grid md:grid-cols-3 gap-4">
-                    {/* The gap */}
-                    {data.topic_coverage.some(_hasFiniteRecall) && (
-                      <Card className="p-6 border-border/60">
-                        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-warning mb-3">
-                          The gap · mention rate by topic
-                        </div>
-                        <TopicRecallInline topics={data.topic_coverage} />
-                      </Card>
-                    )}
+                  <div className="grid md:grid-cols-3 gap-4 items-stretch">
+                    {/* The gap (or "Topic visibility" when every
+                        topic ties). When there's no real gap to
+                        surface (all topics within TIE_EPSILON of each
+                        other), the warning-toned "gap" framing
+                        misrepresents the data. Swap both the label
+                        AND the tone: success-toned "Topic visibility"
+                        if everyone's at ≥70%, neutral otherwise.
+                        TopicRecallInline already mutes its bar-level
+                        warning treatment in the no-gap case, so the
+                        bars and the eyebrow read consistently. */}
+                    {data.topic_coverage.some(_hasFiniteRecall) && (() => {
+                      const gapExists = hasRealVisibilityGap(data.topic_coverage);
+                      const withRecall = data.topic_coverage.filter(_hasFiniteRecall);
+                      const allHigh =
+                        withRecall.length > 0 &&
+                        withRecall.every((t) => (t.ai_recall ?? 0) >= 0.7);
+                      const label = gapExists
+                        ? "Visibility gap by topic"
+                        : "Topic visibility";
+                      const labelTone = gapExists
+                        ? "text-warning"
+                        : allHigh
+                          ? "text-success"
+                          : "text-foreground/55";
+                      return (
+                        <Card className="flex h-full flex-col p-6 border-border/60">
+                          <div className={`text-[10.5px] font-semibold uppercase tracking-[0.08em] ${labelTone} mb-3`}>
+                            {label}
+                          </div>
+                          <TopicRecallInline topics={data.topic_coverage} />
+                        </Card>
+                      );
+                    })()}
 
                     {/* Strongest asset — success-toned to contrast the
                         warning-toned gap card on its left. Renders the
@@ -1484,7 +1624,7 @@ export default async function SubjectOverviewPage({
                         tone field so this card always reads as the
                         "what's working" beat in the trio. */}
                     {strongestAsset && (
-                      <Card className="p-6 border-border/60">
+                      <Card className="flex h-full flex-col p-6 border-border/60">
                         <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-success mb-3">
                           {strongestAsset.eyebrow}
                         </div>
@@ -1500,7 +1640,7 @@ export default async function SubjectOverviewPage({
                     {/* The fix. Primary-tinted card so it reads
                         as the actionable callout. */}
                     {data.recommended_actions?.primary && (
-                      <Card className="p-6 border border-primary/30 bg-primary/[0.04]">
+                      <Card className="flex h-full flex-col p-6 border border-primary/30 bg-primary/[0.04]">
                         <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-primary mb-3">
                           The fix · recommended move
                         </div>
@@ -1510,7 +1650,7 @@ export default async function SubjectOverviewPage({
                         {data.recommended_actions.secondary.length > 0 && (
                           <Link
                             href={`/subjects/${subjectId}/recommendations`}
-                            className="mt-3 inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                            className="mt-auto pt-3 inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
                           >
                             View all {1 + data.recommended_actions.secondary.length} recommendations
                             <ArrowRight className="h-3 w-3" aria-hidden />
@@ -1610,34 +1750,47 @@ export default async function SubjectOverviewPage({
                           />
                         )}
 
-                        {stats.gapPp !== null && (
-                          <StatCard
-                            label="Gap to leader"
-                            value={
-                              stats.isLeader
-                                ? stats.gapPp > 0
-                                  ? `+${stats.gapPp} pts`
-                                  : "Leads"
-                                : `${stats.gapPp} pts`
-                            }
-                            valueTone={
-                              stats.isLeader
-                                ? "success"
-                                : stats.gapPp < 0
-                                  ? "warning"
-                                  : "neutral"
-                            }
-                            sub={
-                              stats.isLeader
-                                ? stats.gapPp > 0 && stats.comparatorName
-                                  ? `ahead of ${stats.comparatorName}`
-                                  : "leads the field"
-                                : stats.comparatorName
-                                  ? `behind ${stats.comparatorName}`
-                                  : null
-                            }
-                          />
-                        )}
+                        {/* Label and value switch together based on
+                            rank: "Gap to leader / −N pts / behind X"
+                            for non-#1 subjects, "Lead over runner-up
+                            / +N pts / ahead of X" when the subject IS
+                            the leader. Avoids the contradictory
+                            "Gap to leader: Leads" pairing. Edge case:
+                            if there's no runner-up (single tracked
+                            entity), comparatorName is null and we
+                            hide the card entirely rather than show
+                            a stat with no peer context. */}
+                        {stats.gapPp !== null &&
+                          stats.comparatorName !== null && (
+                            <StatCard
+                              label={
+                                stats.isLeader ? "Lead over runner-up" : "Gap to leader"
+                              }
+                              value={
+                                stats.isLeader
+                                  ? stats.gapPp > 0
+                                    ? `+${stats.gapPp} pts`
+                                    : `Tied with ${stats.comparatorName}`
+                                  : stats.gapPp < 0
+                                    ? `${stats.gapPp} pts`
+                                    : `Tied with ${stats.comparatorName}`
+                              }
+                              valueTone={
+                                stats.gapPp > 0
+                                  ? "success"
+                                  : stats.gapPp < 0
+                                    ? "warning"
+                                    : "neutral"
+                              }
+                              sub={
+                                stats.gapPp === 0
+                                  ? null
+                                  : stats.isLeader
+                                    ? `ahead of ${stats.comparatorName}`
+                                    : `behind ${stats.comparatorName}`
+                              }
+                            />
+                          )}
 
                         {trendCardEligible && (
                           <StatCard
