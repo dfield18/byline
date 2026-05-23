@@ -2,7 +2,54 @@
 
 > A pulse-check of where the project sits **as of 2026-05-23**
 > — three new spokes (Narrative, Sources, Prompts) stood up
-> from scratch, plus a deep Overview polish pass. The big themes:
+> from scratch, then a full Overview-spoke restructure into a
+> five-band narrative layout with horizontal sub-nav. The big
+> themes:
+>
+> - **Overview spoke restructured into five bands** (commit
+>   `bfda60f`): Vitals → Gap → Competitive → Sources → Evidence,
+>   each anchored to a section id that matches the new
+>   horizontal sticky sub-nav. Replaces the prior hero card that
+>   had absorbed verdict + SoV + takeaways + recommendation into
+>   one overloaded surface, and the duplicate Visibility Trends
+>   section. Right-rail `OverviewSectionNav` retired in favor of
+>   `OverviewSubNav` (horizontal `<nav>` pinned `top-16 z-10`
+>   under the Header); content + sub-nav + Header inner all cap
+>   at `max-w-[1280px]` so bands, header controls, and nav
+>   links align. Killed the fragile `xl:pr-[260px]` corridor
+>   pattern entirely.
+> - **Overview Vitals card** = subject verdict + 3-up KPI strip
+>   (Mention Rate / Net Favorability / First Result Mentioned),
+>   each with sparkline + inline trend delta beside the value
+>   (`↓10 pp` etc., color-toned by direction). Sparkline plot
+>   range padded asymmetrically (40% below, 15% above) so the
+>   line never grazes the bottom edge. Reserved subtitle slot
+>   on every KPI tile + `mt-auto` on the sparkline align the
+>   baselines across all three tiles.
+> - **Band 2 = Gap | Strongest asset | Fix three-up**, equal-
+>   height. Gap card eyebrow + tone swap dynamically based on
+>   `hasRealVisibilityGap()`: warning-toned "Visibility gap by
+>   topic" when there's a real spread, success-toned "Topic
+>   visibility" when all topics tie ≥70%, neutral otherwise.
+>   Strongest asset moved here from the old Competitive band so
+>   the trio reads as weakness ↔ strength ↔ action.
+> - **Band 3 = Competitive standing**: SoV bars (top 5, subject
+>   highlighted) + computed Competitive Position stat stack
+>   (rank, gap-to-leader / lead-over-runner-up, SoV trend) on
+>   the right. Stats derived from the same `data.competitive`
+>   array that feeds the bars, so chart + stats can't drift.
+>   Second card flips label AND value together based on rank
+>   ("Lead over runner-up / +N pts / ahead of {runnerUp}" when
+>   subject is #1, "Gap to leader / −N pts / behind {leader}"
+>   otherwise). Tie case ("Tied with X") explicit; single-entity
+>   peer set hides the card.
+> - **Verdict copy reframed** so the contrast lands at the
+>   punchline: "AI mentions {X} in {N}% of answers about
+>   {comparator} — but only {M}% on {weakest}." `formatComparator`
+>   now names every topic inline regardless of label length;
+>   pure-count fallback ("every other tracked topic") only kicks
+>   in beyond 6 topics. Empty/all-tied case returns null and
+>   falls back to the server `bottom_line`.
 >
 > - **Narrative spoke shipped.** Four right-rail briefing tiles
 >   (Avg Sentiment / Most Positive Topic / Most Negative Topic /
@@ -270,6 +317,155 @@ Visibility `SectionNav` rail. `FilterBar.tsx`, `PlatformTopicFilter`,
   `new URLSearchParams(...)` blocks as "params is async, add
   await". The page's actual `params` prop *is* awaited correctly
   at function top — the hook is matching the wrong line. Ignore.
+
+---
+
+## Follow-up session (2026-05-23, later) — Overview restructure + polish
+
+Two more commits on `main`:
+
+- **`bfda60f`** — Overview: five-band narrative restructure +
+  horizontal sub-nav. 5 files, 1028 ins / 956 del.
+- **`724500c`** — Overview: KPI trend deltas + label clarity +
+  Band 2 polish. 1 file, 266 ins / 113 del.
+
+### Five-band layout (commit `bfda60f`)
+
+Replaced the prior Overview structure (overloaded hero card +
+duplicate Visibility Trends + Sources + Evidence) with five
+sequential bands that read as one top-down argument:
+
+| Band | id | Contents |
+|---|---|---|
+| 1 Vitals | `vitals` | Subject verdict (BottomLineBlock) + 3-up KPI strip (Mention Rate / Net Favorability / First Result Mentioned) each with sparkline + trend delta. "Open Visibility deep-dive →" link in the strip footer. |
+| 2 Gap & Fix | `gap` | 3-up: warning-toned "Visibility gap by topic" (TopicRecallInline bars) / success-toned "Strongest asset" / primary-tinted "The fix · recommended move" with "View all N recommendations →" link. |
+| 3 Competitive | `competitive` | 2-up (`1.4fr 1fr`): SoV bars (top 5, subject highlighted) + Competitive Position stat stack (rank / gap-to-leader / SoV trend). Stats derived from the SAME `data.competitive` array as the bars via `deriveCompetitivePosition()`. |
+| 4 Sources | `sources` | SectionTitle moved INTO the left column of the grid so the donut on the right aligns with the section heading. Table capped at top 5. |
+| 5 Evidence | `evidence` | 3-up equal-height EvidenceCards (`items-stretch` + `flex h-full flex-col` + `mt-auto` Frame footer, em-dash placeholder when frame is null). |
+
+### Horizontal sticky sub-nav (commit `bfda60f`)
+
+`OverviewSectionNav.tsx` (right-rail) **deleted**. Replaced by
+`OverviewSubNav.tsx`: horizontal `<nav aria-label="Page sections">`
+pinned `sticky top-16 z-10` directly under the Header. Five
+labelled links matching the band ids. Scroll-spy via
+IntersectionObserver (rootMargin `-115px 0px -55% 0px`); active
+link gets a 2px primary underline. Real `<a href="#…">` anchors
+so navigation works without JS.
+
+Layout consequence: dropped the `xl:grid xl:grid-cols-[minmax(0,1fr)_200px]`
+content/rail two-column wrapper. Main content now uses the full
+width of its container (capped at `max-w-[1280px]`). No more
+empty right gutter; bands span the full content width.
+
+### Content-width cap (commit `bfda60f`)
+
+`max-w-[1500px]` → `max-w-[1280px]` on the populated and empty
+Overview `<main>` elements. The `OverviewSubNav` inner content
+and the shared `Header`'s inner content also cap at `1280px` so
+all three layers align edge-for-edge. The outer `<header>` and
+`<nav>` backgrounds still span full-viewport — only the inner
+controls cluster centered.
+
+⚠️ **Cross-spoke regression to track**: other spokes (Visibility
+1400, Narrative 1400, Sources 1400) still use `max-w-[1400px]`
+on their main. Their content now extends ~60px past the centered
+Header controls on wide screens until they're tightened to 1280
+in a follow-up. Header.tsx carries a code comment flagging this.
+
+### Vitals polish (commit `724500c`)
+
+- **Inline trend delta beside each KPI value** (e.g. `90% ↓10 pp`),
+  color-toned by direction (success rising, warning falling,
+  muted on zero). Value color stays driven by absolute level;
+  the delta carries the directional signal — resolves the
+  "green value + falling sparkline" misread that prior versions
+  had. Prior value = most recent finite value before the latest
+  (scans right-to-left from index `length-2` so a backfill gap
+  immediately before the latest doesn't kill the delta).
+- **`MiniSpark` plot range asymmetrically padded** (40% below
+  the data, 15% above) so the line floats inside the chart
+  rather than grazing the bottom edge. Axis labels still show
+  the actual data extremes — only the line's vertical position
+  gets headroom. Min/max use a `dataMin` / `dataMax` /
+  `plotMin` / `plotMax` split internally.
+- **KPI tiles equalized**: `items-stretch` on the grid +
+  `flex h-full flex-col` on each tile + `mt-auto pt-3` on the
+  sparkline mount, plus a reserved subtitle slot rendered on
+  every tile (non-breaking space placeholder when no subtitle)
+  so the title block height is identical across the strip.
+  Sparkline baselines now align across the three tiles regardless
+  of which carries a subtitle.
+- **Inter-tile gap** bumped `gap-4` → `gap-8` so the
+  value/delta on one tile doesn't crowd the sparkline of the
+  next.
+
+### Label clarity (commit `724500c`)
+
+| Old | New |
+|---|---|
+| "Top Result Rate" | "First Result Mentioned" |
+| "Average Tone" | "Net Favorability" (tooltip updated) |
+| (no subtitle on AI Mention Rate) | `across all topics` subtitle |
+| "AI Narrative Brief" eyebrow + Subject H1 inside Vitals card | both removed; `BOTTOM LINE` is the only eyebrow |
+
+Internal field names unchanged (`top_result_rate`, `avg_sentiment`,
+etc.) — display labels only.
+
+### Verdict copy reframed (commit `724500c`)
+
+Old template (gap led, contrast buried in parenthetical):
+> When asked about X, AI mentions Y in only N% of answers — well
+> below the M% average across other tracked topics (Foo, Bar, …).
+
+New template (strong leads, gap is the punchline):
+> AI mentions Y in M% of answers about Foo, Bar, and Baz — but
+> only N% on X.
+
+`formatComparator` rewritten: names every topic inline regardless
+of label length; the pure-count fallback ("every other tracked
+topic") only fires when there are more than 6 topics (was
+bucketing labels >40 chars into "and N more"). `MAX_INLINE_LABEL_CHARS`
+constant retired. Verdict title typography dropped `17/18` →
+`16/17` to make room for longer lists. Empty/all-tied case
+returns null and falls back to `data.bottom_line`.
+
+### Band 2 polish (commit `724500c`)
+
+- **Equal-height** cards: `items-stretch` on the grid +
+  `flex h-full flex-col p-6` on each Card + `mt-auto pt-3` on
+  the Fix card's "View all N recommendations →" link.
+- **Dynamic gap-card eyebrow + tone** driven by new module-level
+  helper `hasRealVisibilityGap()`:
+  - real gap → `VISIBILITY GAP BY TOPIC` (warning)
+  - all topics tied ≥70% → `TOPIC VISIBILITY` (success)
+  - all topics tied <70% → `TOPIC VISIBILITY` (neutral)
+- Shared `TIE_EPSILON` constant promoted to module level
+  (was shadowed inside `buildGapBottomLine` and `TopicRecallInline`).
+
+### Band 3 polish (commit `724500c`)
+
+- Second stat card flips label AND value together based on
+  rank: `LEAD OVER RUNNER-UP / +N pts / ahead of {runnerUp}`
+  when subject is #1, `GAP TO LEADER / −N pts / behind {leader}`
+  otherwise.
+- Tie case (gap = 0) renders `Tied with {peer}` instead of
+  `+0 / −0 pts`.
+- Single-entity peer set (no runner-up) hides the card entirely
+  via the `stats.comparatorName !== null` guard.
+
+### New / removed components
+
+- **New**: `web/app/subjects/[id]/OverviewSubNav.tsx` (horizontal
+  sticky sub-nav with scroll-spy).
+- **New helpers in `page.tsx`**: `StatCard`, `TinySpark`,
+  `deriveCompetitivePosition`, `hasRealVisibilityGap`,
+  `pickTopWithSubject`.
+- **Deleted**: `web/app/subjects/[id]/OverviewSectionNav.tsx`
+  (right-rail superseded by `OverviewSubNav`).
+- **Retired functions / constants** in page.tsx:
+  `formatRefreshKind`, `MAX_INLINE_LABEL_CHARS`, the bucketing
+  branch of `formatComparator`.
 
 ---
 
