@@ -116,12 +116,20 @@ export default async function NarrativePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ topic?: string; platform?: string }>;
+  searchParams: Promise<{
+    topic?: string;
+    platform?: string;
+    // Active cluster name — when set, the Representative Quotes
+    // section narrows to that cluster's response_ids and the
+    // Clusters section visually marks the chosen card.
+    cluster?: string;
+  }>;
 }) {
   const { id: idStr } = await params;
   const sp = await searchParams;
   const topic = sp.topic || "";
   const platform = sp.platform || "";
+  const activeClusterName = sp.cluster || "";
 
   const subjectId = Number.parseInt(idStr, 10);
   if (Number.isNaN(subjectId)) notFound();
@@ -152,14 +160,28 @@ export default async function NarrativePage({
   const validPlatformSlugSet = new Set(
     data.platform_topic_matrix.platforms.map((p) => p.slug),
   );
+  const validClusterNameSet = new Set(
+    data.narrative_clusters.map((c) => c.name),
+  );
   let needsRedirect = false;
-  const sanitized: Record<string, string> = { topic, platform };
+  const sanitized: Record<string, string> = {
+    topic,
+    platform,
+    cluster: activeClusterName,
+  };
   if (topic && !validTopicSet.has(topic)) {
     sanitized.topic = "";
     needsRedirect = true;
   }
   if (platform && !validPlatformSlugSet.has(platform)) {
     sanitized.platform = "";
+    needsRedirect = true;
+  }
+  if (
+    activeClusterName &&
+    !validClusterNameSet.has(activeClusterName)
+  ) {
+    sanitized.cluster = "";
     needsRedirect = true;
   }
   if (needsRedirect) {
@@ -170,6 +192,31 @@ export default async function NarrativePage({
     const qs = params.toString();
     redirect(qs ? `?${qs}` : `?`);
   }
+  // Resolved cluster object — derived after sanitization so we know
+  // it's safe to dereference. Powers the cluster-card visual selected
+  // state below and the response_ids filter on Representative Quotes.
+  const activeCluster = activeClusterName
+    ? data.narrative_clusters.find((c) => c.name === activeClusterName) ??
+      null
+    : null;
+  // Pre-compute a Set of the active cluster's response_ids for O(1)
+  // membership checks when filtering the quotes feed.
+  const activeClusterResponseIds = new Set<number>(
+    activeCluster?.response_ids ?? [],
+  );
+  // URL builder for cluster toggle links. Preserves existing topic +
+  // platform params so the global scope persists; toggles cluster
+  // on/off (clicking the already-active cluster clears the filter).
+  const buildClusterHref = (clusterName: string | null): string => {
+    const params = new URLSearchParams();
+    if (topic) params.set("topic", topic);
+    if (platform) params.set("platform", platform);
+    if (clusterName) params.set("cluster", clusterName);
+    const qs = params.toString();
+    // Preserve the #clusters anchor so toggling re-scrolls the
+    // reader to where they clicked rather than the page top.
+    return qs ? `?${qs}#clusters` : `#clusters`;
+  };
 
   const subjectInitials = deriveInitials(data.subject_name);
   const updated = data.meta.last_refresh_at
@@ -956,16 +1003,46 @@ export default async function NarrativePage({
                                 label: "Neutral",
                                 cls: "bg-muted/60 text-foreground/70",
                               };
+                    const isActive =
+                      activeClusterName === cluster.name;
                     return (
                     <li
                       key={`${i}:${cluster.name}`}
-                      className="border-b border-border/30 last:border-0 pb-5 last:pb-0"
+                      className={`border-b border-border/30 last:border-0 pb-5 last:pb-0 ${isActive ? "" : ""}`}
                     >
+                      {/* Cluster card is a real anchor — clicking
+                          toggles ?cluster=<name> in the URL, which
+                          this server component reads on next render
+                          and uses to narrow the Representative Quotes
+                          section below to just this cluster's
+                          response_ids. Toggling the active card
+                          clears the filter. Anchor links to #clusters
+                          so the scroll position is preserved across
+                          re-renders. */}
+                      <a
+                        href={buildClusterHref(
+                          isActive ? null : cluster.name,
+                        )}
+                        aria-current={isActive ? "true" : undefined}
+                        className={`block -mx-3 -my-1 rounded-md px-3 py-1 transition-colors ${
+                          isActive
+                            ? "bg-primary/[0.07] ring-1 ring-primary/30"
+                            : "hover:bg-accent/30"
+                        }`}
+                      >
                       <div className="flex items-baseline justify-between gap-4">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <div className="text-[14px] font-semibold text-foreground truncate">
                             {cluster.name}
                           </div>
+                          {isActive && (
+                            <span
+                              className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-primary"
+                              aria-hidden
+                            >
+                              Filtering quotes
+                            </span>
+                          )}
                           {sentimentTone && (
                             <span
                               className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.04em] tabular-nums ${sentimentTone.cls}`}
@@ -1000,6 +1077,7 @@ export default async function NarrativePage({
                             ))}
                         </div>
                       )}
+                      </a>
                     </li>
                     );
                   })}
@@ -1050,19 +1128,23 @@ export default async function NarrativePage({
                 }
               }
             }
-            // Platform filter wires via evidence_cards.model_slug
-            // (real filter — narrows the quote feed to that AI
-            // platform). Topic filter still needs a backend join
-            // since evidence_cards don't carry topic labels; an
-            // inline advisory below admits that gap when topic is
-            // set.
+            // Filters layered on top of the type/excerpt baseline:
+            //   - Platform (model_slug match — real narrowing)
+            //   - Active narrative cluster (response_ids membership
+            //     check — real narrowing, set via clicking a cluster
+            //     card in the section above)
+            // Topic filter still needs a backend join since evidence
+            // cards don't carry topic labels; advisory below admits
+            // that gap when topic is set.
             const quotes = data.evidence_cards
               .filter(
                 (c) =>
                   QUOTE_TYPES.includes(c.type) &&
                   c.excerpt &&
                   c.excerpt.trim().length > 0 &&
-                  (!platform || c.model_slug === platform),
+                  (!platform || c.model_slug === platform) &&
+                  (!activeCluster ||
+                    activeClusterResponseIds.has(c.model_response_id)),
               )
               .sort(
                 (a, b) =>
@@ -1076,14 +1158,33 @@ export default async function NarrativePage({
                   eyebrow="04 · Quotes"
                   title="Representative Quotes"
                   description={
-                    platform
-                      ? `AI passages from ${platform} that frame the narrative around ${data.subject_name}.`
-                      : `Actual AI passages that frame the narrative around ${data.subject_name}.`
+                    activeCluster
+                      ? `Quotes from responses in the "${activeCluster.name}" cluster.`
+                      : platform
+                        ? `AI passages from ${platform} that frame the narrative around ${data.subject_name}.`
+                        : `Actual AI passages that frame the narrative around ${data.subject_name}.`
                   }
                   className="mb-5"
                 />
                 <Card className="p-5 md:p-6">
-                  {topic && (
+                  {activeCluster && (
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-primary/30 bg-primary/[0.05] px-3 py-2 text-[12px] leading-relaxed">
+                      <span className="text-foreground/80">
+                        Filtered to the{" "}
+                        <span className="font-semibold text-foreground">
+                          {activeCluster.name}
+                        </span>{" "}
+                        narrative cluster.
+                      </span>
+                      <a
+                        href={buildClusterHref(null)}
+                        className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-background px-2.5 py-1 text-[11.5px] font-medium text-foreground/85 hover:bg-accent/40 transition-colors"
+                      >
+                        Show all quotes
+                      </a>
+                    </div>
+                  )}
+                  {topic && !activeCluster && (
                     <div className="mb-4 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground">
                       Quotes aren&apos;t filtered by topic yet —
                       evidence cards don&apos;t carry topic labels in

@@ -11,20 +11,14 @@
  */
 import Link from "next/link";
 import {
-  TrendingUp,
-  TrendingDown,
-  Minus,
   ExternalLink,
   Info,
   ArrowRight,
-  ChevronRight,
   Sparkles,
 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { OverviewSectionNav } from "./OverviewSectionNav";
-import { VisibilityTopicFilter } from "./visibility/VisibilityTopicFilter";
-import { VisibilityPlatformFilter } from "./visibility/VisibilityPlatformFilter";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
@@ -35,7 +29,6 @@ import {
   type Subject,
   type SubjectOverview,
   type SubjectDetail,
-  type KpiValue,
 } from "@/lib/api";
 import { RefreshButton } from "./refresh-button";
 import { SourcesTypeMix } from "./sources-type-mix";
@@ -372,246 +365,26 @@ function splitBottomLine(text: string): { title: string; body: string | null } {
 function BottomLineBlock({ text }: { text: string }) {
   const { title, body } = splitBottomLine(text);
   return (
-    <div className="mt-6 pl-3.5 border-l-2 border-l-primary">
+    // Hero-tier treatment — no left-border accent (kept reserved for
+    // the secondary Supporting Takeaways below), larger title (reads
+    // as the executive headline, distinct from the smaller takeaways
+    // beneath), and more breathing room above. text-wrap:balance
+    // splits the title evenly across lines instead of dropping a
+    // single word onto a second line.
+    <div className="mt-6">
       <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-primary">
         Bottom line
       </div>
-      <div className="mt-0.5 text-[15px] font-semibold text-foreground leading-snug">
+      <div className="mt-1.5 text-[19px] md:text-[21px] font-semibold leading-snug tracking-tight text-foreground [text-wrap:balance]">
         {title}
       </div>
       {body && (
-        <p className="mt-1.5 text-[13.5px] text-foreground/75 leading-relaxed">
+        <p className="mt-2 text-[14px] text-foreground/75 leading-relaxed [text-wrap:balance]">
           {body}
         </p>
       )}
     </div>
   );
-}
-
-function HeroKpis({
-  kpis,
-  topics,
-}: {
-  kpis: SubjectOverview["kpis"];
-  // Per-topic mention rates from the same snapshot. Used to populate
-  // the Weakest Topic Visibility tile (value + topic-name subtitle).
-  // The full per-topic breakdown also renders below the hero in
-  // TopicRecallChart — same source, two different surfacings.
-  topics: SubjectOverview["topic_coverage"];
-}) {
-  const weakest = findWeakestTopic(topics);
-
-  // Mirror of the backend's `min_recall_gap_pp` threshold (15pp). When
-  // the weakest topic's recall isn't materially below the mean of the
-  // other tracked topics, there's no actionable "gap" — pointing the
-  // tile at a specific topic would mislead a reader into thinking that
-  // topic is a weakness when really all topics are clustered together.
-  // The tile keeps showing the value (the weakest IS still the weakest,
-  // even if everything's at 100%), but the subtitle swaps to a neutral
-  // signal so the reader doesn't chase a non-issue.
-  const MIN_GAP_PP = 15;
-  const withRecall = topics.filter(_hasFiniteRecall);
-  const others = weakest
-    ? withRecall.filter((t) => t !== weakest)
-    : [];
-  const hasMeaningfulGap = (() => {
-    if (!weakest || !others.length) return false;
-    const meanOthers =
-      others.reduce((s, t) => s + (t.ai_recall ?? 0), 0) / others.length;
-    const gapPP = (meanOthers - (weakest.ai_recall ?? 0)) * 100;
-    return gapPP >= MIN_GAP_PP;
-  })();
-
-  const tiles: {
-    // Plain-English title. Was previously the metric's official name
-    // (e.g., "AI Mention Rate") with a parenthetical definition; now
-    // the definition IS the title, since it's what a non-technical
-    // reader needs to understand the card. The official metric name
-    // is preserved in the tooltip's leading clause for technical
-    // readers / consistency with internal naming.
-    title: string;
-    subtitle?: string | null;
-    tooltip: string;
-    value: string;
-    valueColor: string;
-    kpi: KpiValue;
-    unit: string;
-    goodDirection: "up" | "down";
-  }[] = [
-    {
-      title: "Unprompted mentions",
-      tooltip: "AI Mention Rate — share of AI answers that mention this subject. Measured only on questions about the subject's topic areas (listed below) — not questions that name the subject directly.",
-      value: formatPct(kpis.ai_recall.value),
-      valueColor: getKpiValueColor("mention_rate", kpis.ai_recall.value),
-      kpi: kpis.ai_recall,
-      unit: "pts",
-      goodDirection: "up",
-    },
-    {
-      title: "Positive vs negative",
-      tooltip: "Average Tone — average tone of AI answers about this subject, expressed as a percentage above or below neutral. Range −100% (most negative) to +100% (most positive). 0% means perfectly neutral.",
-      // Drop "positive"/"negative" word — title carries that context
-      // and color/sign convey direction. Frees the value from
-      // wrapping to a second line at this card width.
-      value: formatTonePct(kpis.avg_sentiment.value, 0, false),
-      valueColor: getKpiValueColor("avg_tone", kpis.avg_sentiment.value),
-      kpi: kpis.avg_sentiment,
-      unit: "pts",
-      goodDirection: "up",
-    },
-    {
-      title: "Weakest topic visibility",
-      // Subtitle names the weakest topic when there's a meaningful gap
-      // vs the other tracked topics; otherwise it signals that all
-      // tracked topics are clustered together so a reader doesn't
-      // misread the topic name as a weakness. Threshold mirrors the
-      // backend's Message Gap rule (15pp).
-      subtitle: weakest
-        ? hasMeaningfulGap
-          ? capitalizeFirst(weakest.label)
-          : "No material gap across tracked topics"
-        : null,
-      tooltip: "Weakest Topic Recall — lowest topic-level mention rate in this snapshot. Same data feeds the Topic Recall chart below. The subtitle names the topic only when its recall is at least 15pp below the average of the other tracked topics.",
-      value: formatPct(weakest?.ai_recall ?? null),
-      valueColor: getKpiValueColor("weakest_topic_recall", weakest?.ai_recall ?? null),
-      // Per-topic deltas aren't tracked in the current API (trajectory
-      // carries overall rates, not per-topic ones). Surface "no prior"
-      // until a backend change adds prev_ai_recall to topic_coverage.
-      kpi: { value: weakest?.ai_recall ?? null, delta: null, trend: "flat" },
-      unit: "pts",
-      goodDirection: "up",
-    },
-    {
-      title: "% citing own site",
-      tooltip: "Citation Rate — share of AI answers that cite the subject's canonical website (e.g., campaign homepage or org domain). Tracks whether AI is sending readers to the subject's owned web property when answering questions about them. Subjects without a canonical URL configured will show 0%.",
-      value: formatPct(kpis.citation_rate.value),
-      valueColor: getKpiValueColor("citation_rate", kpis.citation_rate.value),
-      kpi: kpis.citation_rate,
-      unit: "pts",
-      goodDirection: "up",
-    },
-  ];
-
-  return (
-    <div className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-4">
-      {tiles.map((t) => {
-        const change = getKpiChangeDisplay(
-          t.kpi.delta,
-          t.kpi.trend,
-          t.unit,
-          t.goodDirection,
-        );
-        const ChangeIcon = change.icon;
-
-        return (
-          <div
-            key={t.title}
-            className="rounded-lg border border-border/60 bg-card p-5 min-h-[140px] flex flex-col"
-          >
-            {/* Top: title + tooltip. The plain-English title (e.g.
-                "Unprompted mentions") replaces the prior label +
-                parenthetical-definition pairing. The official metric
-                name is preserved in the tooltip's leading clause. */}
-            <div className="flex items-start justify-between gap-2">
-              <span className="text-sm font-medium text-foreground truncate">
-                {t.title}
-              </span>
-              <KpiTooltipIcon text={t.tooltip} align="right" />
-            </div>
-
-            {/* Value + subtitle on one row, change indicator below.
-                Subtitle (only the Weakest Topic Visibility tile uses
-                it today, with the weakest topic name or a "no
-                material gap" signal) sits inline with the value so
-                the topic reads as the label of what the number
-                applies to — e.g., "0%  The future of American
-                conservatism." Fixed min-h on the row reserves 2-line
-                subtitle worth of vertical space whether or not a
-                tile has a subtitle, so values align horizontally
-                across the four-tile strip. items-center vertically
-                centers the value within the row. mt-auto pushes the
-                whole bottom stack to the card's bottom so the
-                change-indicator baseline aligns across all four. */}
-            <div className="mt-auto pt-4 space-y-1.5">
-              <div className="flex min-h-[40px] items-center gap-2.5">
-                <div
-                  className={`shrink-0 text-2xl font-semibold tracking-tight leading-none ${t.valueColor}`}
-                >
-                  {t.value}
-                </div>
-                {t.subtitle && (
-                  <div
-                    className="text-[13px] text-muted-foreground line-clamp-2 leading-snug"
-                    title={t.subtitle}
-                  >
-                    {t.subtitle}
-                  </div>
-                )}
-              </div>
-              <div
-                className={`flex items-center gap-1 text-xs leading-none ${change.color}`}
-              >
-                <ChangeIcon className="h-3 w-3 shrink-0" />
-                <span>{change.text}</span>
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// Builds the KPI card's change-indicator content (text + color + icon)
-// based on the delta value, the metric's trend direction, and which
-// direction counts as "good" for this particular metric.
-//
-// Wording is full prose ("Up 10 pts from previous snapshot") rather
-// than abbreviations ("+10 pts") so non-technical readers don't have
-// to interpret the symbols. Tiny absolute deltas (< 0.5 pts) collapse
-// to "Effectively unchanged" so noise doesn't get colored as
-// improvement/worsening.
-function getKpiChangeDisplay(
-  delta: number | null,
-  trend: "up" | "down" | "flat",
-  unit: string,
-  goodDirection: "up" | "down",
-): { text: string; color: string; icon: typeof TrendingUp } {
-  // No prior snapshot at all
-  if (delta === null) {
-    return {
-      text: "no prior data",
-      color: "text-muted-foreground",
-      icon: Minus,
-    };
-  }
-
-  // Tiny absolute deltas — treat as effectively unchanged so we don't
-  // color them as good/bad signals or imply directional movement
-  // that's really just noise.
-  const abs = Math.abs(delta);
-  const isEffectivelyZero = abs < 0.5;
-  const effectiveTrend = trend === "flat" || isEffectivelyZero ? "flat" : trend;
-
-  if (effectiveTrend === "flat") {
-    return {
-      text:
-        delta === 0 || trend === "flat" ? "no change" : "≈ unchanged",
-      color: "text-muted-foreground",
-      icon: Minus,
-    };
-  }
-
-  // Real movement — compact format ("10 pts vs prior") rather than
-  // prose ("Down 10 pts from previous snapshot") so the indicator
-  // fits on one line beside the value and doesn't crowd the card.
-  // Direction is conveyed by the icon + color, not the words.
-  const formatted = abs % 1 === 0 ? abs.toFixed(0) : abs.toFixed(1);
-  const text = `${formatted} ${unit} vs prior`;
-  const color =
-    effectiveTrend === goodDirection ? "text-success" : "text-warning";
-  const icon = effectiveTrend === "up" ? TrendingUp : TrendingDown;
-  return { text, color, icon };
 }
 
 function DominantNarrativePanel({
@@ -750,6 +523,25 @@ function TopicRecallChart({
           {sorted.map((t) => {
             const pct = Math.round((t.ai_recall ?? 0) * 100);
             const isWeakest = hasRealGap && t === weakestTopic;
+            // Recall-tier coloring so a reader can spot strong
+            // vs gap topics at a glance without scanning the
+            // percent column:
+            //   ≥70% → success (green) — strong coverage
+            //   40-70% → primary (blue) — middle of the pack
+            //   <40% → warning (orange) — visibility gap
+            // The "weakest" flag forces warning on top of these
+            // tiers so the worst topic always reads as the gap
+            // even when its absolute rate sits above the warning
+            // threshold (e.g. all four topics at 80%+ — the
+            // weakest still deserves the warning treatment as a
+            // relative-to-set signal).
+            const tierColor =
+              pct >= 70
+                ? "var(--success)"
+                : pct >= 40
+                  ? "var(--primary)"
+                  : "var(--warning)";
+            const barColor = isWeakest ? "var(--warning)" : tierColor;
             return (
               <div
                 key={t.label}
@@ -769,10 +561,11 @@ function TopicRecallChart({
                       className="h-full rounded-full"
                       style={{
                         width: `${pct}%`,
-                        background: isWeakest ? "var(--warning)" : "var(--primary)",
-                        // Value-derived opacity so a 100% bar reads darker
-                        // than a 50% bar — width alone wasn't enough visual
-                        // differentiation between high- and mid-recall topics.
+                        background: barColor,
+                        // Value-derived opacity so a 100% bar reads
+                        // darker than a 50% bar — width alone wasn't
+                        // enough visual differentiation between
+                        // high- and mid-recall topics.
                         opacity: isWeakest ? 0.75 : 0.4 + (pct / 100) * 0.45,
                       }}
                     />
@@ -956,22 +749,45 @@ function MiniSpark({
   // render the same text stacked. Show a single vertically-centered
   // label instead — clearer about what's being depicted.
   const flatLine = min === max;
+  // Date ticks under the chart — first measured · midpoint · last
+  // measured. Picks indices from the actual values (not just the
+  // labels array) so a sparkline with leading nulls doesn't show
+  // a date for an empty point. Renders a 3-cell flex row below
+  // the SVG; the parent reserves space via the wrapping div.
+  const measuredIndices: number[] = [];
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] !== null) measuredIndices.push(i);
+  }
+  const fmtShortDate = (iso: string | undefined): string => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  };
+  const firstIdx = measuredIndices[0];
+  const lastIdx = measuredIndices[measuredIndices.length - 1];
+  const midIdx =
+    measuredIndices[Math.floor(measuredIndices.length / 2)];
   return (
-    <div className="relative h-[120px] pl-9">
-      {flatLine ? (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
-          {format(max)}
-        </span>
-      ) : (
-        <>
-          <span className="absolute left-0 top-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
+    <div>
+      <div className="relative h-[120px] pl-9">
+        {flatLine ? (
+          <span className="absolute left-0 top-1/2 -translate-y-1/2 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
             {format(max)}
           </span>
-          <span className="absolute left-0 bottom-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
-            {format(min)}
-          </span>
-        </>
-      )}
+        ) : (
+          <>
+            <span className="absolute left-0 top-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
+              {format(max)}
+            </span>
+            <span className="absolute left-0 bottom-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
+              {format(min)}
+            </span>
+          </>
+        )}
       <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-full w-full">
         {/* Subtle top/bottom gridlines anchor the line to the axis
             labels' values. Dashed + faint so they read as guidance
@@ -1031,21 +847,24 @@ function MiniSpark({
           </circle>
         );
       })}
-      </svg>
+        </svg>
+      </div>
+      {/* X-axis date row — start · midpoint · end of the measured
+          range. Mirrors the date-tick pattern on the Narrative
+          spoke's sparklines so a reader can see what time window
+          the line covers without consulting the section header.
+          Indented to match the SVG's pl-9 plot area so the labels
+          align with the plotted points. */}
+      <div className="mt-1.5 pl-9 flex items-center justify-between text-[9px] tabular-nums text-muted-foreground/55">
+        <span>{fmtShortDate(labels[firstIdx])}</span>
+        {measuredIndices.length >= 3 && (
+          <span>{fmtShortDate(labels[midIdx])}</span>
+        )}
+        <span>{fmtShortDate(labels[lastIdx])}</span>
+      </div>
     </div>
   );
 }
-
-// Map quote-type to a Pill tone. Criticism/praise carry direction;
-// the rest are neutral analytical categorizations.
-const TYPE_TONE: Record<string, "warning" | "success" | "primary" | "gold" | "neutral"> = {
-  criticism: "warning",
-  praise: "success",
-  narrative_frame: "primary",
-  model_difference: "gold",
-  characterization: "neutral",
-  factual_claim: "neutral",
-};
 
 const TYPE_LABEL: Record<string, string> = {
   criticism: "Criticism",
@@ -1056,6 +875,25 @@ const TYPE_LABEL: Record<string, string> = {
   factual_claim: "Factual claim",
 };
 
+// Inline pill styling for the Evidence card's type / mention
+// badges. Mirrors the Narrative cluster sentiment-label pattern
+// (bg-tone/15 + text-tone, rounded-full, uppercase bold) so the
+// corner badge actually reads as a tonal indicator rather than
+// muted small-caps text. Used in place of the generic <Pill>
+// component here so Evidence cards get the more prominent
+// treatment without affecting <Pill> consumers elsewhere.
+const EVIDENCE_BADGE_TONE: Record<string, string> = {
+  criticism: "bg-warning/15 text-warning",
+  praise: "bg-success/15 text-success",
+  narrative_frame: "bg-primary/15 text-primary",
+  // Model-difference + characterization + factual_claim don't carry
+  // a positive/negative direction — give them readable muted bgs
+  // (not the same as no-bg so they still pop against the card).
+  model_difference: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  characterization: "bg-muted text-foreground/75",
+  factual_claim: "bg-muted text-foreground/75",
+};
+
 const MODEL_DISPLAY: Record<string, string> = {
   chatgpt: "ChatGPT",
   gemini: "Gemini",
@@ -1064,22 +902,32 @@ const MODEL_DISPLAY: Record<string, string> = {
 };
 
 function EvidenceCard({ card }: { card: SubjectOverview["evidence_cards"][number] }) {
-  // Unnamed-layer cards show the Mentioned/Not-mentioned pill;
-  // named-layer cards show the quote type pill instead (mention status
-  // is meaningless when the subject is in the prompt itself).
+  // Unnamed-layer cards show the Mentioned/Not-mentioned badge;
+  // named-layer cards show the quote type badge instead (mention
+  // status is meaningless when the subject is in the prompt itself).
+  // Both render with the same prominent bg-tone/15 + text-tone
+  // styling so the corner badge actually reads as a tonal signal
+  // instead of muted small-caps text — same treatment the Narrative
+  // spoke's cluster cards use.
+  const badgeClass =
+    "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.04em] tabular-nums";
   const pillNode =
     card.mention_status !== null ? (
       card.mention_status.mentioned ? (
-        <Pill tone="success">
+        <span className={`${badgeClass} bg-success/15 text-success`}>
           Mentioned · #{card.mention_status.rank ?? "?"}
-        </Pill>
+        </span>
       ) : (
-        <Pill tone="destructive">Not mentioned</Pill>
+        <span className={`${badgeClass} bg-destructive/15 text-destructive`}>
+          Not mentioned
+        </span>
       )
     ) : (
-      <Pill tone={TYPE_TONE[card.type] || "neutral"}>
+      <span
+        className={`${badgeClass} ${EVIDENCE_BADGE_TONE[card.type] ?? "bg-muted text-foreground/75"}`}
+      >
         {TYPE_LABEL[card.type] || card.type}
-      </Pill>
+      </span>
     );
 
   // Named-layer cards come from prompts that mentioned the subject by
@@ -1263,6 +1111,11 @@ export default async function SubjectOverviewPage({
     if (e instanceof Error && e.message.includes("404")) notFound();
     throw e;
   }
+  // Subject detail is fetched in parallel with the overview for 404
+  // detection (and previously fed the Snapshot history disclosure
+  // that was retired). Other consumers can read it back without a
+  // round-trip; for now it's intentionally unused after the read.
+  void subject;
 
   // Short date for the sticky header meta line — drops the year so
   // the line stays tight ("Updated May 8" vs "Updated May 8, 2026").
@@ -1290,6 +1143,13 @@ export default async function SubjectOverviewPage({
   // item list to match so the rail can't point at a missing anchor.
   const overviewSectionNavItems: { id: string; label: string; num: string }[] = [];
   overviewSectionNavItems.push({ id: "hero", label: "Overview", num: "01" });
+  if (data.evidence_cards.length > 0) {
+    overviewSectionNavItems.push({
+      id: "evidence",
+      label: "Evidence",
+      num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
+    });
+  }
   if (data.trajectory.weeks.length >= 2) {
     overviewSectionNavItems.push({
       id: "trends",
@@ -1302,13 +1162,6 @@ export default async function SubjectOverviewPage({
     label: "Topics",
     num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
   });
-  if (data.evidence_cards.length > 0) {
-    overviewSectionNavItems.push({
-      id: "evidence",
-      label: "Evidence",
-      num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
-    });
-  }
   if (data.competitive.length > 0) {
     overviewSectionNavItems.push({
       id: "competition",
@@ -1416,19 +1269,14 @@ export default async function SubjectOverviewPage({
         />
 
         <main className="flex-1 px-4 md:px-12 xl:pr-44 py-6 space-y-16 max-w-[1500px] w-full mx-auto">
-          <OverviewSectionNav items={overviewSectionNavItems} filters={
-            <>
-              <VisibilityTopicFilter
-                topics={data.topic_coverage.map((t) => ({ label: t.label }))}
-              />
-              <VisibilityPlatformFilter
-                platforms={data.platform_topic_matrix.platforms.map((p) => ({
-                  slug: p.slug,
-                  name: p.name,
-                }))}
-              />
-            </>
-          } />
+          {/* Filters slot intentionally not passed — the rail
+              shows just the Jump To nav on the Overview spoke. The
+              VisibilityTopicFilter / VisibilityPlatformFilter
+              dropdowns still live on every other spoke (Visibility,
+              Narrative, Competition, Prompts), so the global
+              ?topic= / ?platform= URL params are still settable
+              there and persist when the reader returns to Overview. */}
+          <OverviewSectionNav items={overviewSectionNavItems} />
 
           {/* HERO */}
           <section id="hero" className="scroll-mt-20">
@@ -1470,78 +1318,76 @@ export default async function SubjectOverviewPage({
                     <BottomLineBlock text={effectiveBottomLine} />
                   )}
 
-                  {/* Strategic-takeaway callouts inline with the hero
-                      brief. Surfaces the genuinely-new signals
-                      (strongest_asset = what's working, opposition_frame
-                      = critical framing AI volunteers) without the
-                      standalone "Strategic Takeaways" section that used
-                      to live below Topic Recall. `message_gap` is
-                      filtered out because the Bottom Line above already
-                      surfaces the gap — keeping both was the
-                      redundancy. Compact treatment: left-border accent
-                      + small uppercase eyebrow + body sentence, no
-                      card containers. */}
-                  {data.strategic_takeaways
-                    .filter((item) => item.kind !== "message_gap")
-                    .map((item) => {
-                      const accent =
-                        item.tone === "warning" ? "border-l-warning"
-                        : item.tone === "primary" ? "border-l-primary"
-                        : "border-l-foreground/30";
-                      const eyebrowColor =
-                        item.tone === "warning" ? "text-warning"
-                        : item.tone === "primary" ? "text-primary"
-                        : "text-foreground/55";
-                      return (
-                        <div
-                          key={item.kind}
-                          className={`mt-4 pl-3.5 border-l-2 ${accent}`}
-                        >
-                          <div
-                            className={`text-[10.5px] font-semibold uppercase tracking-[0.06em] ${eyebrowColor}`}
-                          >
-                            {item.eyebrow}
-                          </div>
-                          <div className="mt-0.5 text-[13.5px] font-semibold text-foreground leading-snug">
-                            {item.title}
-                          </div>
-                          <p className="mt-1 text-[13px] text-foreground/70 leading-relaxed">
-                            {item.body}
-                          </p>
-                        </div>
-                      );
-                    })}
+                  {/* Supporting takeaways tier — visually subordinate
+                      to the Bottom Line above. Same content as before
+                      (Strongest Asset + Opposition Frame + Recommended
+                      Move), now grouped under a single muted divider
+                      with reduced type so the eye reads them as
+                      "supporting context" rather than co-equal headlines
+                      competing with the Bottom Line. The thin top
+                      border marks the visual tier transition without
+                      adding a heavy section header. message_gap is
+                      still filtered out since the Bottom Line surfaces
+                      the gap directly. */}
+                  {(data.strategic_takeaways.some(
+                    (i) => i.kind !== "message_gap",
+                  ) ||
+                    data.recommended_actions?.primary) && (
+                    <div className="mt-7 pt-5 border-t border-border/40 space-y-3.5">
+                      {data.strategic_takeaways
+                        .filter((item) => item.kind !== "message_gap")
+                        .map((item) => {
+                          const accent =
+                            item.tone === "warning" ? "border-l-warning"
+                            : item.tone === "primary" ? "border-l-primary"
+                            : "border-l-foreground/30";
+                          const eyebrowColor =
+                            item.tone === "warning" ? "text-warning"
+                            : item.tone === "primary" ? "text-primary"
+                            : "text-foreground/55";
+                          return (
+                            <div
+                              key={item.kind}
+                              className={`pl-3 border-l-2 ${accent}`}
+                            >
+                              <div
+                                className={`text-[10px] font-semibold uppercase tracking-[0.06em] ${eyebrowColor}`}
+                              >
+                                {item.eyebrow}
+                              </div>
+                              <div className="mt-0.5 text-[13px] font-semibold text-foreground leading-snug">
+                                {item.title}
+                              </div>
+                              <p className="mt-0.5 text-[12.5px] text-foreground/70 leading-relaxed">
+                                {item.body}
+                              </p>
+                            </div>
+                          );
+                        })}
 
-                  {/* Recommended Move — completes the briefing triad
-                      (Bottom Line = what / Strongest Asset = where
-                      you're strong / Recommended Move = what to do).
-                      Uses the same editorial chrome as the other two
-                      takeaways (eyebrow + bold title + regular body +
-                      left-border accent). Full action set + Regenerate
-                      controls live on the /recommendations spoke; this
-                      block surfaces just the primary action with a
-                      "View all" handoff when alternatives exist. */}
-                  {data.recommended_actions?.primary && (
-                    <div className="mt-5 pl-3.5 border-l-2 border-l-primary">
-                      <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-primary">
-                        Recommended move
-                      </div>
-                      {/* Hero shows just the imperative action — the
-                          "why" rationale is preserved on the
-                          /recommendations spoke alongside the
-                          secondary alternatives, so the briefing
-                          stays scannable. */}
-                      <div className="mt-0.5 text-[14px] font-semibold text-foreground leading-snug">
-                        {data.recommended_actions.primary.action}
-                      </div>
-                      {data.recommended_actions.secondary.length > 0 && (
-                        <Link
-                          href={`/subjects/${subjectId}/recommendations`}
-                          className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
-                        >
-                          View all recommendations
-                          <ArrowRight className="h-3 w-3" aria-hidden />
-                        </Link>
+                      {/* Recommended Move — last in the supporting
+                          tier. Full action set + Regenerate controls
+                          live on the /recommendations spoke; this
+                          block surfaces just the primary action with
+                          a "View all" handoff when alternatives exist. */}
+                      {data.recommended_actions?.primary && (
+                        <div className="pl-3 border-l-2 border-l-primary">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">
+                            Recommended move
+                          </div>
+                          <div className="mt-0.5 text-[13px] font-semibold text-foreground leading-snug">
+                            {data.recommended_actions.primary.action}
+                          </div>
+                          {data.recommended_actions.secondary.length > 0 && (
+                            <Link
+                              href={`/subjects/${subjectId}/recommendations`}
+                              className="mt-1.5 inline-flex items-center gap-1 text-[11.5px] font-medium text-primary hover:text-primary/80 transition-colors"
+                            >
+                              View all recommendations
+                              <ArrowRight className="h-3 w-3" aria-hidden />
+                            </Link>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -1567,16 +1413,34 @@ export default async function SubjectOverviewPage({
                   clusters={data.narrative_clusters}
                 />
               </div>
-              {/* KPI strip: Unprompted mentions · Positive vs negative ·
-                  Weakest topic visibility · % citing own site. Risk
-                  Frame / Unprompted Criticism Rate was promoted out
-                  of the hero in favor of the gap metric — it lives in
-                  TopicRecallChart's data feed. Passing topic_coverage
-                  so the Weakest Topic Visibility tile can show the
-                  weakest topic name as a subtitle. */}
-              <HeroKpis kpis={data.kpis} topics={data.topic_coverage} />
+              {/* HeroKpis tile strip retired — its four metrics
+                  (Unprompted mentions, Positive vs negative, Weakest
+                  topic visibility, % citing own site) all duplicated
+                  signals already shown below: AI Mention Rate /
+                  Average Tone / Citation Rate sparklines on the
+                  Visibility Trends strip and the weakest topic on
+                  the TopicRecallChart's warning-toned bar. */}
             </Card>
           </section>
+
+          {/* EVIDENCE — Phase 3c wiring */}
+          {data.evidence_cards.length > 0 && (
+            <section id="evidence" className="scroll-mt-20">
+              <SectionTitle
+                eyebrow="Evidence"
+                title="What AI is actually saying"
+                description="Verbatim quotes selected by the top-quotes cross-analyzer from the latest snapshot. Each card shows the originating prompt, the AI's exact words, and the narrative cluster it falls under."
+              />
+              <div className="grid md:grid-cols-3 gap-4">
+                {data.evidence_cards.slice(0, 3).map((card, i) => (
+                  <EvidenceCard
+                    key={`${card.model_response_id}-${i}`}
+                    card={card}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* VISIBILITY TRENDS — promoted out of its previous
               position-after-Competitive slot to sit directly under
@@ -1608,6 +1472,165 @@ export default async function SubjectOverviewPage({
                 }
               />
               <TrajectoryStrip trajectory={data.trajectory} />
+              {/* "What changed" footer — same pattern the Visibility
+                  + Competition spokes use. Surfaces the overall
+                  mention-rate delta + top 3 topic movers across the
+                  trend window so a reader sees movement at a glance
+                  without having to read the sparkline shapes. Logic
+                  inlined here (rather than imported from the
+                  Visibility spoke) to keep this page self-contained. */}
+              {(() => {
+                const weeks = data.trajectory.weeks;
+                const aiRecall = data.trajectory.ai_recall;
+                // First + last MEASURED indices across the visible
+                // window, not just last-two-snapshots. Lets the footer
+                // describe the chart's whole window without dropping
+                // when a backfill gap leaves one endpoint null.
+                const measuredEndpoints = (
+                  arr: (number | null)[],
+                ): [number, number] | null => {
+                  let first = -1;
+                  let last = -1;
+                  for (let i = 0; i < arr.length; i++) {
+                    const v = arr[i];
+                    if (v !== null && Number.isFinite(v)) {
+                      if (first === -1) first = i;
+                      last = i;
+                    }
+                  }
+                  return first !== -1 &&
+                    last !== -1 &&
+                    first !== last
+                    ? [first, last]
+                    : null;
+                };
+                const endpoints = measuredEndpoints(aiRecall);
+                const fmtDate = (iso: string | null): string | null => {
+                  if (!iso) return null;
+                  const d = new Date(iso);
+                  return Number.isNaN(d.getTime())
+                    ? null
+                    : d.toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      });
+                };
+                // Build delta list. Overall recall leads when present;
+                // topic movers follow, sorted by absolute magnitude
+                // desc, capped at top 3. Same 1pp overall / 5pp topic
+                // floors the Visibility spoke uses so micro-jitter
+                // doesn't surface.
+                type Delta = {
+                  label: string;
+                  deltaPp: number;
+                  kind: "overall" | "topic";
+                };
+                const deltas: Delta[] = [];
+                let latestIso: string | null = null;
+                let priorIso: string | null = null;
+                if (endpoints) {
+                  const [priorIdx, latestIdx] = endpoints;
+                  latestIso = weeks[latestIdx] ?? null;
+                  priorIso = weeks[priorIdx] ?? null;
+                  const cur = aiRecall[latestIdx];
+                  const pri = aiRecall[priorIdx];
+                  if (
+                    cur !== null &&
+                    pri !== null &&
+                    Number.isFinite(cur) &&
+                    Number.isFinite(pri)
+                  ) {
+                    const d = (cur as number) - (pri as number);
+                    if (Math.abs(d) >= 0.01) {
+                      deltas.push({
+                        label: "Overall mention rate",
+                        deltaPp: Math.round(d * 100),
+                        kind: "overall",
+                      });
+                    }
+                  }
+                  const topicMovers: Delta[] = [];
+                  for (const t of data.topic_trajectories) {
+                    const tEnds = measuredEndpoints(t.mention_rate);
+                    if (!tEnds) continue;
+                    const [pIdx, lIdx] = tEnds;
+                    const tc = t.mention_rate[lIdx];
+                    const tp = t.mention_rate[pIdx];
+                    if (
+                      tc === null ||
+                      tp === null ||
+                      !Number.isFinite(tc) ||
+                      !Number.isFinite(tp)
+                    )
+                      continue;
+                    const d = (tc as number) - (tp as number);
+                    if (Math.abs(d) < 0.05) continue;
+                    topicMovers.push({
+                      label: capitalizeFirst(t.label),
+                      deltaPp: Math.round(d * 100),
+                      kind: "topic",
+                    });
+                  }
+                  topicMovers.sort(
+                    (a, b) => Math.abs(b.deltaPp) - Math.abs(a.deltaPp),
+                  );
+                  deltas.push(...topicMovers.slice(0, 3));
+                }
+                const latestStr = fmtDate(latestIso);
+                const priorStr = fmtDate(priorIso);
+                const eyebrow =
+                  latestStr && priorStr
+                    ? `What changed · ${priorStr} → ${latestStr}`
+                    : latestStr
+                      ? `What changed · since ${latestStr}`
+                      : "What changed";
+                return (
+                  <div className="mt-8 border-t border-border/60 pt-5">
+                    <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+                      {eyebrow}
+                    </div>
+                    {deltas.length > 0 ? (
+                      <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2.5">
+                        {deltas.map((d) => (
+                          <li
+                            key={`${d.kind}:${d.label}`}
+                            className="inline-flex max-w-full items-baseline gap-2"
+                          >
+                            <span
+                              className={`max-w-[260px] truncate text-[13px] ${
+                                d.kind === "overall"
+                                  ? "font-medium text-foreground"
+                                  : "text-foreground/80"
+                              }`}
+                              title={d.label}
+                            >
+                              {d.label}
+                            </span>
+                            <span
+                              className={`shrink-0 text-[13px] font-semibold tabular-nums ${
+                                d.deltaPp > 0
+                                  ? "text-success"
+                                  : d.deltaPp < 0
+                                    ? "text-warning"
+                                    : "text-foreground/65"
+                              }`}
+                            >
+                              {d.deltaPp === 0
+                                ? "0 pp"
+                                : `${d.deltaPp > 0 ? "+" : ""}${d.deltaPp} pp`}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-3 text-[13px] leading-relaxed text-foreground/80">
+                        Headline metrics held steady across the trend
+                        window.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </section>
           )}
 
@@ -1622,25 +1645,6 @@ export default async function SubjectOverviewPage({
           <div id="topics" className="scroll-mt-20">
             <TopicRecallChart topics={data.topic_coverage} />
           </div>
-
-          {/* EVIDENCE — Phase 3c wiring */}
-          {data.evidence_cards.length > 0 && (
-            <section id="evidence" className="scroll-mt-20">
-              <SectionTitle
-                eyebrow="Evidence"
-                title="What AI is actually saying"
-                description="Verbatim quotes selected by the top-quotes cross-analyzer from the latest snapshot. Each card shows the originating prompt, the AI's exact words, and the narrative cluster it falls under."
-              />
-              <div className="grid md:grid-cols-3 gap-4">
-                {data.evidence_cards.slice(0, 3).map((card, i) => (
-                  <EvidenceCard
-                    key={`${card.model_response_id}-${i}`}
-                    card={card}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
 
           {/* COMPETITIVE SNAPSHOT — Phase 4 wiring */}
           {data.competitive.length > 0 && (
@@ -1757,78 +1761,6 @@ export default async function SubjectOverviewPage({
             </div>
           </Card>
           </section>
-
-          {/* REFRESH HISTORY — operator/audit context, behind a disclosure
-              so it doesn't clutter the executive view */}
-          {subject.refreshes.length > 0 && (
-            <details className="group rounded-md border border-border/60 bg-card">
-              <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden flex items-center justify-between px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground/65 hover:text-foreground transition-colors">
-                <span>
-                  Snapshot history
-                  <span className="ml-2 text-muted-foreground font-normal normal-case tracking-normal">
-                    ({subject.refreshes.length} run{subject.refreshes.length === 1 ? "" : "s"})
-                  </span>
-                </span>
-                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-[color,transform] group-open:rotate-90" />
-              </summary>
-              <div className="px-5 pb-5">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-[10px] uppercase tracking-wider text-foreground/65 border-b border-border">
-                        <th className="px-3 py-2 font-medium">ID</th>
-                        <th className="px-3 py-2 font-medium">Started</th>
-                        <th className="px-3 py-2 font-medium">Status</th>
-                        <th className="px-3 py-2 font-medium text-right">Responses</th>
-                        <th className="px-3 py-2 font-medium text-right">Cost</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {subject.refreshes.map((r) => (
-                        <tr
-                          key={r.id}
-                          className="border-b border-border/30 last:border-b-0 hover:bg-accent/40 transition-colors"
-                        >
-                          <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                            {r.id}
-                          </td>
-                          <td className="px-3 py-2 text-foreground/80">
-                            {new Date(r.started_at).toLocaleString("en-US", {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              timeZone: "UTC",
-                            })}
-                          </td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={
-                                r.status === "completed"
-                                  ? "text-success"
-                                  : r.status === "partial"
-                                  ? "text-warning"
-                                  : "text-muted-foreground"
-                              }
-                            >
-                              {r.status}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-right text-foreground/65 tabular-nums">
-                            {r.n_ok}/{r.n_responses}
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground">
-                            ${Number(r.cost_usd).toFixed(4)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </details>
-          )}
 
           <footer className="pt-6 pb-8 border-t border-border/40">
             <p className="text-center text-[11.5px] text-foreground/70 leading-relaxed">
