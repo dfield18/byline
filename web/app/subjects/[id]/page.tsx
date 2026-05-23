@@ -22,6 +22,9 @@ import {
 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
+import { OverviewSectionNav } from "./OverviewSectionNav";
+import { VisibilityTopicFilter } from "./visibility/VisibilityTopicFilter";
+import { VisibilityPlatformFilter } from "./visibility/VisibilityPlatformFilter";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
@@ -264,10 +267,15 @@ function buildGapBottomLine(
   }
   const weakestPct = Math.round((weakest.ai_recall ?? 0) * 100);
 
+  // Plain-English phrasing so readers unfamiliar with "mention rate"
+  // and the topic abstraction can parse the sentence. "When asked
+  // about X, AI mentions Y in N% of answers" makes the metric self-
+  // describing: the topic is what AI is being asked about; the rate
+  // is the share of those answers that name the subject.
   if (others.length === 1) {
     const other = others[0];
     const otherPct = Math.round((other.ai_recall ?? 0) * 100);
-    return `AI underweights ${subjectName} on ${weakest.label} — ${weakestPct}% mention rate vs ${otherPct}% on ${other.label}.`;
+    return `When asked about ${weakest.label}, AI mentions ${subjectName} in only ${weakestPct}% of answers — compared to ${otherPct}% when asked about ${other.label}.`;
   }
 
   const meanOthersPct = Math.round(
@@ -282,7 +290,15 @@ function buildGapBottomLine(
   // pure count when nothing's short enough, or when there are too
   // many total to list cleanly.
   const comparator = formatComparator(others.map((t) => t.label));
-  return `AI underweights ${subjectName} on ${weakest.label} — ${weakestPct}% mention rate vs ${meanOthersPct}% average across ${comparator}.`;
+  // When formatComparator falls back to "N other tracked topics", it
+  // already carries the "other tracked topics" framing — don't double
+  // it up with a parenthetical. Otherwise wrap the named list so the
+  // reader knows those topic names ARE the comparison group.
+  const isPureCount = /^\d+ other tracked topics/.test(comparator);
+  const comparatorPhrase = isPureCount
+    ? comparator
+    : `other tracked topics (${comparator})`;
+  return `When asked about ${weakest.label}, AI mentions ${subjectName} in only ${weakestPct}% of answers — well below the ${meanOthersPct}% average across ${comparatorPhrase}.`;
 }
 
 // Plain-English list joiner: "A", "A and B", "A, B, and C", etc.
@@ -609,6 +625,10 @@ function DominantNarrativePanel({
         <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
           Narrative mix
         </div>
+        <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
+          Recurring AI framings — each bar is the share of responses
+          in that theme.
+        </p>
         <p className="mt-3 text-[13px] text-foreground/55 leading-relaxed">
           No narrative clustering available for this snapshot yet. Run the
           cross-analyzer pass to populate this panel.
@@ -635,6 +655,10 @@ function DominantNarrativePanel({
       <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
         Narrative mix
       </div>
+      <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
+        Recurring AI framings — each bar is the share of responses
+        in that theme.
+      </p>
 
       <ul className="mt-6 space-y-5">
         {clusters.slice(0, 4).map((c, i) => {
@@ -792,7 +816,7 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
       colorKind: "avg_tone",
     },
     {
-      title: "Citation Rate",
+      title: "Citation Rate (mentioning own site)",
       values: trajectory.citation_rate,
       format: (v) => formatPct(v, 0),
       tooltip: "Share of AI answers that cite the subject's canonical website (e.g., campaign homepage or org domain), plotted across each weekly snapshot. Higher is better. Subjects without a canonical URL configured will show 0% throughout.",
@@ -1260,6 +1284,44 @@ export default async function SubjectOverviewPage({
       ? `Updated ${updatedShort} · ${data.meta.n_responses} responses`
       : "";
 
+  // Jump-to items for the right-rail nav. Some sections render only
+  // when their data exists (Trends needs ≥2 trajectory weeks,
+  // Evidence + Competition require non-empty payloads) — filter the
+  // item list to match so the rail can't point at a missing anchor.
+  const overviewSectionNavItems: { id: string; label: string; num: string }[] = [];
+  overviewSectionNavItems.push({ id: "hero", label: "Overview", num: "01" });
+  if (data.trajectory.weeks.length >= 2) {
+    overviewSectionNavItems.push({
+      id: "trends",
+      label: "Trends",
+      num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
+    });
+  }
+  overviewSectionNavItems.push({
+    id: "topics",
+    label: "Topics",
+    num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
+  });
+  if (data.evidence_cards.length > 0) {
+    overviewSectionNavItems.push({
+      id: "evidence",
+      label: "Evidence",
+      num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
+    });
+  }
+  if (data.competitive.length > 0) {
+    overviewSectionNavItems.push({
+      id: "competition",
+      label: "Competition",
+      num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
+    });
+  }
+  overviewSectionNavItems.push({
+    id: "sources",
+    label: "Sources",
+    num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
+  });
+
   // Empty state: subject exists but has no completed refresh yet. The
   // normal page would render mostly empty cards and "—" values. Show
   // a focused first-run state instead so the user understands they're
@@ -1353,9 +1415,23 @@ export default async function SubjectOverviewPage({
           refreshSlot={<RefreshButton subjectId={subjectId} />}
         />
 
-        <main className="flex-1 px-4 md:px-12 py-6 space-y-16 max-w-[1500px] w-full mx-auto">
+        <main className="flex-1 px-4 md:px-12 xl:pr-44 py-6 space-y-16 max-w-[1500px] w-full mx-auto">
+          <OverviewSectionNav items={overviewSectionNavItems} filters={
+            <>
+              <VisibilityTopicFilter
+                topics={data.topic_coverage.map((t) => ({ label: t.label }))}
+              />
+              <VisibilityPlatformFilter
+                platforms={data.platform_topic_matrix.platforms.map((p) => ({
+                  slug: p.slug,
+                  name: p.name,
+                }))}
+              />
+            </>
+          } />
+
           {/* HERO */}
-          <section>
+          <section id="hero" className="scroll-mt-20">
             <Card className="relative overflow-hidden p-6 md:p-8 border-border/60">
               <div
                 className="absolute inset-0 pointer-events-none"
@@ -1512,14 +1588,14 @@ export default async function SubjectOverviewPage({
               the Visibility deep-dive spoke for readers who want
               the full per-platform / per-topic analysis. */}
           {data.trajectory.weeks.length >= 2 && (
-            <section>
+            <section id="trends" className="scroll-mt-20">
               <SectionTitle
                 eyebrow="Visibility Trends"
                 title="How visibility has shifted"
                 description={
                   data.trajectory.weeks.length === 2
-                    ? "Early trend — based on 2 snapshots. Open circles are retrospective estimates; filled circles are live snapshots."
-                    : `Movement across the headline metrics over the last ${data.trajectory.weeks.length} weekly snapshots. Open circles are retrospective estimates; filled circles are live snapshots.`
+                    ? "Early trend — 2 snapshots. Open circles are backfilled estimates; filled are real-time."
+                    : `Headline metrics across the last ${data.trajectory.weeks.length} snapshots. Open circles are backfilled estimates; filled are real-time.`
                 }
                 right={
                   <Link
@@ -1540,12 +1616,16 @@ export default async function SubjectOverviewPage({
               the hero card so the headline "weakest topic" tile is
               immediately followed by the full ranking. The
               audit-style topics table in Analysis Scope below
-              remains unchanged. */}
-          <TopicRecallChart topics={data.topic_coverage} />
+              remains unchanged. Wrapped in <div id="topics"> so the
+              right-rail jump nav can target it without modifying
+              the inner TopicRecallChart component. */}
+          <div id="topics" className="scroll-mt-20">
+            <TopicRecallChart topics={data.topic_coverage} />
+          </div>
 
           {/* EVIDENCE — Phase 3c wiring */}
           {data.evidence_cards.length > 0 && (
-            <section>
+            <section id="evidence" className="scroll-mt-20">
               <SectionTitle
                 eyebrow="Evidence"
                 title="What AI is actually saying"
@@ -1564,6 +1644,7 @@ export default async function SubjectOverviewPage({
 
           {/* COMPETITIVE SNAPSHOT — Phase 4 wiring */}
           {data.competitive.length > 0 && (
+            <section id="competition" className="scroll-mt-20">
             <Card className="p-6">
               <SectionTitle
                 eyebrow="Competitive Snapshot"
@@ -1576,12 +1657,21 @@ export default async function SubjectOverviewPage({
                   <div className="text-[11px] uppercase tracking-wider text-foreground/65 mb-3">
                     Share of Voice (% of answers)
                   </div>
+                  {/* CompetitorBarsFromData expects sov as a 0..1
+                      fraction (its XAxis is domain={[0,1]} and the
+                      tickFormatter multiplies × 100 for the "%"
+                      ticks). Passing already-multiplied integers
+                      pushed the X-axis ceiling to 9000% — fixed by
+                      passing the raw fraction. Height matches the
+                      ~7-row table on the right so the two halves
+                      of the Snapshot card align bottom-to-bottom. */}
                   <CompetitorBarsFromData
                     data={data.competitive.map((c) => ({
                       name: c.name,
-                      sov: Math.round(c.sov * 100),
+                      sov: c.sov,
                       is_subject: c.is_subject,
                     }))}
+                    height={320}
                   />
                 </div>
                 <div>
@@ -1648,9 +1738,11 @@ export default async function SubjectOverviewPage({
                 </div>
               </div>
             </Card>
+            </section>
           )}
 
           {/* SOURCES — wired */}
+          <section id="sources" className="scroll-mt-20">
           <Card className="p-6">
             <SectionTitle
               eyebrow="Sources"
@@ -1664,6 +1756,7 @@ export default async function SubjectOverviewPage({
               <SourcesTypeMix sources={data.sources} />
             </div>
           </Card>
+          </section>
 
           {/* REFRESH HISTORY — operator/audit context, behind a disclosure
               so it doesn't clutter the executive view */}

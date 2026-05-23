@@ -13,8 +13,8 @@
  * Trend" section. Pairs with a "What changed" insight card to the
  * right (rendered by the page, not this component).
  */
+import { useState } from "react";
 import {
-  Area,
   CartesianGrid,
   ComposedChart,
   Line,
@@ -137,12 +137,39 @@ export function TrendOverTime({
   trajectoryWeeks,
   subjectValues,
   overlays,
+  helperText,
+  overlayOpacity = 0.7,
+  height = 420,
 }: {
   subjectName: string;
   trajectoryWeeks: SubjectOverview["trajectory"]["weeks"];
   subjectValues: (number | null)[];     // aligned to trajectoryWeeks
   overlays: Overlay[];                  // up to 2-3 topic lines
+  // Optional small caption rendered below the chart legend, used
+  // by callers (e.g. the Competition spoke) to anchor what the
+  // mention-rate values mean for a non-technical reader.
+  helperText?: string;
+  // Stroke opacity for overlay (non-subject) lines. Default 0.7 so
+  // competitor / per-platform lines sit a touch behind the subject.
+  // Competition spoke passes a lower value (~0.5) when many
+  // competitor lines crowd the chart and the subject needs to read
+  // as the focal series.
+  overlayOpacity?: number;
+  // Chart pixel height. Default 420 keeps the Visibility spoke
+  // unchanged; the Competition spoke passes a smaller value so
+  // the line movements feel less wavy when many overlay lines
+  // are competing for vertical room.
+  height?: number;
 }) {
+  // Hover-to-isolate: when the user hovers a legend chip (or a line),
+  // drop the opacity of every non-hovered series so the chosen one
+  // pops. `hoveredName === null` = no isolation; default rendering.
+  // Both subject and overlay lines react to this so the user can
+  // focus on a single series even when four overlays + the subject
+  // line are crowding the chart.
+  const [hoveredName, setHoveredName] = useState<string | null>(null);
+  const opacityFor = (name: string, base: number): number =>
+    hoveredName === null || hoveredName === name ? base : 0.12;
   // Wide-format chart data: one row per week, one column per entity.
   type Row = { w: string; rawWeek: string } & Record<
     string,
@@ -192,30 +219,32 @@ export function TrendOverTime({
       if (typeof v === "number") allValues.push(v);
     });
   });
-  let yDomain: [number, number] = [0, 100];
-  if (allValues.length > 0) {
-    const lo = Math.max(0, Math.floor(Math.min(...allValues) / 10) * 10);
-    const hi = Math.min(100, Math.ceil(Math.max(...allValues) / 10) * 10);
-    yDomain =
-      lo === hi
-        ? [Math.max(0, lo - 10), Math.min(100, hi + 10)]
-        : [lo, hi];
-  }
+  // Render the full 0-100% conceptual range but pad the actual
+  // domain to 105 so a series that hugs the ceiling (100%) sits a
+  // hair below the chart frame instead of fusing with it. Explicit
+  // ticks keep the visible axis labels at 0/25/50/75/100 so the
+  // chart still reads as a 0-100% scale. A truncated axis is still
+  // off-limits — that would exaggerate movement.
+  const yDomain: [number, number] = [0, 105];
+  const yTicks = [0, 25, 50, 75, 100];
 
   return (
     <div>
-      <div className="h-[260px] w-full">
-        <ResponsiveContainer width="100%" height={260} minWidth={1}>
+      {/* Chart canvas at 420px — bumped from 340 because with 4-5
+          series in the upper 50-100% band the old height still made
+          the lines weave on top of each other. The taller canvas
+          combined with the tighter Y-domain (above) lets the cluster
+          spread vertically instead of stacking. */}
+      <div className="h-[420px] w-full">
+        <ResponsiveContainer width="100%" height={height} minWidth={1}>
           <ComposedChart
             data={data}
-            margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
+            margin={{ top: 12, right: 16, left: 0, bottom: 4 }}
           >
-            <defs>
-              <linearGradient id="trend-fill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={PRIMARY} stopOpacity={0.18} />
-                <stop offset="100%" stopColor={PRIMARY} stopOpacity={0} />
-              </linearGradient>
-            </defs>
+            {/* Gradient `<defs>` removed when the subject's area
+                fill was replaced with a heavier line stroke — the
+                fill was visually dominant and exaggerated the
+                subject's weight in the chart. */}
             <CartesianGrid
               stroke="oklch(0.91 0.008 250)"
               strokeDasharray="2 4"
@@ -228,9 +257,16 @@ export function TrendOverTime({
               tickLine={false}
               axisLine={false}
               tickMargin={8}
+              // minTickGap=40 lets Recharts thin the x-axis labels
+              // automatically — at 12 weekly snapshots the default
+              // would print every date, which crowds the axis. Now
+              // labels render at a comfortable cadence regardless of
+              // window width or how many weeks the trajectory has.
+              minTickGap={40}
             />
             <YAxis
               domain={yDomain}
+              ticks={yTicks}
               stroke="oklch(0.45 0.015 250)"
               fontSize={11}
               tickLine={false}
@@ -248,26 +284,38 @@ export function TrendOverTime({
                 type="monotone"
                 dataKey={o.name}
                 stroke={o.color}
-                strokeOpacity={0.75}
-                strokeWidth={1.5}
+                // Overlay strokes set to 70% opacity so the
+                // subject's primary line + area fill stays clearly
+                // dominant in the cluster — fully-opaque competitor
+                // lines were competing for visual weight and making
+                // the chart read as "lots of lines" instead of "one
+                // subject, several context lines."
+                strokeOpacity={opacityFor(o.name, overlayOpacity)}
+                strokeWidth={2}
                 dot={false}
                 activeDot={{
                   r: 3,
                   fill: o.color,
-                  fillOpacity: 0.75,
+                  fillOpacity: 0.85,
                   strokeWidth: 0,
                 }}
                 connectNulls={false}
                 isAnimationActive={false}
               />
             ))}
-            <Area
+            <Line
               type="monotone"
               dataKey={subjectName}
               stroke={PRIMARY}
-              strokeWidth={2.5}
-              fill="url(#trend-fill)"
-              dot={{ r: 2.5, fill: PRIMARY, strokeWidth: 0 }}
+              // Subject line gets a heavier stroke (3.5px vs the 2px
+              // competitor lines) so the focal entity reads clearly
+              // as the lead series — especially important on the
+              // Competition spoke where 6 competitor lines crowd
+              // the chart. Going past ~4px starts to feel chunky;
+              // 3.5px is the "noticeably thicker" sweet spot.
+              strokeWidth={3.5}
+              strokeOpacity={opacityFor(subjectName, 1)}
+              dot={false}
               activeDot={{ r: 4 }}
               connectNulls={false}
               isAnimationActive={false}
@@ -276,31 +324,74 @@ export function TrendOverTime({
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11.5px]">
-        <span className="inline-flex items-center gap-1.5">
+      {/* Legend doubles as the hover-isolate control. Hovering a
+          chip (mouse or keyboard focus) drops the opacity of every
+          other series so the chosen line pops; leaving restores the
+          full chart. Keyboard users get the same behavior via
+          `focus` / `blur` because the chips are tabbable buttons. */}
+      <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-[11.5px]">
+        <button
+          type="button"
+          onMouseEnter={() => setHoveredName(subjectName)}
+          onMouseLeave={() => setHoveredName(null)}
+          onFocus={() => setHoveredName(subjectName)}
+          onBlur={() => setHoveredName(null)}
+          className="inline-flex items-center gap-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
           <span
             className="h-[2px] w-4 rounded-full"
-            style={{ background: PRIMARY }}
+            style={{
+              background: PRIMARY,
+              opacity: opacityFor(subjectName, 1),
+            }}
             aria-hidden
           />
-          <span className="font-medium text-foreground">{subjectName}</span>
-        </span>
-        {overlays.map((o) => (
-          <span key={o.name} className="inline-flex items-center gap-1.5">
-            <span
-              className="h-[2px] w-4 rounded-full"
-              style={{ background: o.color, opacity: 0.75 }}
-              aria-hidden
-            />
-            <span
-              className="max-w-[220px] truncate text-foreground/70"
-              title={o.name}
-            >
-              {o.name}
-            </span>
+          <span
+            className="font-medium text-foreground transition-opacity"
+            style={{ opacity: opacityFor(subjectName, 1) }}
+          >
+            {subjectName}
           </span>
-        ))}
+        </button>
+        {/* Legend follows the same order as the chart's line data
+            (backend ships overlays sorted by total volume desc).
+            Aligning legend and chart ordering means a reader can
+            match "first chip" → "most-mentioned series" without
+            re-mapping between alphabetical chips and volume-ranked
+            lines. */}
+        {overlays.map((o) => (
+            <button
+              key={o.name}
+              type="button"
+              onMouseEnter={() => setHoveredName(o.name)}
+              onMouseLeave={() => setHoveredName(null)}
+              onFocus={() => setHoveredName(o.name)}
+              onBlur={() => setHoveredName(null)}
+              className="inline-flex items-center gap-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <span
+                className="h-[2px] w-4 rounded-full"
+                style={{
+                  background: o.color,
+                  opacity: opacityFor(o.name, overlayOpacity),
+                }}
+                aria-hidden
+              />
+              <span
+                className="max-w-[220px] truncate text-foreground/70 transition-opacity"
+                title={o.name}
+                style={{ opacity: opacityFor(o.name, 1) }}
+              >
+                {o.name}
+              </span>
+            </button>
+          ))}
       </div>
+      {helperText && (
+        <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+          {helperText}
+        </p>
+      )}
     </div>
   );
 }

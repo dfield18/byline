@@ -18,6 +18,7 @@ from dashboard.lib.queries import (
     _LOCK_CLASS_RECOMMENDED_ACTIONS,
     _RECOMMENDED_ACTIONS_TYPE,
     create_subject,
+    get_prompt_responses_for_subject,
     get_subject,
     get_subject_overview,
     list_subjects,
@@ -111,6 +112,29 @@ async def get_overview(
     if not overview:
         raise HTTPException(status_code=404, detail=f"subject {subject_id} not found")
     return overview
+
+
+@router.get("/{subject_id}/prompts/{prompt_id}/responses")
+async def get_prompt_responses(
+    subject_id: int,
+    prompt_id: int,
+    user: User = Depends(current_user),
+):
+    """Per-platform full response text for a single prompt on the
+    subject's latest completed refresh. Powers the Prompts spoke's
+    click-to-expand panel; lazy-loaded so the overview payload stays
+    compact.
+    """
+    org_id = _require_org(user)
+    responses = get_prompt_responses_for_subject(
+        subject_id, prompt_id, org_id=org_id,
+    )
+    if responses is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"subject {subject_id} not found",
+        )
+    return {"responses": responses}
 
 
 @router.post("", status_code=201)

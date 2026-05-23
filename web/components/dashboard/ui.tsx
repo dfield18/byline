@@ -42,9 +42,9 @@ export function SectionTitle({
             {eyebrow}
           </div>
         )}
-        <h2 className="text-[20px] font-semibold tracking-[-0.01em] text-foreground">{title}</h2>
+        <h2 className="text-[20px] font-semibold tracking-[-0.01em] text-foreground [hyphens:none]">{title}</h2>
         {description && (
-          <p className="text-sm text-foreground/75 mt-1 max-w-2xl leading-relaxed">{description}</p>
+          <p className="text-sm text-foreground/75 mt-1 max-w-2xl leading-relaxed [hyphens:none]">{description}</p>
         )}
       </div>
       {right}

@@ -2248,9 +2248,14 @@ def _read_competitive_snapshot(
         })
 
     competitor_rows.sort(key=lambda c: -c["sov"])
-    top_competitors = competitor_rows[:4]
+    # Top 6 competitors so the page's canonical N=7 (subject + 6) is
+    # backed by enough data. Earlier this was 4 (subject + 4 = 5),
+    # which forced different charts on the Competition spoke to pick
+    # different subsets from their own builders and broke cross-chart
+    # label consistency.
+    top_competitors = competitor_rows[:6]
 
-    # Build final table: focal subject + top 4 competitors, sorted by
+    # Build final table: focal subject + top 6 competitors, sorted by
     # SOV descending so the chart renders in rank order.
     table: list[dict[str, Any]] = [{
         "name": subject_name,
@@ -2391,7 +2396,9 @@ def _read_evidence_cards(
 
 
 def _read_narrative_clusters(
-    cur, refresh_run_id: int,
+    cur,
+    refresh_run_id: int,
+    setup_inputs: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Read the latest narrative_clusters cross-analyzer output for this
     refresh. Returns the cluster list ranked by share desc, or [] if
@@ -2424,6 +2431,101 @@ def _read_narrative_clusters(
     # Cluster list is already ranked share-desc by the analyzer, but
     # defensively re-sort here so the dashboard can rely on order.
     clusters.sort(key=lambda c: -(c.get("share") or 0))
+
+    # Attach a mean sentiment score to each cluster by averaging the
+    # per-response sentiment of its response_ids. Single bulk query
+    # for all response_ids across all clusters; group in Python. Lets
+    # the Narrative spoke render "is this a laudatory or hostile
+    # cluster" at a glance without a new endpoint.
+    all_response_ids: set[int] = set()
+    for c in clusters:
+        for rid in c.get("response_ids", []) or []:
+            if isinstance(rid, int):
+                all_response_ids.add(rid)
+    sentiment_by_response: dict[int, float] = {}
+    if all_response_ids:
+        cur.execute(
+            """
+            SELECT mr.id,
+                   (s.scores->>'sentiment')::numeric AS sentiment
+            FROM model_responses mr
+            JOIN LATERAL (
+                SELECT scores
+                FROM response_extractions
+                WHERE model_response_id = mr.id AND scores IS NOT NULL
+                ORDER BY analysis_run_id DESC LIMIT 1
+            ) s ON TRUE
+            WHERE mr.id = ANY(%s)
+            """,
+            (list(all_response_ids),),
+        )
+        for mr_id, sentiment in cur.fetchall():
+            if sentiment is not None:
+                sentiment_by_response[mr_id] = float(sentiment)
+    for c in clusters:
+        rids = c.get("response_ids", []) or []
+        vals = [
+            sentiment_by_response[rid]
+            for rid in rids
+            if rid in sentiment_by_response
+        ]
+        c["sentiment_mean"] = sum(vals) / len(vals) if vals else None
+
+    # Attach per-cluster topic + platform distributions so the
+    # Narrative spoke can narrow the Clusters section by the active
+    # global filter. One bulk query: for each response_id across all
+    # clusters, fetch the prompt template (for topic resolution) +
+    # the model slug (= platform identifier). Group counts in Python
+    # per cluster so the payload ships a compact distribution list
+    # rather than the raw join. Skips topic resolution when
+    # setup_inputs isn't provided (defensive — older callers don't
+    # pass it).
+    response_meta: dict[int, dict[str, str | None]] = {}
+    if all_response_ids:
+        cur.execute(
+            """
+            SELECT mr.id, m.slug AS platform_slug, p.template AS prompt_template
+            FROM model_responses mr
+            JOIN models m ON m.id = mr.model_id
+            JOIN prompts p ON p.id = mr.prompt_id
+            WHERE mr.id = ANY(%s)
+            """,
+            (list(all_response_ids),),
+        )
+        for mr_id, platform_slug, prompt_template in cur.fetchall():
+            response_meta[mr_id] = {
+                "platform_slug": platform_slug,
+                "prompt_template": prompt_template,
+            }
+    for c in clusters:
+        rids = c.get("response_ids", []) or []
+        topic_counts: dict[str, int] = {}
+        platform_counts: dict[str, int] = {}
+        for rid in rids:
+            meta = response_meta.get(rid)
+            if not meta:
+                continue
+            slug = meta.get("platform_slug")
+            if slug:
+                platform_counts[slug] = platform_counts.get(slug, 0) + 1
+            tmpl = meta.get("prompt_template")
+            if tmpl and setup_inputs is not None:
+                topic = _topic_for_prompt(tmpl, setup_inputs)
+                if topic is not None:
+                    label, _src = topic
+                    topic_counts[label] = topic_counts.get(label, 0) + 1
+        c["topic_distribution"] = [
+            {"label": label, "count": cnt}
+            for label, cnt in sorted(
+                topic_counts.items(), key=lambda kv: -kv[1]
+            )
+        ]
+        c["platform_distribution"] = [
+            {"slug": slug, "count": cnt}
+            for slug, cnt in sorted(
+                platform_counts.items(), key=lambda kv: -kv[1]
+            )
+        ]
     return clusters
 
 
@@ -2677,10 +2779,26 @@ def get_subject_overview(
             cur, latest_refresh_id,
         )
 
+        # Same KPI breakdown scoped to each tracked topic, with a
+        # per-topic delta vs the prior snapshot. Powers the topic
+        # dropdown on the Visibility tab's Platform Change Detail
+        # table so the four headline metrics (mention rate, avg
+        # rank, first-mention, change) can be read inside a single
+        # topic, not just at the all-topics roll-up.
+        per_platform_kpis_by_topic = _per_platform_kpis_by_topic(
+            cur, latest_refresh_id, prior_refresh_id, setup_inputs,
+        )
+
         # ── Rank distribution (Visibility tab) ───────────────────
         # When the subject IS mentioned, where do they rank? Four
         # buckets: #1, #2, #3, #4+. Powers the position histogram
         # alongside the avg-rank KPI tile.
+        # Per-(platform × topic) rank distribution — feeds the
+        # platform/topic dropdowns on the Answer Prominence section
+        # so both filters can be combined.
+        rank_distribution_by_platform = _rank_distribution_by_platform(
+            cur, latest_refresh_id, setup_inputs,
+        )
         rank_distribution = _rank_distribution_for_refresh(
             cur, latest_refresh_id,
         )
@@ -2703,6 +2821,21 @@ def get_subject_overview(
         # distinct from the avg_sentiment KPI which is just a mean.
         sentiment_distribution = _sentiment_distribution_for_refresh(
             cur, latest_refresh_id,
+        )
+        # Per-topic sentiment + auxiliary scores for the Narrative
+        # spoke's topic-axis matrix. Same scope as
+        # sentiment_distribution (mention-bearing responses only).
+        topic_sentiment_matrix = _topic_sentiment_matrix_for_refresh(
+            cur, latest_refresh_id, setup_inputs,
+        )
+        # Per-platform sentiment distribution — closes the Narrative
+        # spoke's Sentiment Mix advisory when the platform filter is
+        # set. Same mention-scoped denominator as the overall
+        # sentiment_distribution + the topic matrix.
+        platform_sentiment_distribution = (
+            _platform_sentiment_distribution_for_refresh(
+                cur, latest_refresh_id,
+            )
         )
 
         # ── Mention quality stratification (Visibility tab) ──────
@@ -2758,6 +2891,15 @@ def get_subject_overview(
             cur, latest_refresh_id, sname,
         )
 
+        # Per-(topic × platform × entity) landscape — powers the
+        # section-level platform/topic dropdowns on the Competition
+        # spoke's Landscape section so all three sub-cards (SoV bars,
+        # Scatter, Prominence table) can be scoped on both
+        # dimensions at once.
+        per_platform_landscape = _per_platform_landscape_for_refresh(
+            cur, latest_refresh_id, setup_inputs, sname,
+        )
+
         # ── First-mention steal share (Visibility tab) ───────────
         # When the subject doesn't land at #1, who does? Names the
         # specific competitors winning rank-1 placements and on
@@ -2780,6 +2922,58 @@ def get_subject_overview(
             cur, sid, weeks=weeks, risk_frame_threshold=risk_frame_threshold,
         )
 
+        # ── Scoped narrative-score trajectories (Narrative spoke) ──
+        # Per-topic and per-platform per-week means for the four
+        # narrative scores (sentiment / lean / criticism / certainty).
+        # Powers the per-week sparklines when the global topic /
+        # platform filter is active. Falls back gracefully — empty
+        # dicts when the trend window has no refreshes.
+        traj_refresh_ids = trajectory.get("refresh_ids", []) or []
+        scoped_by_topic, scoped_by_platform = _scoped_score_trajectories(
+            cur, list(traj_refresh_ids), setup_inputs,
+        )
+        # Assemble parallel-array trajectories (one per topic, one per
+        # platform) so the frontend can swap them in as a drop-in
+        # replacement for `trajectory.*` arrays when a filter is set.
+        def _assemble_scoped(
+            scope_map: dict[str, dict[int, dict[str, float | None]]],
+            scope_key: str,
+        ) -> list[dict[str, Any]]:
+            out: list[dict[str, Any]] = []
+            for key, rid_map in scope_map.items():
+                avg_sentiment_arr: list[float | None] = []
+                directional_lean_arr: list[float | None] = []
+                criticism_severity_arr: list[float | None] = []
+                certainty_arr: list[float | None] = []
+                net_sentiment_arr: list[float | None] = []
+                for rid in traj_refresh_ids:
+                    cell = rid_map.get(rid, {})
+                    avg_sentiment_arr.append(cell.get("avg_sentiment"))
+                    directional_lean_arr.append(
+                        cell.get("directional_lean")
+                    )
+                    criticism_severity_arr.append(
+                        cell.get("criticism_severity")
+                    )
+                    certainty_arr.append(cell.get("certainty"))
+                    net_sentiment_arr.append(cell.get("net_sentiment"))
+                out.append({
+                    scope_key: key,
+                    "avg_sentiment": avg_sentiment_arr,
+                    "directional_lean": directional_lean_arr,
+                    "criticism_severity": criticism_severity_arr,
+                    "certainty": certainty_arr,
+                    "net_sentiment": net_sentiment_arr,
+                })
+            return out
+
+        trajectory_by_topic = _assemble_scoped(
+            scoped_by_topic, "topic_label",
+        )
+        trajectory_by_platform = _assemble_scoped(
+            scoped_by_platform, "platform_slug",
+        )
+
         # ── Per-topic trajectories (Visibility tab) ───────────────
         # One mention-rate series per topic, aligned to the same
         # refresh order as the headline trajectory. Powers the
@@ -2790,6 +2984,22 @@ def get_subject_overview(
             cur, trajectory["refresh_ids"], setup_inputs,
         )
 
+        # ── Platform trajectories (Visibility Trend overlay) ────
+        # Per-LLM mention rate per refresh — the light-blue overlay
+        # lines on the Visibility Trend chart that answer "which
+        # platform is gaining or losing visibility for this subject?"
+        platform_trajectories = _platform_trajectories(
+            cur, trajectory["refresh_ids"],
+        )
+
+        # Per-(platform × topic) trajectories — feeds the platform
+        # dropdown on the Topic Visibility section so its "Largest
+        # Movement" card can recompute first-vs-latest deltas inside
+        # a chosen LLM.
+        topic_trajectories_by_platform = _topic_trajectories_by_platform(
+            cur, trajectory["refresh_ids"], setup_inputs,
+        )
+
         # ── Competitor trajectories (Visibility Trend overlay) ──
         # Top 3 competitors by total appearances across the window,
         # each with per-refresh mention_rate / share_of_voice /
@@ -2797,7 +3007,7 @@ def get_subject_overview(
         # frontend can render lighter overlay lines beside the
         # subject's line on each tab.
         competitor_trajectories = _competitor_trajectories(
-            cur, trajectory["refresh_ids"], top_n=3,
+            cur, trajectory["refresh_ids"], top_n=6,
         )
 
         # ── Top cited sources ───────────────────────────────────
@@ -2825,7 +3035,9 @@ def get_subject_overview(
         recommended_focus = polished["recommended_focus"]
 
         # ── Narrative clusters (Phase 3b — read pre-computed) ───
-        narrative_clusters = _read_narrative_clusters(cur, latest_refresh_id)
+        narrative_clusters = _read_narrative_clusters(
+            cur, latest_refresh_id, setup_inputs,
+        )
 
         # ── Evidence cards (Phase 3c — TopQuotes + cluster mapping) ─
         evidence_cards = _read_evidence_cards(
@@ -2900,17 +3112,26 @@ def get_subject_overview(
         "competitive": competitive,
         "competitor_trajectories": competitor_trajectories,
         "per_platform_kpis": per_platform_kpis,
+        "per_platform_kpis_by_topic": per_platform_kpis_by_topic,
         "platform_topic_matrix": platform_topic_matrix,
         "rank_distribution": rank_distribution,
+        "rank_distribution_by_platform": rank_distribution_by_platform,
         "sentiment_distribution": sentiment_distribution,
+        "topic_sentiment_matrix": topic_sentiment_matrix,
+        "platform_sentiment_distribution": platform_sentiment_distribution,
+        "trajectory_by_topic": trajectory_by_topic,
+        "trajectory_by_platform": trajectory_by_platform,
         "first_mention_steal_share": first_mention_steal_share,
         "mention_quality": mention_quality,
         "cross_platform_divergence": cross_platform_divergence,
         "per_prompt_coverage": per_prompt_coverage,
         "topic_trajectories": topic_trajectories,
+        "platform_trajectories": platform_trajectories,
+        "topic_trajectories_by_platform": topic_trajectories_by_platform,
         "topic_leaderboard": topic_leaderboard,
         "co_mention_frequency": co_mention_frequency,
         "per_platform_entity_sov": per_platform_entity_sov,
+        "per_platform_landscape": per_platform_landscape,
         "subject_set_benchmarks": subject_set_benchmarks,
         "snapshot_diff": snapshot_diff,
         "meta": {
@@ -2922,6 +3143,108 @@ def get_subject_overview(
             "canonical_url": setup_inputs.get("canonical_url"),
         },
     }
+
+
+def get_prompt_responses_for_subject(
+    subject_id: int,
+    prompt_id: int,
+    org_id: str | None = None,
+) -> list[dict[str, Any]] | None:
+    """Per-platform full response text for a single (subject, prompt)
+    on the latest completed refresh. Powers the Prompts spoke's
+    click-to-expand panel — lazy-loaded per row so we don't ship
+    every response_text up-front in the overview payload.
+
+    Auth: same org-scoping rules as get_subject. Returns None when
+    the subject doesn't exist or the caller's org can't see it.
+    Returns [] when the subject has no completed refresh or the
+    prompt has no responses on the latest refresh.
+    """
+    with get_cursor(commit=False) as cur:
+        # Verify the subject exists and is visible to this caller.
+        # Mirrors get_subject's three-case org check.
+        if org_id is None:
+            cur.execute(
+                "SELECT id FROM subjects WHERE id = %s",
+                (subject_id,),
+            )
+        elif _is_operator_org(org_id):
+            cur.execute(
+                """
+                SELECT id FROM subjects
+                WHERE id = %s AND (org_id = %s OR org_id IS NULL)
+                """,
+                (subject_id, org_id),
+            )
+        else:
+            cur.execute(
+                "SELECT id FROM subjects WHERE id = %s AND org_id = %s",
+                (subject_id, org_id),
+            )
+        if cur.fetchone() is None:
+            return None
+
+        # Latest completed refresh for this subject.
+        cur.execute(
+            """
+            SELECT id FROM refresh_runs
+            WHERE subject_id = %s AND status = 'completed'
+            ORDER BY
+              COALESCE(historical_as_of, started_at::date) DESC,
+              id DESC
+            LIMIT 1
+            """,
+            (subject_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return []
+        refresh_run_id = row[0]
+
+        # Responses for this (refresh × prompt), joined with the
+        # latest extraction for mention status + rank.
+        cur.execute(
+            """
+            SELECT
+              m.slug,
+              mr.response_text,
+              mr.success,
+              sm.subject_mentioned,
+              sm.mention_rank
+            FROM model_responses mr
+            JOIN models m ON m.id = mr.model_id
+            LEFT JOIN LATERAL (
+                SELECT subject_mentioned, mention_rank
+                FROM response_extractions
+                WHERE model_response_id = mr.id
+                  AND subject_mentioned IS NOT NULL
+                ORDER BY analysis_run_id DESC LIMIT 1
+            ) sm ON TRUE
+            WHERE mr.refresh_run_id = %s
+              AND mr.prompt_id = %s
+            ORDER BY m.slug
+            """,
+            (refresh_run_id, prompt_id),
+        )
+        display = {
+            "chatgpt": "ChatGPT",
+            "gemini": "Gemini",
+            "claude": "Claude",
+            "perplexity": "Perplexity",
+        }
+        out: list[dict[str, Any]] = []
+        for slug, text, success, mentioned, rank in cur.fetchall():
+            out.append({
+                "platform_slug": slug,
+                "platform_name": display.get(slug, slug.title()),
+                "response_text": text or "",
+                "success": bool(success),
+                "mentioned": (
+                    bool(mentioned) if mentioned is not None else None
+                ),
+                "rank": int(rank) if rank is not None else None,
+            })
+        return out
 
 
 def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
@@ -2949,6 +3272,10 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
             "avg_sentiment": [],
             "risk_frame_rate": [],
             "citation_rate": [],
+            "directional_lean": [],
+            "criticism_severity": [],
+            "certainty": [],
+            "net_sentiment": [],
             "share_of_voice": [],
             "top_result_rate": [],
         },
@@ -2963,7 +3290,9 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         "competitive": [],
         "competitor_trajectories": [],
         "per_platform_kpis": [],
+        "per_platform_kpis_by_topic": [],
         "platform_topic_matrix": {"platforms": [], "topics": [], "cells": []},
+        "rank_distribution_by_platform": [],
         # Empty subject still ships the fixed bucket skeleton (all
         # zero) so the frontend can render without null-guarding.
         "rank_distribution": {
@@ -2984,6 +3313,10 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
             "positive": 0, "neutral": 0, "negative": 0, "total": 0,
             "mean": None, "threshold": 0.1,
         },
+        "topic_sentiment_matrix": [],
+        "platform_sentiment_distribution": [],
+        "trajectory_by_topic": [],
+        "trajectory_by_platform": [],
         "first_mention_steal_share": {
             "total_responses": 0,
             "subject_first_count": 0,
@@ -3006,6 +3339,8 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         },
         "per_prompt_coverage": [],
         "topic_trajectories": [],
+        "platform_trajectories": [],
+        "topic_trajectories_by_platform": [],
         "topic_leaderboard": [],
         "co_mention_frequency": {
             "subject_mention_count": 0,
@@ -3016,11 +3351,16 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
             "entities": [],
             "cells": [],
         },
+        "per_platform_landscape": {
+            "platforms": [],
+            "by_topic": [],
+        },
         "subject_set_benchmarks": {
             "n_subjects": 0,
             "ai_mention_rate_avg": None,
             "avg_mention_rank_avg": None,
             "first_mention_rate_avg": None,
+            "topic_gap_median": None,
         },
         "snapshot_diff": None,
         "meta": {
@@ -3294,6 +3634,160 @@ def _rank_distribution_for_refresh(
     }
 
 
+def _rank_distribution_by_platform(
+    cur,
+    refresh_run_id: int,
+    setup_inputs: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Per-platform rank distribution with a nested per-(platform × topic)
+    breakdown so the Visibility tab's Answer Prominence section can
+    independently scope by platform, by topic, or by both at once.
+
+    Returns:
+      [
+        {
+          slug, name,
+          # Aggregate across all topics for this platform.
+          all_topics: {total_responses, n_mentioned, buckets[...]},
+          # Per-topic for this platform.
+          by_topic: [
+            {topic_label, source_field, total_responses, n_mentioned, buckets[...]},
+            ...
+          ],
+        },
+        ...
+      ]
+    Same bucket schema as `_rank_distribution_for_refresh`, so the
+    frontend rendering doesn't branch on shape.
+    """
+    cur.execute(
+        """
+        SELECT
+          m.slug,
+          p.template,
+          sm.subject_mentioned,
+          sm.mention_rank
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN models m ON m.id = mr.model_id
+        JOIN LATERAL (
+            SELECT subject_mentioned, mention_rank
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return []
+
+    def _empty_buckets() -> dict[int, int]:
+        return {1: 0, 2: 0, 4: 0, 6: 0, 0: 0}
+
+    def _bucket_for(mentioned: bool, rank: int | None) -> int:
+        if not mentioned or rank is None:
+            return 0
+        r = int(rank)
+        if r == 1:
+            return 1
+        if r <= 3:
+            return 2
+        if r <= 5:
+            return 4
+        return 6
+
+    def _bucket_payload(
+        counts: dict[int, int], total: int,
+    ) -> dict[str, Any]:
+        n_mentioned = sum(v for k, v in counts.items() if k != 0)
+        share = lambda n: (n / total) if total else 0.0  # noqa: E731
+        return {
+            "total_responses": total,
+            "n_mentioned": n_mentioned,
+            "buckets": [
+                {"rank": 1, "label": "Rank 1", "n": counts[1], "share": share(counts[1])},
+                {"rank": 2, "label": "Ranks 2-3", "n": counts[2], "share": share(counts[2])},
+                {"rank": 4, "label": "Ranks 4-5", "n": counts[4], "share": share(counts[4])},
+                {"rank": 6, "label": "Rank 6+", "n": counts[6], "share": share(counts[6])},
+                {
+                    "rank": 0, "label": "Not mentioned",
+                    "n": counts[0], "share": share(counts[0]),
+                    "is_absence": True,
+                },
+            ],
+        }
+
+    # per_platform[slug] = {all: {counts, total}, by_topic: {label: {counts, total, source_field}}}
+    per_platform: dict[str, dict[str, Any]] = {}
+
+    for slug, template, mentioned, rank in rows:
+        if slug is None:
+            continue
+        topic = _topic_for_prompt(template, setup_inputs)
+        platform_entry = per_platform.setdefault(
+            slug,
+            {
+                "all_counts": _empty_buckets(),
+                "all_total": 0,
+                "by_topic": {},
+            },
+        )
+        bucket = _bucket_for(mentioned, rank)
+        platform_entry["all_counts"][bucket] += 1
+        platform_entry["all_total"] += 1
+        if topic is not None:
+            label, source_field = topic
+            topic_entry = platform_entry["by_topic"].setdefault(
+                label,
+                {
+                    "counts": _empty_buckets(),
+                    "total": 0,
+                    "source_field": source_field,
+                },
+            )
+            topic_entry["counts"][bucket] += 1
+            topic_entry["total"] += 1
+
+    display = {
+        "chatgpt": "ChatGPT",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "perplexity": "Perplexity",
+    }
+    # Order platforms by total responses desc (most-populated first).
+    ordered_slugs = sorted(
+        per_platform.keys(), key=lambda s: -per_platform[s]["all_total"],
+    )
+    out: list[dict[str, Any]] = []
+    for slug in ordered_slugs:
+        entry = per_platform[slug]
+        # Topics within each platform ordered by total responses desc.
+        topic_rows = []
+        for label, topic_entry in sorted(
+            entry["by_topic"].items(), key=lambda kv: -kv[1]["total"],
+        ):
+            payload = _bucket_payload(
+                topic_entry["counts"], topic_entry["total"],
+            )
+            payload["topic_label"] = label
+            payload["source_field"] = topic_entry["source_field"]
+            topic_rows.append(payload)
+        out.append({
+            "slug": slug,
+            "name": display.get(slug, slug.title()),
+            "all_topics": _bucket_payload(
+                entry["all_counts"], entry["all_total"],
+            ),
+            "by_topic": topic_rows,
+        })
+    return out
+
+
 def _per_platform_kpis_for_refresh(
     cur, refresh_run_id: int,
 ) -> list[dict[str, Any]]:
@@ -3376,6 +3870,171 @@ def _per_platform_kpis_for_refresh(
     # Sort by mention_rate desc so the strongest-coverage platform leads
     # the matrix (consistent with platform_recall's ordering).
     out.sort(key=lambda r: (r["mention_rate"] is None, -(r["mention_rate"] or 0.0)))
+    return out
+
+
+def _per_platform_kpis_by_topic(
+    cur,
+    latest_refresh_id: int,
+    prior_refresh_id: int | None,
+    setup_inputs: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Per-(platform × topic) breakdown of the headline visibility KPIs
+    so the Visibility tab's Platform Change Detail table can scope to
+    a single topic. Mirrors `_per_platform_kpis_for_refresh` but adds
+    the template → topic resolution + per-topic grouping, and computes
+    a per-topic delta from the prior snapshot.
+
+    Returns:
+      [
+        {
+          topic_label: str,
+          source_field: str,
+          platforms: [
+            {
+              slug, name, n_responses,
+              mention_rate, avg_rank, first_mention_rate,
+              # delta is already in PERCENTAGE POINTS (cur - prior)*100,
+              # to match platform_recall.delta and keep the frontend
+              # using one signed-pp formatter across both views.
+              delta: float | None,
+            },
+            ...
+          ],
+        },
+        ...
+      ]
+
+    Topics are sorted by total response volume desc (most-populated
+    first, matches the existing topic_leaderboard ordering); platforms
+    within each topic sort by mention rate desc.
+    """
+    def _fetch_per_topic_platform_aggregates(
+        refresh_id: int,
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        cur.execute(
+            """
+            SELECT
+              m.slug,
+              p.template,
+              sm.subject_mentioned,
+              sm.mention_rank
+            FROM model_responses mr
+            JOIN prompts p ON p.id = mr.prompt_id
+            JOIN models m ON m.id = mr.model_id
+            LEFT JOIN LATERAL (
+                SELECT subject_mentioned, mention_rank
+                FROM response_extractions
+                WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+                ORDER BY analysis_run_id DESC LIMIT 1
+            ) sm ON TRUE
+            WHERE mr.refresh_run_id = %s
+              AND p.layer = 'unnamed'
+              AND mr.success = TRUE
+            """,
+            (refresh_id,),
+        )
+        agg: dict[tuple[str, str], dict[str, Any]] = {}
+        for slug, template, mentioned, mention_rank in cur.fetchall():
+            topic = _topic_for_prompt(template, setup_inputs)
+            if topic is None:
+                continue
+            label, source_field = topic
+            key = (slug, label)
+            cell = agg.setdefault(
+                key,
+                {
+                    "n_responses": 0,
+                    "n_mentioned": 0,
+                    "rank_sum": 0.0,
+                    "rank_n": 0,
+                    "first_n": 0,
+                    "source_field": source_field,
+                },
+            )
+            cell["n_responses"] += 1
+            if mentioned:
+                cell["n_mentioned"] += 1
+                if mention_rank is not None:
+                    cell["rank_sum"] += float(mention_rank)
+                    cell["rank_n"] += 1
+                    if int(mention_rank) == 1:
+                        cell["first_n"] += 1
+        return agg
+
+    current = _fetch_per_topic_platform_aggregates(latest_refresh_id)
+    if not current:
+        return []
+    prior = (
+        _fetch_per_topic_platform_aggregates(prior_refresh_id)
+        if prior_refresh_id
+        else {}
+    )
+
+    display = {
+        "chatgpt": "ChatGPT",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "perplexity": "Perplexity",
+    }
+
+    # Build per-topic structure.
+    topics: dict[str, dict[str, Any]] = {}
+    for (slug, label), cell in current.items():
+        n_resp = cell["n_responses"]
+        mention_rate = (
+            cell["n_mentioned"] / n_resp if n_resp > 0 else None
+        )
+        avg_rank = (
+            cell["rank_sum"] / cell["rank_n"] if cell["rank_n"] > 0 else None
+        )
+        first_rate = (
+            cell["first_n"] / n_resp if n_resp > 0 else None
+        )
+        prior_cell = prior.get((slug, label))
+        prior_rate = None
+        if prior_cell and prior_cell["n_responses"] > 0:
+            prior_rate = (
+                prior_cell["n_mentioned"] / prior_cell["n_responses"]
+            )
+        delta_pp = None
+        if mention_rate is not None and prior_rate is not None:
+            delta_pp = (mention_rate - prior_rate) * 100.0
+
+        topic_entry = topics.setdefault(
+            label,
+            {
+                "topic_label": label,
+                "source_field": cell["source_field"],
+                "_total_responses": 0,
+                "platforms": [],
+            },
+        )
+        topic_entry["_total_responses"] += n_resp
+        topic_entry["platforms"].append({
+            "slug": slug,
+            "name": display.get(slug, slug),
+            "n_responses": n_resp,
+            "mention_rate": mention_rate,
+            "avg_rank": avg_rank,
+            "first_mention_rate": first_rate,
+            "delta": delta_pp,
+        })
+
+    # Sort platforms within each topic, drop the scratch field, sort
+    # topics by total volume desc.
+    out: list[dict[str, Any]] = []
+    for entry in sorted(
+        topics.values(), key=lambda t: -t["_total_responses"],
+    ):
+        entry["platforms"].sort(
+            key=lambda p: (
+                p["mention_rate"] is None,
+                -(p["mention_rate"] or 0.0),
+            ),
+        )
+        del entry["_total_responses"]
+        out.append(entry)
     return out
 
 
@@ -3705,12 +4364,18 @@ def _subject_set_benchmarks(cur) -> dict[str, Any]:
     means in one bulk query, then averages those per-subject values
     across the set.
 
+    The topic-gap benchmark is the median of per-subject
+    (max_topic_recall - min_topic_recall) values. Median (not mean)
+    keeps a single subject with one outlier topic from blowing up
+    the benchmark for everyone else.
+
     Returns:
       {
         n_subjects: int,                     # subjects contributing
         ai_mention_rate_avg: float | None,   # 0..1
         avg_mention_rank_avg: float | None,  # ranks (lower better)
         first_mention_rate_avg: float | None,# 0..1
+        topic_gap_median: float | None,      # 0..1 (median across subjects)
       }
 
     Currently not org-scoped — the page-level org filter would let
@@ -3760,6 +4425,7 @@ def _subject_set_benchmarks(cur) -> dict[str, Any]:
             "ai_mention_rate_avg": None,
             "avg_mention_rank_avg": None,
             "first_mention_rate_avg": None,
+            "topic_gap_median": None,
         }
 
     recalls: list[float] = []
@@ -3773,6 +4439,76 @@ def _subject_set_benchmarks(cur) -> dict[str, Any]:
         if first_rate is not None:
             firsts.append(float(first_rate))
 
+    # Topic-gap benchmark: per-subject (max_topic_recall - min_topic_recall)
+    # across that subject's tracked topics on the same latest refresh
+    # used above. Resolving prompt → topic requires each subject's own
+    # setup_inputs, so this needs a second pass that joins subjects to
+    # their per-prompt mentioned counts and runs topic resolution in
+    # Python. Subjects with fewer than 2 measured topics are skipped
+    # (you can't have a gap with one topic).
+    cur.execute(
+        """
+        WITH latest_refreshes AS (
+          SELECT DISTINCT ON (subject_id) subject_id, id
+          FROM refresh_runs
+          WHERE status = 'completed'
+          ORDER BY
+            subject_id,
+            COALESCE(historical_as_of, started_at::date) DESC,
+            id DESC
+        )
+        SELECT
+          lr.subject_id,
+          s.setup_inputs,
+          p.template,
+          sm.subject_mentioned
+        FROM latest_refreshes lr
+        JOIN subjects s ON s.id = lr.subject_id
+        JOIN model_responses mr ON mr.refresh_run_id = lr.id
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+          SELECT subject_mentioned
+          FROM response_extractions
+          WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+          ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE p.layer = 'unnamed' AND mr.success = TRUE
+        """,
+    )
+    # Per-subject: {(topic_label): [n_responses, n_mentioned]}
+    per_subject_topics: dict[int, dict[str, list[int]]] = {}
+    per_subject_setup: dict[int, dict[str, Any]] = {}
+    for sid, setup, template, mentioned in cur.fetchall():
+        setup_inputs = _maybe_json(setup) or {}
+        per_subject_setup.setdefault(sid, setup_inputs)
+        topic = _topic_for_prompt(template, setup_inputs)
+        if topic is None:
+            continue
+        label, _source_field = topic
+        buckets = per_subject_topics.setdefault(sid, {})
+        bucket = buckets.setdefault(label, [0, 0])
+        bucket[0] += 1
+        if mentioned:
+            bucket[1] += 1
+
+    gaps: list[float] = []
+    for sid, topic_buckets in per_subject_topics.items():
+        rates = [
+            n_m / n_r for (n_r, n_m) in topic_buckets.values() if n_r > 0
+        ]
+        if len(rates) < 2:
+            continue
+        gaps.append(max(rates) - min(rates))
+
+    topic_gap_median: float | None = None
+    if gaps:
+        gaps.sort()
+        mid = len(gaps) // 2
+        if len(gaps) % 2 == 1:
+            topic_gap_median = gaps[mid]
+        else:
+            topic_gap_median = (gaps[mid - 1] + gaps[mid]) / 2
+
     return {
         "n_subjects": len(rows),
         "ai_mention_rate_avg": (
@@ -3784,6 +4520,7 @@ def _subject_set_benchmarks(cur) -> dict[str, Any]:
         "first_mention_rate_avg": (
             sum(firsts) / len(firsts) if firsts else None
         ),
+        "topic_gap_median": topic_gap_median,
     }
 
 
@@ -4106,7 +4843,7 @@ def _per_platform_entity_sov_for_refresh(
     refresh_run_id: int,
     subject_name: str,
     *,
-    top_n: int = 5,
+    top_n: int = 7,
 ) -> dict[str, Any]:
     """Per-platform Share of Voice per entity. Rows × columns:
       rows = top N entities by total appearances (subject always
@@ -4237,6 +4974,278 @@ def _per_platform_entity_sov_for_refresh(
         "platforms": platforms,
         "entities": entities,
         "cells": cells,
+    }
+
+
+def _per_platform_landscape_for_refresh(
+    cur,
+    refresh_run_id: int,
+    setup_inputs: dict[str, Any],
+    subject_name: str,
+    *,
+    top_n: int = 7,
+) -> dict[str, Any]:
+    """Per-(topic × platform × entity) prominence metrics for the
+    Competition spoke's Landscape section. Powers the section-level
+    platform/topic dropdowns there so all three sub-cards (SoV bars,
+    Scatter, Competitive Prominence table) can be scoped on both
+    dimensions at once.
+
+    Returns:
+      {
+        platforms: [{slug, name, n_responses_total}, ...],
+        # First entry is a synthetic "All topics" rollup with
+        # `is_all_topics: True`, so the frontend can read this same
+        # structure for the platform-only scope without a separate
+        # field. Subsequent entries are one per tracked topic.
+        by_topic: [
+          {
+            topic_label: str,                  # "All topics" or actual label
+            source_field: str | None,          # None for All-topics rollup
+            is_all_topics: bool,
+            platforms: [
+              {
+                slug: str,
+                n_responses: int,              # for this (platform, topic) cell
+                entities: [
+                  {
+                    name: str,
+                    is_subject: bool,
+                    sov: float,                # 0..1, appearances/n_responses
+                    avg_rank: float | None,    # mean rank when entity appeared
+                    first_mention_rate: float, # 0..1, rank=1 / n_responses
+                    n_appearances: int,
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+
+    Entity selection: top-N by total appearances across the snapshot,
+    with the subject force-included even if it would otherwise miss
+    the cut. Mirrors `_per_platform_entity_sov_for_refresh`'s
+    selection so the same set of entities appears across both
+    breakdowns.
+    """
+    cur.execute(
+        """
+        SELECT
+          m.slug,
+          p.template,
+          sm.subject_mentioned,
+          sm.mention_rank,
+          sm.competitors_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN models m ON m.id = mr.model_id
+        LEFT JOIN LATERAL (
+            SELECT
+              subject_mentioned, mention_rank, competitors_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id
+              AND (
+                subject_mentioned IS NOT NULL
+                OR competitors_mentioned IS NOT NULL
+              )
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return {"platforms": [], "by_topic": []}
+
+    # Aggregator key: (topic_or_ALL, platform_slug) → {
+    #   n_responses: int,
+    #   by_entity: {name: {n_appearances, rank_sum, rank_n, first_n}}
+    # }
+    # We track the "ALL topics" rollup under the sentinel key.
+    ALL_TOPICS = "__ALL__"
+
+    def _new_cell() -> dict[str, Any]:
+        return {"n_responses": 0, "by_entity": {}}
+
+    cells: dict[tuple[str, str], dict[str, Any]] = {}
+    # Track per-topic source_field for the response shape.
+    topic_source_field: dict[str, str] = {}
+    # Track per-platform totals across all topics for the platforms[] list.
+    platform_total: dict[str, int] = {}
+    total_appearances: dict[str, int] = {}
+
+    def _add_entity(
+        cell: dict[str, Any], name: str, rank: int | None,
+    ) -> None:
+        agg = cell["by_entity"].setdefault(
+            name,
+            {"n_appearances": 0, "rank_sum": 0.0, "rank_n": 0, "first_n": 0},
+        )
+        agg["n_appearances"] += 1
+        if rank is not None:
+            agg["rank_sum"] += float(rank)
+            agg["rank_n"] += 1
+            if int(rank) == 1:
+                agg["first_n"] += 1
+
+    for slug, template, subj_mentioned, subj_rank, comps_raw in rows:
+        if slug is None:
+            continue
+        platform_total[slug] = platform_total.get(slug, 0) + 1
+        topic = _topic_for_prompt(template, setup_inputs)
+        topic_label = topic[0] if topic is not None else None
+        if topic is not None:
+            topic_source_field.setdefault(topic[0], topic[1])
+
+        # Pick the cells this response should count toward — the
+        # All-topics rollup always, and the specific topic cell when
+        # the prompt resolved to a tracked topic.
+        target_keys: list[tuple[str, str]] = [(ALL_TOPICS, slug)]
+        if topic_label is not None:
+            target_keys.append((topic_label, slug))
+
+        for key in target_keys:
+            cell = cells.setdefault(key, _new_cell())
+            cell["n_responses"] += 1
+            if subj_mentioned:
+                _add_entity(
+                    cell, subject_name,
+                    int(subj_rank) if subj_rank is not None else None,
+                )
+        if subj_mentioned:
+            total_appearances[subject_name] = (
+                total_appearances.get(subject_name, 0) + 1
+            )
+
+        comps = _maybe_json(comps_raw) or []
+        if not isinstance(comps, list):
+            continue
+        seen: set[str] = set()
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("name")
+            if not isinstance(name, str) or not name or name in seen:
+                continue
+            seen.add(name)
+            rank_val = c.get("rank")
+            rank_int: int | None = None
+            if isinstance(rank_val, (int, float)) and rank_val > 0:
+                rank_int = int(rank_val)
+            for key in target_keys:
+                _add_entity(cells[key], name, rank_int)
+            total_appearances[name] = total_appearances.get(name, 0) + 1
+
+    # Top-N entity selection — same logic as _per_platform_entity_sov_for_refresh
+    ranked = sorted(total_appearances.items(), key=lambda kv: -kv[1])
+    top_names = [n for n, _ in ranked[:top_n]]
+    if subject_name not in top_names and subject_name in total_appearances:
+        if len(top_names) >= top_n:
+            top_names[-1] = subject_name
+        else:
+            top_names.append(subject_name)
+
+    display = {
+        "chatgpt": "ChatGPT",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "perplexity": "Perplexity",
+    }
+    platforms_out = sorted(
+        (
+            {
+                "slug": slug,
+                "name": display.get(slug, slug),
+                "n_responses_total": total,
+            }
+            for slug, total in platform_total.items()
+        ),
+        key=lambda p: p["slug"],
+    )
+
+    def _format_entities(
+        cell: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        n_resp = cell["n_responses"]
+        out: list[dict[str, Any]] = []
+        if n_resp <= 0:
+            return out
+        for name in top_names:
+            agg = cell["by_entity"].get(name)
+            if agg is None:
+                out.append({
+                    "name": name,
+                    "is_subject": name == subject_name,
+                    "sov": 0.0,
+                    "avg_rank": None,
+                    "first_mention_rate": 0.0,
+                    "n_appearances": 0,
+                })
+                continue
+            avg_rank = (
+                agg["rank_sum"] / agg["rank_n"]
+                if agg["rank_n"] > 0 else None
+            )
+            out.append({
+                "name": name,
+                "is_subject": name == subject_name,
+                "sov": agg["n_appearances"] / n_resp,
+                "avg_rank": avg_rank,
+                "first_mention_rate": agg["first_n"] / n_resp,
+                "n_appearances": agg["n_appearances"],
+            })
+        return out
+
+    def _build_topic_entry(
+        topic_label_value: str,
+        source_field: str | None,
+        is_all_topics: bool,
+    ) -> dict[str, Any]:
+        plats: list[dict[str, Any]] = []
+        for slug in (p["slug"] for p in platforms_out):
+            cell = cells.get((
+                ALL_TOPICS if is_all_topics else topic_label_value,
+                slug,
+            ))
+            if cell is None or cell["n_responses"] == 0:
+                continue
+            plats.append({
+                "slug": slug,
+                "n_responses": cell["n_responses"],
+                "entities": _format_entities(cell),
+            })
+        return {
+            "topic_label": topic_label_value,
+            "source_field": source_field,
+            "is_all_topics": is_all_topics,
+            "platforms": plats,
+        }
+
+    by_topic: list[dict[str, Any]] = [
+        _build_topic_entry("All topics", None, True),
+    ]
+    # Order specific topics by volume desc so the most-populated
+    # ones appear first in any dropdown that iterates the array.
+    ordered_topics = sorted(
+        topic_source_field.keys(),
+        key=lambda t: -sum(
+            cells[(t, s["slug"])]["n_responses"]
+            for s in platforms_out
+            if (t, s["slug"]) in cells
+        ),
+    )
+    for label in ordered_topics:
+        by_topic.append(
+            _build_topic_entry(label, topic_source_field[label], False),
+        )
+
+    return {
+        "platforms": platforms_out,
+        "by_topic": by_topic,
     }
 
 
@@ -4554,6 +5563,220 @@ def _topic_trajectories(
     return out
 
 
+def _platform_trajectories(
+    cur,
+    refresh_ids: list[int],
+) -> list[dict[str, Any]]:
+    """Per-platform (per LLM) mention rate per refresh, aligned to the
+    same refresh order as `_trajectory_for_subject`. Powers the
+    Visibility Trend chart's lighter "by platform" overlay lines so
+    the reader can see which models are gaining/losing visibility.
+
+    Returns: [{slug, name, mention_rate: [float|None per refresh]}, ...]
+    Ordered by total appearances across the window so the
+    most-populated platforms get the most-readable lines. A refresh
+    where a platform had zero responses yields None for that slot.
+    """
+    if not refresh_ids:
+        return []
+
+    cur.execute(
+        """
+        SELECT mr.refresh_run_id, m.slug, sm.subject_mentioned
+        FROM model_responses mr
+        JOIN models m ON m.id = mr.model_id
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s)
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_ids,),
+    )
+
+    # per_refresh[rid][slug] = {n_resp, n_mentioned}
+    per_refresh: dict[int, dict[str, dict[str, int]]] = {}
+    platform_total: dict[str, int] = {}
+
+    for rid, slug, mentioned in cur.fetchall():
+        if slug is None:
+            continue
+        agg = per_refresh.setdefault(rid, {}).setdefault(
+            slug, {"n_resp": 0, "n_mentioned": 0},
+        )
+        agg["n_resp"] += 1
+        if mentioned:
+            agg["n_mentioned"] += 1
+        platform_total[slug] = platform_total.get(slug, 0) + 1
+
+    # Slug → display name mapping, same convention used elsewhere
+    # in this module (see Platform Breakdown / Cross-Platform Divergence).
+    display = {
+        "chatgpt": "ChatGPT",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "perplexity": "Perplexity",
+    }
+
+    ordered_slugs = sorted(
+        platform_total.keys(), key=lambda s: -platform_total[s],
+    )
+
+    out: list[dict[str, Any]] = []
+    for slug in ordered_slugs:
+        rates: list[float | None] = []
+        for rid in refresh_ids:
+            agg = per_refresh.get(rid, {}).get(slug)
+            if agg and agg["n_resp"] > 0:
+                rates.append(agg["n_mentioned"] / agg["n_resp"])
+            else:
+                rates.append(None)
+        out.append({
+            "slug": slug,
+            "name": display.get(slug, slug.title()),
+            "mention_rate": rates,
+        })
+    return out
+
+
+def _topic_trajectories_by_platform(
+    cur,
+    refresh_ids: list[int],
+    setup_inputs: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Per-(platform × topic) mention rate per refresh — the cross of
+    `_topic_trajectories` and `_platform_trajectories`. Powers the
+    platform dropdown on the Topic Visibility section so the "Largest
+    Movement" card can recompute its first-vs-latest delta inside a
+    chosen LLM, not just across all platforms.
+
+    Returns:
+      [
+        {
+          slug: str,
+          name: str,
+          topics: [
+            {label, source_field, mention_rate: [float|None per refresh]},
+            ...
+          ],
+        },
+        ...
+      ]
+    Platforms ordered by total appearances across the window; topics
+    within each platform ordered by total appearances on that platform.
+    """
+    if not refresh_ids:
+        return []
+
+    cur.execute(
+        """
+        SELECT mr.refresh_run_id, m.slug, p.template, sm.subject_mentioned
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        JOIN models m ON m.id = mr.model_id
+        JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s)
+          AND p.layer = 'unnamed'
+          AND mr.success = TRUE
+        """,
+        (refresh_ids,),
+    )
+
+    # per_refresh[rid][slug][label] = {n_resp, n_mentioned, source_field}
+    per_refresh: dict[int, dict[str, dict[str, dict[str, Any]]]] = {}
+    platform_total: dict[str, int] = {}
+    # Per-platform topic volume for ordering within each platform.
+    platform_topic_total: dict[str, dict[str, dict[str, Any]]] = {}
+
+    for rid, slug, template, mentioned in cur.fetchall():
+        if slug is None:
+            continue
+        topic = _topic_for_prompt(template, setup_inputs)
+        if topic is None:
+            continue
+        label, source_field = topic
+
+        agg = (
+            per_refresh
+            .setdefault(rid, {})
+            .setdefault(slug, {})
+            .setdefault(
+                label,
+                {
+                    "n_resp": 0,
+                    "n_mentioned": 0,
+                    "source_field": source_field,
+                },
+            )
+        )
+        agg["n_resp"] += 1
+        if mentioned:
+            agg["n_mentioned"] += 1
+
+        platform_total[slug] = platform_total.get(slug, 0) + 1
+        topic_agg = (
+            platform_topic_total
+            .setdefault(slug, {})
+            .setdefault(
+                label,
+                {"n_resp": 0, "source_field": source_field},
+            )
+        )
+        topic_agg["n_resp"] += 1
+
+    display = {
+        "chatgpt": "ChatGPT",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "perplexity": "Perplexity",
+    }
+
+    out: list[dict[str, Any]] = []
+    for slug in sorted(
+        platform_total.keys(), key=lambda s: -platform_total[s],
+    ):
+        topics_for_slug = sorted(
+            platform_topic_total.get(slug, {}).keys(),
+            key=lambda t: -platform_topic_total[slug][t]["n_resp"],
+        )
+        topic_rows: list[dict[str, Any]] = []
+        for label in topics_for_slug:
+            rates: list[float | None] = []
+            for rid in refresh_ids:
+                agg = (
+                    per_refresh.get(rid, {})
+                    .get(slug, {})
+                    .get(label)
+                )
+                if agg and agg["n_resp"] > 0:
+                    rates.append(agg["n_mentioned"] / agg["n_resp"])
+                else:
+                    rates.append(None)
+            topic_rows.append({
+                "label": label,
+                "source_field": (
+                    platform_topic_total[slug][label]["source_field"]
+                ),
+                "mention_rate": rates,
+            })
+        out.append({
+            "slug": slug,
+            "name": display.get(slug, slug.title()),
+            "topics": topic_rows,
+        })
+    return out
+
+
 def _snapshot_diff(
     cur,
     latest_refresh_id: int,
@@ -4726,14 +5949,180 @@ def _sentiment_distribution_for_refresh(
     }
 
 
+def _platform_sentiment_distribution_for_refresh(
+    cur, refresh_run_id: int, *, threshold: float = 0.1,
+) -> list[dict[str, Any]]:
+    """Per-platform pos/neu/neg counts + mean — the platform-axis
+    analog of `_sentiment_distribution_for_refresh`. Same
+    mention-bearing scope (named-layer responses + unnamed-layer
+    where subject was mentioned). Powers the Narrative spoke's
+    Sentiment Mix section when the global platform filter is set.
+    Returns one row per AI platform present in the snapshot.
+    """
+    cur.execute(
+        """
+        SELECT
+          m.slug AS platform_slug,
+          COUNT(*) FILTER (WHERE (s.scores->>'sentiment')::numeric > %s) AS positive,
+          COUNT(*) FILTER (WHERE (s.scores->>'sentiment')::numeric BETWEEN -%s AND %s) AS neutral,
+          COUNT(*) FILTER (WHERE (s.scores->>'sentiment')::numeric < -%s) AS negative,
+          COUNT(*) FILTER (WHERE (s.scores->>'sentiment') IS NOT NULL) AS total,
+          AVG((s.scores->>'sentiment')::numeric) AS mean
+        FROM model_responses mr
+        JOIN models m ON m.id = mr.model_id
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT scores
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND scores IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) s ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND mr.success = TRUE
+          AND (p.layer = 'named' OR sm.subject_mentioned = TRUE)
+        GROUP BY m.slug
+        ORDER BY total DESC
+        """,
+        (threshold, threshold, threshold, threshold, refresh_run_id),
+    )
+    # The `models` table doesn't have a display-name column — same
+    # convention the other per-platform builders in this file use:
+    # map well-known slugs to capitalized display strings, fall back
+    # to slug.title() for anything else.
+    display = {
+        "chatgpt": "ChatGPT",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "perplexity": "Perplexity",
+    }
+    out: list[dict[str, Any]] = []
+    for slug, pos, neu, neg, total, mean in cur.fetchall():
+        out.append({
+            "platform_slug": slug,
+            "platform_name": display.get(slug, slug.title()),
+            "positive": int(pos or 0),
+            "neutral": int(neu or 0),
+            "negative": int(neg or 0),
+            "total": int(total or 0),
+            "mean": float(mean) if mean is not None else None,
+            "threshold": threshold,
+        })
+    return out
+
+
+def _topic_sentiment_matrix_for_refresh(
+    cur,
+    refresh_run_id: int,
+    setup_inputs: dict[str, Any],
+    *,
+    threshold: float = 0.1,
+) -> list[dict[str, Any]]:
+    """Per-topic sentiment distribution + directional_lean / certainty
+    means for the Narrative spoke's topic-axis matrix.
+
+    Mirrors `_sentiment_distribution_for_refresh`'s scoping
+    (named-layer responses + unnamed-layer responses where the subject
+    was mentioned) but groups by topic instead of returning a single
+    row. Sorts topics by total measured responses desc so the matrix
+    leads with the topics carrying the most signal.
+    """
+    cur.execute(
+        f"""
+        SELECT
+          p.template,
+          (sc.scores->>'sentiment')::numeric AS sentiment,
+          (sc.scores->>'directional_lean')::numeric AS directional_lean,
+          (sc.scores->>'certainty')::numeric AS certainty
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT scores
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND scores IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sc ON TRUE
+        WHERE mr.refresh_run_id = %s
+          AND mr.success = TRUE
+          AND (p.layer = 'named' OR sm.subject_mentioned = TRUE)
+        """,
+        (refresh_run_id,),
+    )
+
+    buckets: dict[str, dict[str, Any]] = {}
+    for template, sentiment, directional_lean, certainty in cur.fetchall():
+        topic = _topic_for_prompt(template, setup_inputs)
+        if topic is None:
+            continue
+        label, source = topic
+        if label not in buckets:
+            buckets[label] = {
+                "label": label,
+                "source": source,
+                "sentiments": [],
+                "directional_leans": [],
+                "certainties": [],
+            }
+        if sentiment is not None:
+            buckets[label]["sentiments"].append(float(sentiment))
+        if directional_lean is not None:
+            buckets[label]["directional_leans"].append(float(directional_lean))
+        if certainty is not None:
+            buckets[label]["certainties"].append(float(certainty))
+
+    out: list[dict[str, Any]] = []
+    for b in buckets.values():
+        sentiments = b["sentiments"]
+        pos = sum(1 for s in sentiments if s > threshold)
+        neu = sum(1 for s in sentiments if -threshold <= s <= threshold)
+        neg = sum(1 for s in sentiments if s < -threshold)
+        mean_sent = sum(sentiments) / len(sentiments) if sentiments else None
+        mean_lean = (
+            sum(b["directional_leans"]) / len(b["directional_leans"])
+            if b["directional_leans"]
+            else None
+        )
+        mean_cert = (
+            sum(b["certainties"]) / len(b["certainties"])
+            if b["certainties"]
+            else None
+        )
+        out.append({
+            "topic_label": b["label"],
+            "source_field": b["source"],
+            "n_responses": len(sentiments),
+            "sentiment_positive": pos,
+            "sentiment_neutral": neu,
+            "sentiment_negative": neg,
+            "sentiment_mean": mean_sent,
+            "directional_lean_mean": mean_lean,
+            "certainty_mean": mean_cert,
+        })
+
+    out.sort(key=lambda r: -r["n_responses"])
+    return out
+
+
 def _kpis_per_refresh_bulk(
     cur, refresh_ids: list[int], risk_frame_threshold: float,
 ) -> dict[int, dict[str, float | None]]:
     """Compute AI Recall + Avg Sentiment + Risk Frame Rate + Citation
-    Rate for many refreshes in three grouped queries. Returns a
+    Rate + Directional Lean + Criticism Severity (mean) + Certainty
+    for many refreshes in three grouped queries. Returns a
     {refresh_id: {ai_recall, avg_sentiment, risk_frame_rate,
-    citation_rate}} map; missing refreshes (no matching responses) get
-    None values.
+    citation_rate, directional_lean, criticism_severity, certainty}}
+    map; missing refreshes (no matching responses) get None values.
 
     Replaces N×4 queries from looping `_compute_kpis_for_refresh` with
     3 total queries. For Obama (13 refreshes) that's 52 → 3."""
@@ -4746,6 +6135,17 @@ def _kpis_per_refresh_bulk(
             "avg_sentiment": None,
             "risk_frame_rate": None,
             "citation_rate": None,
+            # Per-response scores already extracted by ScoresExtractor
+            # but previously not aggregated at refresh level. Means
+            # power per-week trajectories on the Narrative spoke.
+            "directional_lean": None,
+            "criticism_severity": None,
+            "certainty": None,
+            # Net Sentiment = positive count − negative count per
+            # refresh (±0.1 neutral band). More tangible than the
+            # mean — "8 positive vs 3 negative" reads better than
+            # "+0.42 mean" for executive consumption.
+            "net_sentiment": None,
         }
         for rid in refresh_ids
     }
@@ -4788,7 +6188,17 @@ def _kpis_per_refresh_bulk(
           AVG(
             CASE WHEN (s.scores->>'criticism_severity')::numeric > %s
                  THEN 1.0 ELSE 0.0 END
-          ) FILTER (WHERE p.layer = 'unnamed')
+          ) FILTER (WHERE p.layer = 'unnamed'),
+          AVG((s.scores->>'directional_lean')::numeric),
+          AVG((s.scores->>'criticism_severity')::numeric),
+          AVG((s.scores->>'certainty')::numeric),
+          -- Net sentiment: positive count minus negative count per
+          -- refresh, ±0.1 neutral band (matches the methodology
+          -- used by sentiment_distribution).
+          (
+            COUNT(*) FILTER (WHERE (s.scores->>'sentiment')::numeric > 0.1)
+            - COUNT(*) FILTER (WHERE (s.scores->>'sentiment')::numeric < -0.1)
+          )
         FROM model_responses mr
         JOIN prompts p ON p.id = mr.prompt_id
         JOIN LATERAL (
@@ -4803,9 +6213,22 @@ def _kpis_per_refresh_bulk(
         """,
         (risk_frame_threshold, refresh_ids),
     )
-    for rid, sentiment, risk in cur.fetchall():
+    for (
+        rid, sentiment, risk, lean, crit_mean, certainty, net_sent
+    ) in cur.fetchall():
         out[rid]["avg_sentiment"] = float(sentiment) if sentiment is not None else None
         out[rid]["risk_frame_rate"] = float(risk) if risk is not None else None
+        out[rid]["directional_lean"] = float(lean) if lean is not None else None
+        # criticism_severity here is the MEAN intensity across all
+        # responses (continuous, 0..1). Distinct from risk_frame_rate
+        # which is the RATE of responses above the threshold.
+        out[rid]["criticism_severity"] = (
+            float(crit_mean) if crit_mean is not None else None
+        )
+        out[rid]["certainty"] = float(certainty) if certainty is not None else None
+        out[rid]["net_sentiment"] = (
+            int(net_sent) if net_sent is not None else None
+        )
 
     # Citation Rate — share of responses where AI cited the subject's
     # canonical site. Mirrors `_compute_kpis_for_refresh`'s singular
@@ -4831,6 +6254,159 @@ def _kpis_per_refresh_bulk(
         out[rid]["citation_rate"] = float(citation) if citation is not None else None
 
     return out
+
+
+def _scoped_score_trajectories(
+    cur,
+    refresh_ids: list[int],
+    setup_inputs: dict[str, Any],
+) -> tuple[
+    dict[str, dict[int, dict[str, float | None]]],
+    dict[str, dict[int, dict[str, float | None]]],
+]:
+    """Bulk-fetch per-(refresh × topic) and per-(refresh × platform)
+    means for the four narrative scores: sentiment, directional_lean,
+    criticism_severity, certainty. Mention-scoped (named-layer OR
+    subject_mentioned) so values align with `topic_sentiment_matrix`.
+
+    Returns (by_topic, by_platform):
+      by_topic[topic_label][refresh_id] = {avg_sentiment, directional_lean,
+          criticism_severity, certainty}
+      by_platform[platform_slug][refresh_id] = same dict shape
+
+    Powers per-topic + per-platform trajectory arrays on the
+    Narrative spoke so the per-week sparklines can scope to the
+    active global filter instead of always showing overall means.
+    """
+    by_topic: dict[str, dict[int, dict[str, float | None]]] = {}
+    by_platform: dict[str, dict[int, dict[str, float | None]]] = {}
+    if not refresh_ids:
+        return by_topic, by_platform
+
+    # ── Per-topic: bucket rows in Python so we can reuse
+    # `_topic_for_prompt` for the (subject-aware) topic resolution.
+    cur.execute(
+        """
+        SELECT
+          mr.refresh_run_id,
+          p.template,
+          (sc.scores->>'sentiment')::numeric,
+          (sc.scores->>'directional_lean')::numeric,
+          (sc.scores->>'criticism_severity')::numeric,
+          (sc.scores->>'certainty')::numeric
+        FROM model_responses mr
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT scores
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND scores IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sc ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s)
+          AND mr.success = TRUE
+          AND (p.layer = 'named' OR sm.subject_mentioned = TRUE)
+        """,
+        (refresh_ids,),
+    )
+    # Per (refresh × topic) accumulators.
+    topic_acc: dict[tuple[int, str], dict[str, list[float]]] = {}
+    for rid, template, sent, lean, crit, cert in cur.fetchall():
+        topic = _topic_for_prompt(template, setup_inputs)
+        if topic is None:
+            continue
+        label, _src = topic
+        key = (rid, label)
+        if key not in topic_acc:
+            topic_acc[key] = {
+                "avg_sentiment": [],
+                "directional_lean": [],
+                "criticism_severity": [],
+                "certainty": [],
+            }
+        if sent is not None:
+            topic_acc[key]["avg_sentiment"].append(float(sent))
+        if lean is not None:
+            topic_acc[key]["directional_lean"].append(float(lean))
+        if crit is not None:
+            topic_acc[key]["criticism_severity"].append(float(crit))
+        if cert is not None:
+            topic_acc[key]["certainty"].append(float(cert))
+    for (rid, label), buckets in topic_acc.items():
+        if label not in by_topic:
+            by_topic[label] = {}
+        # Means for the continuous metrics.
+        cell: dict[str, float | None] = {
+            metric: (sum(vals) / len(vals)) if vals else None
+            for metric, vals in buckets.items()
+        }
+        # Net sentiment derived from the same sentiments list (±0.1
+        # neutral band) so the scoped sparkline reads consistently
+        # with the overall trajectory's net_sentiment series.
+        sentiments = buckets["avg_sentiment"]
+        pos = sum(1 for s in sentiments if s > 0.1)
+        neg = sum(1 for s in sentiments if s < -0.1)
+        cell["net_sentiment"] = (
+            float(pos - neg) if sentiments else None
+        )
+        by_topic[label][rid] = cell
+
+    # ── Per-platform: clean SQL grouping (no template parsing needed).
+    cur.execute(
+        """
+        SELECT
+          mr.refresh_run_id,
+          m.slug,
+          AVG((sc.scores->>'sentiment')::numeric),
+          AVG((sc.scores->>'directional_lean')::numeric),
+          AVG((sc.scores->>'criticism_severity')::numeric),
+          AVG((sc.scores->>'certainty')::numeric),
+          (
+            COUNT(*) FILTER (WHERE (sc.scores->>'sentiment')::numeric > 0.1)
+            - COUNT(*) FILTER (WHERE (sc.scores->>'sentiment')::numeric < -0.1)
+          ) AS net_sentiment
+        FROM model_responses mr
+        JOIN models m ON m.id = mr.model_id
+        JOIN prompts p ON p.id = mr.prompt_id
+        LEFT JOIN LATERAL (
+            SELECT subject_mentioned
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND subject_mentioned IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sm ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT scores
+            FROM response_extractions
+            WHERE model_response_id = mr.id AND scores IS NOT NULL
+            ORDER BY analysis_run_id DESC LIMIT 1
+        ) sc ON TRUE
+        WHERE mr.refresh_run_id = ANY(%s)
+          AND mr.success = TRUE
+          AND (p.layer = 'named' OR sm.subject_mentioned = TRUE)
+        GROUP BY mr.refresh_run_id, m.slug
+        """,
+        (refresh_ids,),
+    )
+    for rid, slug, sent, lean, crit, cert, net_sent in cur.fetchall():
+        if slug not in by_platform:
+            by_platform[slug] = {}
+        by_platform[slug][rid] = {
+            "avg_sentiment": float(sent) if sent is not None else None,
+            "directional_lean": float(lean) if lean is not None else None,
+            "criticism_severity": (
+                float(crit) if crit is not None else None
+            ),
+            "certainty": float(cert) if cert is not None else None,
+            "net_sentiment": (
+                float(net_sent) if net_sent is not None else None
+            ),
+        }
+    return by_topic, by_platform
 
 
 def _sov_and_top_result_per_refresh_bulk(
@@ -4931,7 +6507,7 @@ def _sov_and_top_result_per_refresh_bulk(
 
 
 def _competitor_trajectories(
-    cur, refresh_ids: list[int], *, top_n: int = 3,
+    cur, refresh_ids: list[int], *, top_n: int = 6,
 ) -> list[dict[str, Any]]:
     """Per-week metric arrays for the top competitor entities, aligned
     to the same refresh order as `_trajectory_for_subject`. Same
@@ -5103,6 +6679,20 @@ def _trajectory_for_subject(
     avg_sentiment = [kpi_map.get(rid, {}).get("avg_sentiment") for rid in refresh_ids]
     risk_frame_rate = [kpi_map.get(rid, {}).get("risk_frame_rate") for rid in refresh_ids]
     citation_rate = [kpi_map.get(rid, {}).get("citation_rate") for rid in refresh_ids]
+    # Narrative-spoke score trajectories — directional_lean (-1..+1
+    # political axis), criticism_severity (0..1 mean intensity), and
+    # certainty (0..1) per refresh. Powers the per-week sparklines
+    # alongside the sentiment trajectory.
+    directional_lean = [
+        kpi_map.get(rid, {}).get("directional_lean") for rid in refresh_ids
+    ]
+    criticism_severity = [
+        kpi_map.get(rid, {}).get("criticism_severity") for rid in refresh_ids
+    ]
+    certainty = [kpi_map.get(rid, {}).get("certainty") for rid in refresh_ids]
+    net_sentiment = [
+        kpi_map.get(rid, {}).get("net_sentiment") for rid in refresh_ids
+    ]
 
     # Pie-share SoV + Top Result Rate per refresh (one extra query).
     # These unlock the SoV / Top Result tabs on the Visibility Trend
@@ -5119,6 +6709,10 @@ def _trajectory_for_subject(
         "avg_sentiment": avg_sentiment,
         "risk_frame_rate": risk_frame_rate,
         "citation_rate": citation_rate,
+        "directional_lean": directional_lean,
+        "criticism_severity": criticism_severity,
+        "certainty": certainty,
+        "net_sentiment": net_sentiment,
         "share_of_voice": share_of_voice,
         "top_result_rate": top_result_rate,
     }
@@ -5161,17 +6755,45 @@ def _top_sources_for_refresh(
 ) -> list[dict[str, Any]]:
     """Aggregate citations from `sources` JSONB across responses,
     rank by occurrence count, surface top N with a normalized 0-100
-    'influence' score and the source_type. Subdomain variants of the
-    same source (e.g. `en.wikipedia.org` + `wikipedia.org`) are
-    collapsed via `_canonical_domain` before ranking — fetching
-    without a SQL LIMIT so post-merge totals don't miss subdomains
-    that individually fell below the cutoff."""
+    'influence' score, the source_type, response coverage, and per-
+    platform breakdown. Subdomain variants of the same source (e.g.
+    `en.wikipedia.org` + `wikipedia.org`) are collapsed via
+    `_canonical_domain` before ranking — fetching without a SQL LIMIT
+    so post-merge totals don't miss subdomains that individually fell
+    below the cutoff.
+
+    response_coverage = distinct response_ids citing the source ÷
+    total successful responses on the refresh. Distinct from
+    n_citations (raw count, can multi-count when one response cites
+    the same domain in two entries).
+    platforms[] lists per-AI-platform citation counts so the Sources
+    tab can show "ChatGPT leans on Wikipedia, Perplexity leans on
+    news outlets" at a glance.
+    """
+    # Total responses denominator for response_coverage. Same scope
+    # the citation SELECT uses (refresh + success=true).
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM model_responses
+        WHERE refresh_run_id = %s AND success = TRUE
+        """,
+        (refresh_run_id,),
+    )
+    total_responses = (cur.fetchone() or (0,))[0] or 0
+
+    # Pull raw (response × source) rows so Python can compute
+    # distinct-response coverage + per-platform breakdowns; the
+    # prior SQL pre-aggregated by domain which loses both signals.
     cur.execute(
         """
         WITH per_response_sources AS (
             SELECT
+              mr.id AS response_id,
+              m.slug AS platform_slug,
               sc.sources
             FROM model_responses mr
+            JOIN models m ON m.id = mr.model_id
             JOIN LATERAL (
                 SELECT sources
                 FROM response_extractions
@@ -5179,32 +6801,17 @@ def _top_sources_for_refresh(
                 ORDER BY analysis_run_id DESC LIMIT 1
             ) sc ON TRUE
             WHERE mr.refresh_run_id = %s AND mr.success = TRUE
-        ),
-        flat AS (
-            SELECT
-              src->>'domain' AS domain,
-              src->>'source_type_slug' AS source_type
-            FROM per_response_sources, jsonb_array_elements(sources) src
-            WHERE src->>'domain' IS NOT NULL
-        ),
-        counts AS (
-            SELECT
-              domain,
-              MAX(source_type) AS source_type,
-              COUNT(*) AS n_citations
-            FROM flat
-            GROUP BY domain
         )
-        SELECT domain, source_type, n_citations
-        FROM counts
-        -- Tiebreak by domain ASC so the row order is fully deterministic.
-        -- Without this, two domains tied on citation count flip
-        -- positions arbitrarily between calls — fine for display but
-        -- catastrophic for the Recommended Actions cache key, which
-        -- includes the full payload (incl. top_sources) via JSON
-        -- equality. Order flips → JSON mismatch → cache miss → paid
-        -- Gemini 2.5 Pro call on every page render.
-        ORDER BY n_citations DESC, domain ASC
+        SELECT
+          response_id,
+          platform_slug,
+          src->>'domain' AS domain,
+          src->>'source_type_slug' AS source_type
+        FROM per_response_sources, jsonb_array_elements(sources) src
+        WHERE src->>'domain' IS NOT NULL
+        -- Deterministic ordering for caching parity (see prior
+        -- comment about Gemini call cache invalidation).
+        ORDER BY domain ASC, response_id ASC, platform_slug ASC
         """,
         (refresh_run_id,),
     )
@@ -5212,32 +6819,61 @@ def _top_sources_for_refresh(
     if not rows:
         return []
 
-    # Merge by canonical domain. Sum n_citations across subdomains;
-    # take the source_type from the highest-cited variant (it's the
-    # most "representative" classification).
+    # Aggregate by canonical domain. Tracks: total citations, the
+    # set of response_ids that cited the source, per-platform counts,
+    # and the source_type from the largest single-domain contributor
+    # (the most "representative" classification when subdomains
+    # disagree).
     merged: dict[str, dict[str, Any]] = {}
-    for domain, source_type, n_citations in rows:
+    # Per-domain (uncanonicalized) counter for the "_top_n" tiebreak
+    # — needs raw-domain granularity so the source_type winner
+    # tracks the actual top contributor rather than a canonicalized
+    # bucket.
+    domain_counts: dict[str, int] = {}
+    for response_id, platform_slug, domain, source_type in rows:
         canon = _canonical_domain(domain)
-        n = int(n_citations or 0)
+        domain_counts[domain] = domain_counts.get(domain, 0) + 1
         if canon not in merged:
             merged[canon] = {
                 "name": canon,
                 "source_type": source_type,
-                "n_citations": n,
-                "_top_n": n,  # tracks the largest contributor's count
+                "n_citations": 0,
+                "response_ids": set(),
+                "platforms": {},
+                "_top_domain_n": 0,
             }
-        else:
-            merged[canon]["n_citations"] += n
-            if n > merged[canon]["_top_n"]:
-                merged[canon]["_top_n"] = n
-                merged[canon]["source_type"] = source_type
+        m = merged[canon]
+        m["n_citations"] += 1
+        m["response_ids"].add(response_id)
+        if platform_slug:
+            m["platforms"][platform_slug] = (
+                m["platforms"].get(platform_slug, 0) + 1
+            )
+        # Promote source_type from this row's domain when its
+        # cumulative count exceeds the previous top contributor.
+        dom_n = domain_counts[domain]
+        if dom_n > m["_top_domain_n"]:
+            m["_top_domain_n"] = dom_n
+            if source_type:
+                m["source_type"] = source_type
 
     ranked = sorted(
-        merged.values(), key=lambda r: r["n_citations"], reverse=True,
+        merged.values(), key=lambda r: (-r["n_citations"], r["name"]),
     )[:limit]
     if not ranked:
         return []
     max_n = ranked[0]["n_citations"] or 1
+
+    # Same well-known display map the per-platform builders use; falls
+    # back to slug.title() for unknown platforms (e.g. Mistral if it
+    # shows up later).
+    platform_display = {
+        "chatgpt": "ChatGPT",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "perplexity": "Perplexity",
+    }
+
     return [
         {
             "name": r["name"],
@@ -5248,6 +6884,21 @@ def _top_sources_for_refresh(
             # and the Sources table type column).
             "type": (r["source_type"] or "other").replace("_", " ").title(),
             "n_citations": r["n_citations"],
+            "response_coverage": (
+                len(r["response_ids"]) / total_responses
+                if total_responses > 0
+                else 0
+            ),
+            "platforms": [
+                {
+                    "slug": slug,
+                    "name": platform_display.get(slug, slug.title()),
+                    "n_citations": cnt,
+                }
+                for slug, cnt in sorted(
+                    r["platforms"].items(), key=lambda kv: -kv[1],
+                )
+            ],
         }
         for r in ranked
     ]

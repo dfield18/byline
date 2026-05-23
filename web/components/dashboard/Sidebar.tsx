@@ -4,7 +4,6 @@ import {
   MessagesSquare,
   Eye,
   Swords,
-  Hash,
   BookText,
   Sparkles,
   Lightbulb,
@@ -17,7 +16,14 @@ import {
 // renders as a disabled-looking entry with a small "Soon" pill so
 // users know it's coming but not built. Overview is special-cased
 // (subject root, no slug suffix).
-type NavSection = "overview" | "visibility" | "recommendations";
+type NavSection =
+  | "overview"
+  | "visibility"
+  | "competition"
+  | "narrative"
+  | "sources"
+  | "prompts"
+  | "recommendations";
 
 type NavEntry = {
   key: string;          // matches `activeSection` for highlight
@@ -30,11 +36,10 @@ type NavEntry = {
 const NAV: NavEntry[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, slug: null, isOverview: true },
   { key: "visibility", label: "Visibility", icon: Eye, slug: "visibility" },
-  { key: "narrative", label: "Narrative", icon: MessagesSquare, slug: null },
-  { key: "competition", label: "Competition", icon: Swords, slug: null },
-  { key: "topics", label: "Topics", icon: Hash, slug: null },
-  { key: "sources", label: "Sources", icon: BookText, slug: null },
-  { key: "prompts", label: "Prompts", icon: Sparkles, slug: null },
+  { key: "competition", label: "Competitive Visibility", icon: Swords, slug: "competition" },
+  { key: "narrative", label: "Narrative", icon: MessagesSquare, slug: "narrative" },
+  { key: "sources", label: "Sources", icon: BookText, slug: "sources" },
+  { key: "prompts", label: "Prompts", icon: Sparkles, slug: "prompts" },
   { key: "recommendations", label: "Recommendations", icon: Lightbulb, slug: "recommendations" },
   { key: "reports", label: "Reports", icon: FileBarChart, slug: null },
   { key: "settings", label: "Settings", icon: Settings, slug: null },

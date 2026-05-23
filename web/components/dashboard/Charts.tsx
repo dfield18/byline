@@ -184,11 +184,29 @@ export function CompetitorBars() {
  */
 export function CompetitorBarsFromData({
   data,
+  colorByName,
+  height = 220,
 }: {
   data: { name: string; sov: number; is_subject?: boolean }[];
+  // Optional name→color map — when supplied, bars are filled with
+  // the page-canonical entity color so the SoV chart shares its
+  // color identity with the Trend chart, Scatter plot, and any
+  // other entity-keyed visual on the same page. Falls back to the
+  // two-tone default (primary for subject, muted blue for
+  // competitors) when no map is provided.
+  //
+  // Plain object (not a function) so it can cross the Server →
+  // Client component boundary — functions aren't serializable
+  // there.
+  colorByName?: Record<string, string>;
+  // Chart pixel height. Default 220 keeps the Overview spoke
+  // layout unchanged; the Competition spoke passes a taller value
+  // so the SoV bars match the Visibility-vs-Prominence scatter
+  // on the right and the two cards line up vertically.
+  height?: number;
 }) {
   return (
-    <ResponsiveContainer width="100%" height={220}>
+    <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid stroke="oklch(0.91 0.008 250)" strokeDasharray="2 4" horizontal={false} />
         {/* sov values come in as 0..1 fractions; convert to whole
@@ -220,12 +238,13 @@ export function CompetitorBarsFromData({
           formatter={(v) => [`${Math.round(Number(v) * 100)}%`, "Share"]}
         />
         <Bar dataKey="sov" radius={[0, 4, 4, 0]} barSize={18}>
-          {data.map((c, i) => (
-            <Cell
-              key={i}
-              fill={c.is_subject ? "oklch(0.5 0.13 245)" : "oklch(0.78 0.04 245)"}
-            />
-          ))}
+          {data.map((c, i) => {
+            const fallback = c.is_subject
+              ? "oklch(0.5 0.13 245)"
+              : "oklch(0.78 0.04 245)";
+            const fill = colorByName?.[c.name] ?? fallback;
+            return <Cell key={i} fill={fill} />;
+          })}
         </Bar>
       </BarChart>
     </ResponsiveContainer>

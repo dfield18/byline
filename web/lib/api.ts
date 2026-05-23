@@ -234,6 +234,17 @@ export type SubjectOverview = {
     avg_sentiment: (number | null)[];
     risk_frame_rate: (number | null)[];
     citation_rate: (number | null)[];
+    // Narrative-spoke per-refresh score means. directional_lean and
+    // sentiment share the -1..+1 range (signed); criticism_severity
+    // (mean intensity, distinct from risk_frame_rate) and certainty
+    // are unsigned 0..1. net_sentiment is a SIGNED COUNT (positive
+    // count − negative count per refresh, ±0.1 neutral band) —
+    // domain varies with response volume so charts should compute
+    // axis bounds dynamically rather than assuming -1..+1.
+    directional_lean: (number | null)[];
+    criticism_severity: (number | null)[];
+    certainty: (number | null)[];
+    net_sentiment: (number | null)[];
     // Pie-share definition: subject's mentions / (subject + deduped
     // competitor mentions) per refresh. Differs from
     // competitive[].sov (which is subject_mentions / total_responses,
@@ -245,7 +256,24 @@ export type SubjectOverview = {
     // competitive[].first_mention_rate, plotted over time.
     top_result_rate: (number | null)[];
   };
-  sources: { name: string; score: number; type: string; n_citations: number }[];
+  sources: {
+    name: string;
+    score: number;
+    type: string;
+    n_citations: number;
+    // % of successful responses in the snapshot that cited this
+    // source (distinct response_ids / total responses). Distinct
+    // from n_citations — a single response citing the same source
+    // twice counts as 2 citations but 1 covered response.
+    response_coverage: number;
+    // Per-AI-platform citation count. Sorted by count desc. Lets
+    // the Sources tab show which platforms favor which sources.
+    platforms: {
+      slug: string;
+      name: string;
+      n_citations: number;
+    }[];
+  }[];
   topic_coverage: {
     label: string;
     source_field: string;
@@ -280,6 +308,17 @@ export type SubjectOverview = {
     sample_labels: string[];
     n_responses: number;
     share: number;
+    // Mean sentiment of the cluster's response_ids (-1..+1). Lets
+    // the Narrative spoke distinguish a laudatory cluster from a
+    // hostile one at a glance. Null when none of the cluster's
+    // responses have a measured sentiment score.
+    sentiment_mean: number | null;
+    // Topic + platform distributions across the cluster's
+    // response_ids. Empty when the underlying data can't resolve
+    // a topic (e.g. setup_inputs missing). Lets the Narrative
+    // spoke narrow the Clusters list by the active global filter.
+    topic_distribution: { label: string; count: number }[];
+    platform_distribution: { slug: string; count: number }[];
   }[];
   competitive: {
     name: string;
@@ -332,6 +371,26 @@ export type SubjectOverview = {
     first_mention_rate: number | null; // 0..1
     avg_sentiment: number | null;      // -1..+1
   }[];
+  // Same per-platform breakdown but scoped to each tracked topic,
+  // plus a per-topic delta vs the prior snapshot. Powers the topic
+  // dropdown on the Visibility tab's Platform Change Detail table.
+  //   - `delta` is ALREADY IN PERCENTAGE POINTS, matching the
+  //     convention used by `platform_recall.delta`.
+  //   - topics ordered by total response volume desc; platforms
+  //     within each topic sorted by mention_rate desc.
+  per_platform_kpis_by_topic: {
+    topic_label: string;
+    source_field: string;
+    platforms: {
+      slug: string;
+      name: string;
+      n_responses: number;
+      mention_rate: number | null;
+      avg_rank: number | null;
+      first_mention_rate: number | null;
+      delta: number | null;  // pp units, already × 100
+    }[];
+  }[];
   // Position distribution across ALL unnamed-layer responses
   // (including the "Not mentioned" bucket so bars sum to 100% of
   // total responses, not just mentioned ones). Five fixed buckets
@@ -347,6 +406,44 @@ export type SubjectOverview = {
       is_absence?: boolean;   // true for the "Not mentioned" bucket
     }[];
   };
+  // Per-(platform × topic) rank distribution. Powers the platform
+  // and topic dropdowns on the Answer Prominence section — both
+  // filters can be combined.
+  //   - `all_topics` is the platform's rank distribution across all
+  //     tracked topics (used when only the platform filter is set).
+  //   - `by_topic[]` is one entry per topic for that platform (used
+  //     when both filters are set). Same bucket schema as
+  //     `rank_distribution` so the renderer doesn't branch on shape.
+  // Platforms ordered by total responses desc; topics within each
+  // platform ordered by total responses desc.
+  rank_distribution_by_platform: {
+    slug: string;
+    name: string;
+    all_topics: {
+      total_responses: number;
+      n_mentioned: number;
+      buckets: {
+        rank: number;
+        label: string;
+        n: number;
+        share: number;
+        is_absence?: boolean;
+      }[];
+    };
+    by_topic: {
+      topic_label: string;
+      source_field: string;
+      total_responses: number;
+      n_mentioned: number;
+      buckets: {
+        rank: number;
+        label: string;
+        n: number;
+        share: number;
+        is_absence?: boolean;
+      }[];
+    }[];
+  }[];
   // Sentiment-of-mentions lens: pos/neu/neg counts among responses
   // where the subject was actually mentioned (or where the prompt
   // named them). Different question from the avg_sentiment KPI —
@@ -361,6 +458,55 @@ export type SubjectOverview = {
     mean: number | null;
     threshold: number;
   };
+  // Per-topic sentiment + auxiliary score means for the Narrative
+  // spoke's topic-axis matrix. Same mention-scoped denominators as
+  // sentiment_distribution. Sorted by n_responses desc.
+  topic_sentiment_matrix: {
+    topic_label: string;
+    source_field: string;
+    n_responses: number;
+    sentiment_positive: number;
+    sentiment_neutral: number;
+    sentiment_negative: number;
+    sentiment_mean: number | null;
+    directional_lean_mean: number | null;
+    certainty_mean: number | null;
+  }[];
+  // Per-platform sentiment distribution — the platform-axis analog
+  // of sentiment_distribution. Powers the Narrative spoke's
+  // Sentiment Mix section when the platform filter is active.
+  platform_sentiment_distribution: {
+    platform_slug: string;
+    platform_name: string;
+    positive: number;
+    neutral: number;
+    negative: number;
+    total: number;
+    mean: number | null;
+    threshold: number;
+  }[];
+  // Per-topic and per-platform versions of the 4 narrative-score
+  // trajectories (avg_sentiment / directional_lean /
+  // criticism_severity / certainty). Arrays are parallel to
+  // trajectory.weeks. Used to swap the per-week sparklines in the
+  // Sentiment Trend section to the active scope when one filter is
+  // set; both arrays empty when no measured data exists.
+  trajectory_by_topic: {
+    topic_label: string;
+    avg_sentiment: (number | null)[];
+    directional_lean: (number | null)[];
+    criticism_severity: (number | null)[];
+    certainty: (number | null)[];
+    net_sentiment: (number | null)[];
+  }[];
+  trajectory_by_platform: {
+    platform_slug: string;
+    avg_sentiment: (number | null)[];
+    directional_lean: (number | null)[];
+    criticism_severity: (number | null)[];
+    certainty: (number | null)[];
+    net_sentiment: (number | null)[];
+  }[];
   // Who beats the subject to rank #1, and how often. `subject_first_count`
   // and `stolen_count` sum (with `no_first_count`) to total_responses;
   // `share` for each stealer is share of total responses (so a reader
@@ -429,6 +575,32 @@ export type SubjectOverview = {
     label: string;
     source_field: string;
     mention_rate: (number | null)[];
+  }[];
+  // Per-LLM mention rate per refresh, aligned to trajectory.weeks.
+  // Powers the lighter "by platform" overlay lines on the Visibility
+  // Trend chart so the reader sees which model is gaining or losing
+  // visibility for this subject. Platforms ranked by total
+  // appearances across the window; refreshes where a platform had
+  // zero responses come through as null in that slot.
+  platform_trajectories: {
+    slug: string;
+    name: string;
+    mention_rate: (number | null)[];
+  }[];
+  // Per-(platform × topic) mention rate per refresh — the cross of
+  // topic_trajectories and platform_trajectories. Feeds the platform
+  // dropdown on the Topic Visibility section so its Largest Movement
+  // card can scope first-vs-latest deltas to a chosen LLM. Platforms
+  // ordered by total appearances; topics within each platform
+  // ordered by total appearances on that platform.
+  topic_trajectories_by_platform: {
+    slug: string;
+    name: string;
+    topics: {
+      label: string;
+      source_field: string;
+      mention_rate: (number | null)[];
+    }[];
   }[];
   // What changed since the prior snapshot — overall mention-rate
   // delta + biggest topic-level and competitor-level swings. Null
@@ -525,6 +697,38 @@ export type SubjectOverview = {
       n_appearances: number;
     }[];
   };
+  // Per-(topic × platform × entity) prominence — powers the
+  // section-level platform/topic dropdowns on the Competition
+  // spoke's Landscape section so all three sub-cards (SoV bars,
+  // Scatter, Prominence table) can be scoped on both dimensions.
+  //   - `by_topic[0]` is a synthetic "All topics" rollup
+  //     (`is_all_topics: true`), so the same structure handles
+  //     both platform-only and platform+topic scope paths.
+  //   - subsequent entries are ordered by total volume desc.
+  per_platform_landscape: {
+    platforms: {
+      slug: string;
+      name: string;
+      n_responses_total: number;
+    }[];
+    by_topic: {
+      topic_label: string;
+      source_field: string | null;
+      is_all_topics: boolean;
+      platforms: {
+        slug: string;
+        n_responses: number;
+        entities: {
+          name: string;
+          is_subject: boolean;
+          sov: number;                  // 0..1
+          avg_rank: number | null;
+          first_mention_rate: number;   // 0..1
+          n_appearances: number;
+        }[];
+      }[];
+    }[];
+  };
   // Cross-subject benchmarks so the Briefing KPIs can render a
   // "vs subject-set avg" annotation under each card — context the
   // raw percentage alone can't provide.
@@ -533,6 +737,11 @@ export type SubjectOverview = {
     ai_mention_rate_avg: number | null;     // 0..1
     avg_mention_rank_avg: number | null;    // ranks (lower better)
     first_mention_rate_avg: number | null;  // 0..1
+    // Median (max_topic_recall - min_topic_recall) across subjects in
+    // the set. Powers the "vs subject-set median" caption on the
+    // Largest Visibility Gap KPI card. Median (not mean) keeps a
+    // single outlier subject from dragging the benchmark.
+    topic_gap_median: number | null;        // 0..1
   };
   evidence_cards: {
     model_response_id: number;
@@ -560,4 +769,25 @@ export type SubjectOverview = {
 export const getSubjectOverview = (subjectId: number, weeks = 12) =>
   apiGet<SubjectOverview>(
     `/api/subjects/${subjectId}/overview?weeks=${weeks}`,
+  );
+
+// Per-platform full response text for a single prompt on the
+// subject's latest completed refresh. Used by the Prompts spoke's
+// click-to-expand panel — lazy-loaded per prompt_id so the overview
+// payload stays compact.
+export type PromptResponse = {
+  platform_slug: string;
+  platform_name: string;
+  response_text: string;
+  success: boolean;
+  mentioned: boolean | null;
+  rank: number | null;
+};
+
+export const getPromptResponses = (
+  subjectId: number,
+  promptId: number,
+) =>
+  apiGet<{ responses: PromptResponse[] }>(
+    `/api/subjects/${subjectId}/prompts/${promptId}/responses`,
   );
