@@ -3110,7 +3110,12 @@ def get_subject_overview(
         "trajectory": trajectory,
         "sources": sources,
         "topic_coverage": topic_coverage,
-        "strategic_takeaways": strategic_takeaways,
+        # strategic_takeaways intentionally not serialized — it's
+        # still computed above as input to _compute_bottom_line and
+        # _compute_recommended_focus, but no frontend or Streamlit
+        # surface reads it anymore (the Overview's Band 2 middle
+        # slot moved to Top Narratives). Drop saves ~1-2 KB/req on
+        # the SubjectOverview payload.
         "bottom_line": bottom_line,
         "recommended_focus": recommended_focus,
         "recommended_actions": recommended_actions,
@@ -3288,7 +3293,8 @@ def _empty_overview(sid: int, sname: str, category: str) -> dict[str, Any]:
         },
         "sources": [],
         "topic_coverage": [],
-        "strategic_takeaways": [],
+        # strategic_takeaways dropped from the response shape — see
+        # the populated branch above for the rationale.
         "bottom_line": None,
         "recommended_focus": None,
         "recommended_actions": _FALLBACK_RECOMMENDED_ACTIONS,

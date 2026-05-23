@@ -887,7 +887,7 @@ export default async function VisibilityPage({
             overlap the main column's content — the Prominence card
             header was getting clipped by the nav at the section's
             right edge. */}
-        <main className="flex-1 px-4 md:px-12 xl:pr-44 py-6 space-y-16 max-w-[1400px] w-full mx-auto">
+        <main className="flex-1 px-4 md:px-12 xl:pr-44 py-6 space-y-16 max-w-[1280px] w-full mx-auto">
           {/* Floating section jump-nav (xl+ only). Pure anchors —
               the sections below carry matching id attributes. The
               `summary` slot above the nav surfaces three executive-

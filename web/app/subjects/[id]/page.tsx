@@ -483,11 +483,11 @@ function hasRealVisibilityGap(
   );
 }
 
-// Shared row used by both the Gap card (TopicRecallInline) and the
-// Strongest Asset card (StrongestTopicsList). Keeps the two cards
+// Shared row used by the Gap card (TopicRecallInline) and the
+// Top Narratives card (TopNarrativesList). Keeps the two cards
 // visually parallel — same row dimensions, same label/bar/percent
-// treatment — so they only differ in sort direction and which row
-// gets the highlight override.
+// treatment — so they only differ in sort direction, highlight
+// override, and (for narratives) sentiment-derived bar tone.
 //
 // `highlight` semantics:
 //   "weakest" → force warning tone at higher opacity (Gap card)
@@ -629,25 +629,16 @@ function TopicRecallInline({
   );
 }
 
-// Strongest-asset companion to TopicRecallInline. Sorts topics
-// descending and shows the top entries (the ones at the ceiling
-// tier — ≥70% — capped at 4 rows so the card doesn't dominate).
-// Mirrors the Gap card's row format exactly via the shared
-// TopicBarRow component; only differs in sort direction (descending)
-// and which row gets the highlight override (the strongest, in
-// success). Renders nothing when there isn't a clear strongest
-// (all topics tie within TIE_EPSILON or there are no topics at all).
-// Top narrative clusters list for the Band 2 middle card. Replaces
-// the prior StrongestTopicsList, which duplicated the same per-
-// topic mention rates that the Gap card on its left already shows
-// — same data, opposite sort. The narrative clusters surface a
-// genuinely different dimension: the AI's RECURRING FRAMINGS
-// (e.g. "Progressive Policy Advocate", "Foreign Policy Critique")
-// and how often they appear, rather than which topics generated
-// the responses. Visually parallels the Gap card via the shared
-// TopicBarRow component — same row layout, label + bar + %.
-// Top row gets the success-tone highlight to anchor the card as
-// the "what AI is saying" beat in Band 2.
+// Top narrative clusters list for the Band 2 middle card.
+// Surfaces the AI's RECURRING FRAMINGS — e.g. "Progressive
+// Policy Advocate", "Foreign Policy Critique" — and how often
+// each appears across responses. Visually parallels the Gap
+// card via the shared TopicBarRow component (same row layout,
+// label + bar + %). Each bar is sentiment-toned (favorable /
+// critical / neutral) from cluster.sentiment_mean so the color
+// reflects WHETHER each framing is positive, not just HOW
+// prevalent it is — answers the question the share alone
+// can't ("is the most-common narrative for or against us?").
 function TopNarrativesList({
   clusters,
 }: {

@@ -149,7 +149,7 @@ export default async function PromptsPage({
         {/* xl:pr-44 dropped — the right-rail SectionNav (jump nav
             + filters card) was retired, so the main column gets the
             full content width back. */}
-        <main className="flex-1 px-4 md:px-12 py-6 space-y-12 max-w-[1400px] w-full mx-auto">
+        <main className="flex-1 px-4 md:px-12 py-6 space-y-12 max-w-[1280px] w-full mx-auto">
           <Link
             href={`/subjects/${subjectId}`}
             className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground hover:text-foreground transition-colors -mb-6"

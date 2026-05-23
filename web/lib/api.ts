@@ -283,13 +283,6 @@ export type SubjectOverview = {
     share_of_set: number;
     ai_recall: number | null;
   }[];
-  strategic_takeaways: {
-    kind: "message_gap" | "opposition_frame" | "strongest_asset";
-    tone: "warning" | "muted" | "primary";
-    eyebrow: string;
-    title: string;
-    body: string;
-  }[];
   bottom_line: string | null;
   recommended_focus: string | null;
   // Always populated by the backend (even on LLM failure it returns the

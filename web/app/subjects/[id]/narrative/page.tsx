@@ -530,7 +530,7 @@ export default async function NarrativePage({
           }
         />
 
-        <main className="flex-1 px-4 md:px-12 xl:pr-44 py-6 space-y-12 max-w-[1400px] w-full mx-auto">
+        <main className="flex-1 px-4 md:px-12 xl:pr-44 py-6 space-y-12 max-w-[1280px] w-full mx-auto">
           <SectionNav
             summary={
               <div>

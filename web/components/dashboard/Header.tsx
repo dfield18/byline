@@ -98,13 +98,12 @@ export function Header({
 
   return (
     <header className="border-b border-border bg-card sticky top-0 z-20">
-      {/* Inner content capped at 1280 (matches Overview main + sub-nav).
-          Background/border still spans full viewport via the outer
-          <header>, so the bar visually extends edge-to-edge while
-          the controls cluster centered. Other spokes whose content
-          is wider than 1280 (visibility/narrative/sources at 1400)
-          will read slightly misaligned until they're tightened to
-          the same cap — that's a follow-up cleanup. */}
+      {/* Inner content capped at 1280, matching every spoke's main
+          (Overview + Visibility + Narrative + Competition + Sources
+          + Prompts all sit at max-w-[1280px]). Background/border
+          still spans full viewport via the outer <header>, so the
+          bar visually extends edge-to-edge while the controls
+          cluster centered on the same axis as the content below. */}
       <div className="max-w-[1280px] mx-auto flex flex-wrap items-center gap-3 px-4 md:px-6 py-3 h-16">
         <div className="flex items-baseline gap-3 min-w-0">
           {backHref && backLabel && (
