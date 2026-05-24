@@ -1510,6 +1510,15 @@ export default async function VisibilityPage({
                 overlays={platformOverlays}
                 helperText={`Mention rate shows the share of tracked AI answers where ${data.subject_name} appeared — overall, with each platform's mention rate as a lighter line for context.`}
                 overlayOpacity={0.5}
+                // Opt into end-of-line labels — Visibility's overlays
+                // are per-platform breakdowns of the SAME metric
+                // (typically 2-4 platforms), so they spread across
+                // the chart with the subject rather than clustering
+                // at one Y value. Competition leaves this off
+                // because its 7 competitor lines often converge at
+                // the same mention rate, which makes the label rail
+                // stack 5+ labels in a tight column.
+                showEndLabels
               />
               {(() => {
                 const result = composeWhatChanged({

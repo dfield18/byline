@@ -182,6 +182,7 @@ export function TrendOverTime({
   overlayOpacity = 0.7,
   height = 320,
   subjectOnlyAxis = false,
+  showEndLabels = false,
 }: {
   subjectName: string;
   trajectoryWeeks: SubjectOverview["trajectory"]["weeks"];
@@ -214,6 +215,16 @@ export function TrendOverTime({
   // with the subject, so the all-series fit produces an equivalently
   // tight axis without clipping any series.
   subjectOnlyAxis?: boolean;
+  // When true, each series gets an inline label at the right end of
+  // its line (subject name + competitor names). Opt-in because the
+  // label-rail collision logic gracefully spaces ≤3-4 well-separated
+  // series but falls apart when many lines converge at the same Y
+  // value (e.g. Competition's 7 lines clustering at 40% mention
+  // rate stacks 5 labels in a tight vertical column disconnected
+  // from where their lines end). Callers with well-spread or few-
+  // overlay charts opt in; dense-cluster cases rely on the chip
+  // legend below instead.
+  showEndLabels?: boolean;
 }) {
   // Hover-to-isolate: when the user hovers a legend chip (or a line),
   // drop the opacity of every non-hovered series so the chosen one
@@ -422,12 +433,17 @@ export function TrendOverTime({
         <ResponsiveContainer width="100%" height={height} minWidth={1}>
           <ComposedChart
             data={data}
-            // Right margin widened from 16 → 130 to make room for
-            // end-of-line labels next to each series' final data
-            // point. Without the extra margin, label text would
-            // either be clipped by the chart's right edge or push
-            // the lines inward. Top/left/bottom unchanged.
-            margin={{ top: 12, right: 130, left: 0, bottom: 4 }}
+            // Right margin widens only when end-of-line labels are
+            // enabled — without labels, the chart uses the original
+            // tight 16px right margin to maximize plot area. With
+            // labels, ~130px reserves room for the longest entity
+            // name without clipping.
+            margin={{
+              top: 12,
+              right: showEndLabels ? 130 : 16,
+              left: 0,
+              bottom: 4,
+            }}
           >
             {/* Gradient `<defs>` removed when the subject's area
                 fill was replaced with a heavier line stroke — the
@@ -490,33 +506,35 @@ export function TrendOverTime({
                 connectNulls={false}
                 isAnimationActive={false}
               >
-                <LabelList
-                  dataKey={o.name}
-                  content={(props) => {
-                    if (
-                      props.index !== lastRowIdx ||
-                      typeof props.value !== "number" ||
-                      labelYByName[o.name] === undefined
-                    ) {
-                      return null;
-                    }
-                    const px =
-                      typeof props.x === "number" ? props.x : 0;
-                    return (
-                      <text
-                        x={px + 8}
-                        y={labelYByName[o.name]}
-                        dy="0.35em"
-                        fontSize={11}
-                        fill="var(--foreground)"
-                        fillOpacity={0.75}
-                        fontWeight={400}
-                      >
-                        {o.name}
-                      </text>
-                    );
-                  }}
-                />
+                {showEndLabels && (
+                  <LabelList
+                    dataKey={o.name}
+                    content={(props) => {
+                      if (
+                        props.index !== lastRowIdx ||
+                        typeof props.value !== "number" ||
+                        labelYByName[o.name] === undefined
+                      ) {
+                        return null;
+                      }
+                      const px =
+                        typeof props.x === "number" ? props.x : 0;
+                      return (
+                        <text
+                          x={px + 8}
+                          y={labelYByName[o.name]}
+                          dy="0.35em"
+                          fontSize={11}
+                          fill="var(--foreground)"
+                          fillOpacity={0.75}
+                          fontWeight={400}
+                        >
+                          {o.name}
+                        </text>
+                      );
+                    }}
+                  />
+                )}
               </Line>
             ))}
             <Line
@@ -536,32 +554,34 @@ export function TrendOverTime({
               connectNulls={false}
               isAnimationActive={false}
             >
-              <LabelList
-                dataKey={subjectName}
-                content={(props) => {
-                  if (
-                    props.index !== lastRowIdx ||
-                    typeof props.value !== "number" ||
-                    labelYByName[subjectName] === undefined
-                  ) {
-                    return null;
-                  }
-                  const px =
-                    typeof props.x === "number" ? props.x : 0;
-                  return (
-                    <text
-                      x={px + 8}
-                      y={labelYByName[subjectName]}
-                      dy="0.35em"
-                      fontSize={11}
-                      fill="var(--foreground)"
-                      fontWeight={600}
-                    >
-                      {subjectName}
-                    </text>
-                  );
-                }}
-              />
+              {showEndLabels && (
+                <LabelList
+                  dataKey={subjectName}
+                  content={(props) => {
+                    if (
+                      props.index !== lastRowIdx ||
+                      typeof props.value !== "number" ||
+                      labelYByName[subjectName] === undefined
+                    ) {
+                      return null;
+                    }
+                    const px =
+                      typeof props.x === "number" ? props.x : 0;
+                    return (
+                      <text
+                        x={px + 8}
+                        y={labelYByName[subjectName]}
+                        dy="0.35em"
+                        fontSize={11}
+                        fill="var(--foreground)"
+                        fontWeight={600}
+                      >
+                        {subjectName}
+                      </text>
+                    );
+                  }}
+                />
+              )}
             </Line>
           </ComposedChart>
         </ResponsiveContainer>

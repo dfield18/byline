@@ -18,6 +18,7 @@
  */
 import {
   CartesianGrid,
+  Label,
   LabelList,
   ResponsiveContainer,
   Scatter,
@@ -217,10 +218,15 @@ export function CompetitiveScatter({
           without colliding with the axes. Margins are generous on
           all sides so the custom label renderer can place text past
           the dot in any direction without overflowing the card. */}
-      <div className="h-[280px] w-full">
-        <ResponsiveContainer width="100%" height={280} minWidth={1}>
+      {/* Chart height bumped 280 → 300 to make room for the X-axis
+          title below the tick labels without crowding the plot
+          area. Bottom + left margins widened for the axis title
+          text; right kept tight since labels render via the smart
+          anchor in LabelList. */}
+      <div className="h-[300px] w-full">
+        <ResponsiveContainer width="100%" height={300} minWidth={1}>
           <ScatterChart
-            margin={{ top: 36, right: 32, left: 12, bottom: 8 }}
+            margin={{ top: 36, right: 32, left: 28, bottom: 32 }}
           >
             <CartesianGrid
               stroke="oklch(0.91 0.008 250)"
@@ -229,7 +235,11 @@ export function CompetitiveScatter({
             {/* X axis: avg rank, reversed so "best position" sits
                 LEFT. tickFormatter forces 1-decimal display because
                 Recharts otherwise renders the auto-generated tick
-                boundaries (e.g. 3.9944444445) at full precision. */}
+                boundaries (e.g. 3.9944444445) at full precision.
+                Axis title folds the directional hint into the label
+                ("Avg Mention Position (earlier →)") so the reader
+                doesn't need to read a separate caption below the
+                chart to learn which direction is better. */}
             <XAxis
               type="number"
               dataKey="rank"
@@ -241,7 +251,15 @@ export function CompetitiveScatter({
               axisLine={false}
               tickMargin={6}
               tickFormatter={(v: number) => v.toFixed(1)}
-            />
+            >
+              <Label
+                value="Avg Mention Position (← earlier in answer)"
+                position="bottom"
+                offset={12}
+                fontSize={11}
+                fill="var(--muted-foreground)"
+              />
+            </XAxis>
             <YAxis
               type="number"
               dataKey="sov"
@@ -261,7 +279,17 @@ export function CompetitiveScatter({
               axisLine={false}
               width={40}
               tickFormatter={(v: number) => `${v}%`}
-            />
+            >
+              <Label
+                value="Share of Voice (↑ more visible)"
+                angle={-90}
+                position="left"
+                offset={4}
+                fontSize={11}
+                fill="var(--muted-foreground)"
+                style={{ textAnchor: "middle" }}
+              />
+            </YAxis>
             <ZAxis range={[60, 60]} />
             <Tooltip
               cursor={{ stroke: PRIMARY, strokeOpacity: 0.25 }}
@@ -353,14 +381,10 @@ export function CompetitiveScatter({
         </ResponsiveContainer>
       </div>
 
-      {/* Single-line polarity caption — collapsed from the prior
-          two-line "X-axis: ... / Y-axis: ..." pair. Both polarities
-          read as one direction-of-better statement; folding them
-          together drops a line of text under the chart without
-          losing the directional hint. */}
-      <div className="mt-2 text-[11px] text-muted-foreground">
-        ← Earlier in answer · More visible →
-      </div>
+      {/* Directional caption removed — the axis titles now carry
+          the direction-of-better hints inline ("← earlier in answer"
+          on X, "↑ more visible" on Y) so a separate caption would
+          duplicate the signal. */}
     </div>
   );
 }
