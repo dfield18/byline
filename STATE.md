@@ -3,8 +3,12 @@
 > A pulse-check of where the project sits **as of 2026-05-23**
 > — three new spokes (Narrative, Sources, Prompts) stood up
 > from scratch, then a full Overview-spoke restructure into a
-> five-band narrative layout with horizontal sub-nav. The big
-> themes:
+> five-band narrative layout with horizontal sub-nav, then a
+> deep two-pass data-correctness sweep that shipped 26
+> defensive fixes across the page (tied-rank protection,
+> finite/clamp guards, label↔value consistency, threshold
+> harmonization, trajectory length normalization at the API
+> boundary). The big themes:
 >
 > - **Overview spoke restructured into five bands** (commit
 >   `bfda60f`): Vitals → Gap → Competitive → Sources → Evidence,
@@ -466,6 +470,284 @@ returns null and falls back to `data.bottom_line`.
 - **Retired functions / constants** in page.tsx:
   `formatRefreshKind`, `MAX_INLINE_LABEL_CHARS`, the bucketing
   branch of `formatComparator`.
+
+---
+
+## Follow-up session #2 (2026-05-23, late) — Top Narratives, click-to-expand evidence, deep data QA
+
+Three commits on `main`:
+
+- **`4782a48`** — Overview: Top Narratives + click-to-expand
+  evidence + deep data QA pass. 4 files, 848 ins / 122 del.
+- **`7a5e28d`** — Cleanup: unify spoke widths at 1280, drop
+  unused strategic_takeaways, doc tidy. 9 files, 33 ins / 44 del.
+- **`0fb9dc3`** — Overview: defensive parity pass +
+  tie-detection consistency. 4 files, 196 ins / 44 del.
+
+### Band 2 middle card replaced: Strongest Asset → Top Narratives
+
+The middle card in Band 2 (Gap | × | Fix) flipped from a topic-
+mention-rate list (which duplicated the Gap card's data) to a
+narrative-cluster list driven by `data.narrative_clusters`:
+
+- **`TopNarrativesList`** renders the top 4 clusters by share,
+  one row per cluster via the shared `TopicBarRow`.
+- Each bar is **sentiment-toned** from `cluster.sentiment_mean`
+  (≥0.1 favorable / ≤−0.1 critical / else neutral), paired
+  with a small sentiment dot next to the label so the meaning
+  carries for colorblind / grayscale viewers.
+- ±0.1 neutral band matches the same threshold the backend
+  uses to compute `net_sentiment` counts, so the bar coloring
+  agrees with the analyzer's own classification.
+- Color legend rendered as a card footer
+  (`● Favorable · ● Neutral · ● Critical`) so the meaning
+  doesn't have to be guessed.
+- Tied-top highlight suppressed when ambiguous (parity with
+  Gap card + competitive rank tie handling).
+- Share clamped to `[0, 1]` with `Number.isFinite` guard
+  before `Math.round * 100`.
+- Footer caption notes shares are independent — clusters can
+  overlap, so the bars don't have to sum to 100%.
+
+### Click-to-expand Evidence cards + full-AI-response fetch
+
+New client component `web/app/subjects/[id]/EvidenceExcerpt.tsx`
+gives every Evidence quote two layers of expansion:
+
+- **Show more / Show less** — toggles line-clamp-4 on the
+  cross-analyzer's quoted excerpt (no network call). Fires when
+  the excerpt exceeds `TRUNCATE_THRESHOLD_CHARS` (240) OR
+  contains ≥3 newlines (caught by `countNewlines`, matches
+  `\n` / `\r\n` / `\r`). Newline check resolves the case where
+  an excerpt was short by character count but clamped by
+  paragraph breaks at the visible-line level.
+- **Show full AI response** — lazy-fetches the full per-platform
+  response text via the existing
+  `/api/subjects/{id}/prompts/{promptId}/responses` proxy,
+  filters to this card's `model_slug`, renders inline in a
+  `max-h-[260px] overflow-y-auto` panel. States handled:
+  loading / error / empty / success / toggle off.
+
+**Backend**: `_read_evidence_cards` now SELECTs `mr.prompt_id`
+and includes it on every `evidence_cards[]` entry. Frontend type
+extended to match. `EvidenceCard` props bumped to thread
+`subjectId` + `card.prompt_id` + `card.model_slug` into the
+new excerpt component. Requires a uvicorn restart after the
+SQL change (caught it once during the session — module cache
+caveat documented earlier still applies).
+
+### Per-platform mention-rate chip strip in Band 1
+
+New `PlatformBreakdownStrip` component renders under the Vitals
+KPI sparklines (when `data.platform_recall.length > 1`). Each
+chip shows `{platform name} {N%}` with the rate color-toned by
+the same `mention_rate` thresholds the KPI value uses. Answers
+"is the headline rate universal or driven by one platform?" —
+unanswerable before without scrolling to the Visibility deep-
+dive. Chips also include `n_responses` in the title attribute
+for sample-size context. Pct clamped to `[0, 100]` defensively.
+
+### Brand icons replace model dots on Evidence cards
+
+`MODEL_ICON` map added: `SiOpenai` / `SiGooglegemini` /
+`SiAnthropic` / `SiPerplexity` from `react-icons/si`, same icon
+set the landing page's "Platforms monitored" strip uses. Each
+Evidence card's top-row platform marker is the brand glyph at
+`h-3.5 w-3.5 text-foreground/70` instead of the prior 1.5×1.5px
+colored dot. Falls back to the original colored dot when a
+`model_slug` doesn't have a brand mark.
+
+### Cross-spoke width unified at 1280
+
+All five spokes (Visibility, Narrative, Competition, Sources,
+Prompts) bumped from `max-w-[1400px]` → `max-w-[1280px]` to
+match Overview + the shared Header's inner cap. The earlier
+session flagged this as a regression where other spokes'
+content extended past the centered Header controls; that's
+closed now. Header.tsx code comment updated to reflect
+unified-width state.
+
+### Backend payload trim: `strategic_takeaways` dropped
+
+`get_subject_overview` stops serializing `strategic_takeaways`
+in its response dict (both populated and empty-overview
+branches). Still computed internally as input to
+`_compute_bottom_line` + `_compute_recommended_focus`, but no
+frontend / Streamlit / test reads it from the API response
+(confirmed via grep). Saves ~1-2 KB/req. Frontend
+`SubjectOverview` type drops the field to match.
+
+### Deep data QA — fixes shipped this session (chronological)
+
+1. Verdict **rounding-collapse** guard: `buildGapBottomLine`
+   returns null when `weakestPct === otherPct` (single-other)
+   or `weakestPct === meanOthersPct` (multi-other) so the
+   sentence can never read "in N% ... but only N% on Y".
+2. Verdict **tied-weakest** guard: returns null when the
+   weakest's recall ties (within `TIE_EPSILON`) with at
+   least one other topic — the named-topic clause would
+   otherwise flicker between snapshots based on backend
+   insertion order. `TopicRecallInline` correspondingly
+   glows ALL tied-at-weakest bars in warning together.
+3. Verdict **empty-label** guards: returns null when
+   `weakest.label` / `other.label` is empty; comparator list
+   filters empty labels out before `joinList`.
+4. **`_hasFiniteRecall`** now requires `n_responses > 0` —
+   topic rows with `{n_responses: 0, ai_recall: 0}` no longer
+   render as misleading 0% bars in the Gap card.
+5. **Competitive rank tie** detection: `deriveCompetitivePosition`
+   surfaces `rankIsTied`; rank stat renders "Tied #N" when
+   subject's SoV is within tie tolerance of an adjacent entity.
+6. **`pickTopWithSubject` zero-SoV skip**: when subject's SoV
+   is below `SOV_TIE_EPSILON`, function returns natural top N
+   rather than displacing a real-data peer with an empty-bar
+   subject.
+7. **Negative-SoV defensive floor** at both `CompetitorBarsFromData`
+   call sites: `Number.isFinite(c.sov) ? Math.max(0, c.sov) : 0`.
+   Backend NaN / Infinity / round-off-negative can't render a
+   visually broken bar.
+8. **`TopNarrativesList` tied-top highlight** suppressed when
+   ambiguous; share clamped `[0, 1]`.
+9. **KPI delta unit `pp` → `pts`** to match the Competitive
+   Position deltas. One unit across the page.
+10. **KPI delta + SoV-trend delta** now require the IMMEDIATELY
+    preceding snapshot (not the nearest finite predecessor).
+    "vs prior snapshot" copy is honest — never silently spans
+    2+ snapshots when a backfill gap sits before the latest.
+11. **SoV trend stat eyebrow renamed** to "Entity-mix share
+    trend" with sub-line "subject's slice of all tracked-entity
+    mentions" — disambiguates from the Band 3 bar chart's
+    mention-rate definition (both were colloquially "share of
+    voice"; the data definitions actually differ).
+12. **`TinySpark` padding harmonized** with `MiniSpark` (40%
+    below / 15% above the data range).
+13. **`MiniSpark` plot range** padded asymmetrically so a 90%
+    value doesn't appear to bottom out at 0%.
+14. **`normalizeTrajectory`** runs on every `getSubjectOverview`
+    response: pads short series (null / -1 / false sentinels)
+    and right-truncates long ones to match `weeks.length`
+    exactly. The latest value can never bind to the wrong date
+    even if the backend regresses on array alignment. Series
+    enumerated explicitly so new fields can't silently bypass.
+    Plus an empty-trajectory early-return when `t.weeks` is
+    missing so the page degrades to its zero-snapshots
+    empty-state branch instead of 500-ing.
+15. **`formatPct` / `formatTonePct` clamp** to `[0, 1]` /
+    `[-1, 1]` before display. No KPI percentage / sparkline
+    axis label / Source influence number can render >100%.
+16. **`TopicRecallInline` row pct** clamped at 100.
+17. **`PlatformBreakdownStrip` chip pct** clamped at `[0, 100]`
+    with `Number.isFinite` short-circuit.
+18. **`getKpiValueColor("avg_tone")`** boundaries flipped from
+    strict `>0.005 / <-0.005` to inclusive `>= / <=` so the
+    color flips at the same threshold `formatTonePct` uses for
+    "Neutral".
+19. **`TopNarrativesList` sentiment band** uses inclusive
+    `>= 0.1 / <= -0.1` so a cluster mean of exactly 0.1 gets
+    the matching tone.
+20. **Competitive gap label/value consistency**: `rankIsTied`
+    and the gap value now share the same `roundedPp(a, b)`
+    helper. Sub-pp gaps no longer produce a "Lead over
+    runner-up" label paired with a "Tied with X" value.
+21. **`deriveCompetitivePosition` finite guard**: `safeRows`
+    coerces non-finite `c.sov` to 0 before sort + arithmetic.
+    Stat stack can no longer render "NaN pts" / "Infinity pts".
+22. **Band 2 dynamic column count**: grid uses `md:grid-cols-{N}`
+    based on how many cards actually render. No more single
+    card stretched across an empty 3-column row when
+    `narrative_clusters` or `recommended_actions` is missing.
+23. **`MiniSpark` date labels** force `timeZone: "UTC"` so a
+    UTC-midnight snapshot doesn't appear as the previous day
+    to viewers in PST/EST.
+24. **`PlatformBreakdownStrip` + `SourcesList` row keys** use
+    `${name}-${idx}` instead of `name` alone — defends against
+    React key collisions if backend ever returns two same-named
+    entries.
+25. **`OverviewSubNav` observer dep**: `IntersectionObserver`
+    `useEffect` keyed off a content-stable `itemsKey`
+    (`items.map(i => i.id).join("|")`) rather than the items
+    array reference. Observer only reattaches when the band-id
+    set actually changes, not on every parent re-render that
+    produces a fresh array.
+26. **`EvidenceCard` layer tolerance**: `isSolicited` flipped
+    from `layer === "named"` to `layer !== "unnamed"`. Any
+    future layer (e.g. "mixed", "comparative") that still
+    solicits the subject in the prompt gets the "Solicited
+    prompt" tag automatically.
+
+### Renames (display only — internal field names unchanged)
+
+| Old | New |
+|---|---|
+| Top Result Rate | First Result Mentioned |
+| Average Tone | Net Favorability (tooltip updated to match) |
+| AI Mention Rate | + subtitle "across all topics" |
+| The Gap · Mention Rate by Topic | Dynamic "Visibility gap by topic" / "Topic visibility" via `hasRealVisibilityGap` |
+| Share-of-voice trend (stat card) | Entity-mix share trend |
+
+### Verdict copy reframe
+
+- Old: `When asked about X, AI mentions Y in only N% of answers — well below the M% average across other tracked topics (...).`
+- New: `AI mentions Y in M% of answers about [topics] — but only N% on X.` Contrast lands at the punchline; em-dash split gives the BottomLineBlock a clean title clause + body clause.
+- `formatComparator` simplified — names every topic inline
+  regardless of label length; pure-count fallback
+  ("every other tracked topic") only fires beyond 6 topics.
+  `MAX_INLINE_LABEL_CHARS` constant retired.
+- Verdict title typography dropped 17/18 → 16/17 to make
+  room for longer topic lists.
+
+### Vitals card structural changes
+
+- **Subject H1 + "AI Narrative Brief" eyebrow removed** from
+  the populated Vitals card (subject name lives in the header
+  subject picker; the eyebrow duplicated "Bottom line").
+  Empty-state card unchanged.
+- **KPI tiles equalized**: `items-stretch` + `flex h-full
+  flex-col` + `mt-auto pt-3` on sparkline + reserved subtitle
+  slot, so sparkline baselines align across all three tiles
+  regardless of which carries a subtitle.
+- **Inter-tile gap** `4` → `8` so value/delta on one tile
+  doesn't crowd the sparkline of the next.
+
+### Band 3 refinements
+
+- Second stat card flips **label AND value** together by rank:
+  `Lead over runner-up / +N pts / ahead of {runnerUp}` when
+  subject is #1; `Gap to leader / −N pts / behind {leader}`
+  otherwise. Tie case explicit ("Tied with {peer}"); single-
+  entity peer set hides the card via the `comparatorName !== null`
+  guard.
+
+### Sources / Evidence touch-ups
+
+- Sources `SectionTitle` moved INTO the left column so the
+  donut chart aligns vertically with the heading instead of
+  starting below the table.
+- Sources top-5 cap on the table.
+- Evidence cards equal-height via `h-full` + `mt-auto` on the
+  Frame footer; frame footer always rendered (em-dash
+  placeholder when null) so the three cards line up.
+
+### New / removed components + helpers
+
+- **New**: `web/app/subjects/[id]/EvidenceExcerpt.tsx`
+  (click-to-expand + lazy full-response fetch).
+- **New** helpers in `page.tsx`: `TopNarrativesList`,
+  `PlatformBreakdownStrip`, `MODEL_ICON` map, `countNewlines`.
+- **New** helpers in `lib/api.ts`: `normalizeTrajectory`,
+  `padOrTruncate`.
+- **Removed**: `StrongestTopicsList` (replaced by
+  `TopNarrativesList`), all dead doc comments referencing it.
+- **Frontend type cleanup**: `strategic_takeaways` removed from
+  `SubjectOverview`.
+
+### Backend changes
+
+- `dashboard/lib/queries.py`:
+  - `_read_evidence_cards` SELECT extended with `mr.prompt_id`;
+    each evidence card carries it on the payload.
+  - `get_subject_overview` response dict stops emitting
+    `strategic_takeaways` (still computed internally).
 
 ---
 
