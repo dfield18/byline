@@ -301,14 +301,27 @@ export function TrendOverTime({
     const dataMin = Math.min(...allValues);
     const dataMax = Math.max(...allValues);
     const pad = 5;
+    // Floor on the axis span so a tight cluster (e.g. subject-only
+    // axis on a subject hugging 90-100%) doesn't collapse to a
+    // 10-point window with only 3 ticks. Without this, the axis
+    // crushes against the data and any nearby off-axis lines get
+    // clipped at the chart floor. 25 keeps a comfortable 4-5 tick
+    // count at step 5 and gives competitor lines a few points of
+    // visible territory below the subject's band.
+    const MIN_AXIS_SPAN = 25;
+    const dataRange = dataMax - dataMin;
+    const paddedRange = Math.max(dataRange + 2 * pad, MIN_AXIS_SPAN);
     // Pick a step that yields ~4 gridlines across the padded range.
     // Small ranges (tight cluster) get a 5pt step; medium ranges get
     // 10pt; very wide ranges get 20pt so we don't print 8+ tick
     // labels on a short axis.
-    const paddedRange = dataMax - dataMin + 2 * pad;
     const step = paddedRange <= 25 ? 5 : paddedRange <= 50 ? 10 : 20;
-    const rawMin = dataMin - pad;
-    const rawMax = dataMax + pad;
+    // Distribute the (possibly-expanded) padding around the data
+    // midpoint so the dataset sits centered in its breathing room
+    // rather than pinned to one edge.
+    const halfExtra = (paddedRange - dataRange) / 2;
+    const rawMin = dataMin - halfExtra;
+    const rawMax = dataMax + halfExtra;
     const min = Math.max(0, Math.floor(rawMin / step) * step);
     // Domain can breathe up to 105 so a series at the 100% ceiling
     // doesn't fuse with the chart frame, but tick labels stop at

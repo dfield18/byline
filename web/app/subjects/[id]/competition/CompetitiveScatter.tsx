@@ -144,16 +144,40 @@ export function CompetitiveScatter({
     return (rank - minRank) / span;
   };
 
-  // Collision-aware label placement: when two dots sit close in
-  // (rank, sov) space their default centered-above labels would
-  // overlap (e.g. "BarackJObamap" when Obama and Trump land at
-  // nearly identical coordinates). For each dot, check if an earlier
-  // dot is within a small proximity radius — if so, flip this dot's
-  // label to BELOW its dot instead of above. Subject is always
-  // pinned above so the focal label leads the visual stack.
-  // Thresholds: X close = 5% of the rank span; Y close = 8 pp.
-  const xClose = (maxRank - minRank) * 0.05;
+  // Collision-aware label placement. Earlier version triggered only
+  // when dots were within 5% of the X span — too narrow when labels
+  // run wide ("Gretchen Whitmer" at 11px ≈ 100px), so two dots 0.7
+  // axis-units apart still rendered their labels overlapping. New
+  // approach estimates each label's pixel width from its character
+  // count and compares to the per-pair pixel distance: if the labels
+  // would touch (even after a small gap), the lower-priority dot
+  // flips to the next tier. Y-proximity stays at 8 pp since vertical
+  // overlap is binary (labels are one line, no width variability).
+  const CHAR_PX = 6.5;
+  // Gap bumped from 8 → 14 after observed near-miss collisions (e.g.
+  // "J.B. Pritzker" and "Josh Shapiro" sitting ~92px apart with
+  // estimated combined half-width ~85px were marked safe but read
+  // as a single run-on string). 14px of required gap pushes
+  // borderline pairs into the tier-shift branch where one flips
+  // below the dot instead of overlapping above.
+  const LABEL_GAP_PX = 14;
+  // The CompetitiveScatter card sits in a half-width grid on a
+  // 1280px page, so the chart canvas is ~520px wide for the X axis
+  // area. Approximate is fine — this is a "would these visually
+  // overlap" gate, not pixel-perfect placement; ±50px viewport drift
+  // shifts the threshold by a few percent of one label width.
+  const ASSUMED_X_AXIS_PX = 520;
   const yCloseSov = 8;
+  const xPxOf = (rank: number): number =>
+    xFractionOf(rank) * ASSUMED_X_AXIS_PX;
+  const labelPxOf = (name: string): number => name.length * CHAR_PX;
+  const wouldLabelsOverlap = (a: EntityPoint, b: EntityPoint): boolean => {
+    if (Math.abs(a.sov - b.sov) > yCloseSov) return false;
+    const pxDist = Math.abs(xPxOf(a.rank) - xPxOf(b.rank));
+    const minPxDist =
+      (labelPxOf(a.name) + labelPxOf(b.name)) / 2 + LABEL_GAP_PX;
+    return pxDist < minPxDist;
+  };
   // Sort to make the placement order deterministic: subject first
   // (so it claims "above"), then by SoV desc (topmost dots claim
   // their slot first, lower dots flip if they collide).
@@ -178,10 +202,7 @@ export function CompetitiveScatter({
     const taken = new Set<LabelTier>();
     for (let j = 0; j < i; j++) {
       const other = orderedForPlacement[j];
-      if (
-        Math.abs(p.rank - other.rank) <= xClose &&
-        Math.abs(p.sov - other.sov) <= yCloseSov
-      ) {
+      if (wouldLabelsOverlap(p, other)) {
         const otherTier = labelPositionByName[other.name];
         if (otherTier) taken.add(otherTier);
       }

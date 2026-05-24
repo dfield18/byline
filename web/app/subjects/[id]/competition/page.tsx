@@ -321,9 +321,33 @@ function composeCompetitionWhatChanged({
   competitorMovers.sort((a, b) => Math.abs(b.deltaPp) - Math.abs(a.deltaPp));
   deltas.push(...competitorMovers.slice(0, 3));
 
+  // Field-wide consolidation: when every rendered delta carries the
+  // SAME rounded value (e.g. overall -10 pts, Wes Moore -10 pts,
+  // J.B. Pritzker -10 pts, Gretchen Whitmer -10 pts), the per-entity
+  // strip becomes "-10 pts" four times in a row — no new signal
+  // after the first chip. Collapse to a single field-wide line so
+  // the section carries new information rather than the same number
+  // repeated. Requires ≥3 deltas to trigger; smaller strips keep
+  // the per-entity rows because the comparison is short enough to
+  // read at a glance.
+  const finalDeltas: WhatChangedDelta[] = (() => {
+    if (deltas.length < 3) return deltas;
+    const first = deltas[0].deltaPp;
+    if (first === 0) return deltas;
+    const allMatch = deltas.every((d) => d.deltaPp === first);
+    if (!allMatch) return deltas;
+    return [
+      {
+        label: `All ${deltas.length} tracked movers`,
+        deltaPp: first,
+        kind: "overall",
+      },
+    ];
+  })();
+
   return {
-    deltas,
-    fallbackCopy: deltas.length === 0 ? STABLE_COPY : null,
+    deltas: finalDeltas,
+    fallbackCopy: finalDeltas.length === 0 ? STABLE_COPY : null,
     latestDate,
     priorDate,
   };
@@ -389,6 +413,14 @@ function sovTierStyle(tier: SovTier): {
 // sentences: ranking + gap clause, then topic-win clause. Returns
 // null when there aren't enough entities to say anything useful;
 // callers fall back to a static line in that case.
+//
+// Filter-aware: when the user has scoped the page via the topic or
+// platform dropdown in the sub-nav, the sentence prefixes with the
+// active scope ("On ChatGPT, …" / "On ChatGPT in current events, …")
+// so the reader knows the rank/SoV/gap numbers are scoped, not the
+// unfiltered snapshot. The numbers themselves were already filter-
+// aware (computed from `landscapeEntities`, which is scoped); only
+// the framing copy was misleading.
 function composeCompetitiveBottomLine({
   subjectName,
   subjectEntity,
@@ -397,6 +429,8 @@ function composeCompetitiveBottomLine({
   competitiveSetSize,
   topicsLed,
   topicsTracked,
+  scopedPlatformName,
+  scopedTopicLabel,
 }: {
   subjectName: string;
   subjectEntity: { name: string; sov: number; is_subject: boolean } | null;
@@ -405,6 +439,8 @@ function composeCompetitiveBottomLine({
   competitiveSetSize: number;
   topicsLed: number;
   topicsTracked: number;
+  scopedPlatformName?: string | null;
+  scopedTopicLabel?: string | null;
 }): string | null {
   if (
     !subjectEntity ||
@@ -427,23 +463,38 @@ function composeCompetitiveBottomLine({
       Math.abs(subjectEntity.sov - referenceEntity.sov) * 100,
     );
     if (gapPts === 0) {
-      gapClause = isLeader
-        ? `, tied with ${referenceEntity.name}`
-        : `, tied with ${referenceEntity.name}`;
+      gapClause = `, tied with ${referenceEntity.name}`;
     } else if (isLeader) {
       gapClause = `, ahead of ${referenceEntity.name} by ${gapPts} pts`;
     } else {
       gapClause = `, trailing ${referenceEntity.name} by ${gapPts} pts`;
     }
   }
+  // Scope prefix: prepends an "On <platform> in <topic>, " clause
+  // when filters are active so the rest of the sentence reads as a
+  // filtered statement instead of a global one.
+  const scopeParts: string[] = [];
+  if (scopedPlatformName) scopeParts.push(`On ${scopedPlatformName}`);
+  if (scopedTopicLabel) {
+    scopeParts.push(
+      scopedPlatformName ? `in ${scopedTopicLabel}` : `On ${scopedTopicLabel}`,
+    );
+  }
+  const subjectPhrase =
+    scopeParts.length > 0
+      ? `${scopeParts.join(" ")}, ${subjectName}`
+      : subjectName;
   const rankClause = isLeader
-    ? `${subjectName} leads its ${competitiveSetSize}-way comparison set`
-    : `${subjectName} ranks #${competitiveRank} of ${competitiveSetSize} in the comparison set`;
+    ? `${subjectPhrase} leads its ${competitiveSetSize}-way comparison set`
+    : `${subjectPhrase} ranks #${competitiveRank} of ${competitiveSetSize} in the comparison set`;
   const sentence1 = `${rankClause} with ${sovPct}% Share of Voice${gapClause}.`;
-  // Sentence 2 is optional — only render when topics are tracked.
-  // Skips the "0 of 0 topics" awkwardness on subjects without a
-  // topic leaderboard.
-  if (topicsTracked === 0) return sentence1;
+  // Sentence 2 (topic-win clause) is suppressed when a topic filter
+  // is active — "Wins 3 of 4 tracked topics" reads as a global
+  // claim, but the surrounding page is scoped to one topic, so the
+  // clause would mislead. When unscoped, only render when topics
+  // are tracked (skips the "0 of 0 topics" awkwardness on subjects
+  // without a topic leaderboard).
+  if (topicsTracked === 0 || scopedTopicLabel) return sentence1;
   const sentence2 = `Wins ${topicsLed} of ${topicsTracked} tracked topic${topicsTracked === 1 ? "" : "s"}.`;
   return `${sentence1} ${sentence2}`;
 }
@@ -945,16 +996,27 @@ export default async function CompetitionPage({
   const topicWinRateFrac =
     topicsTracked > 0 ? topicsLed / topicsTracked : null;
 
-  // Strongest Topic — the tracked topic where the subject has
-  // its highest mention rate. Names the topic in the value slot
-  // and surfaces the rate as the subtitle so the reader sees
-  // "where you're most visible" at a glance.
-  const strongestTopic =
-    data.topic_leaderboard.length > 0
-      ? [...data.topic_leaderboard].sort(
-          (a, b) => b.subject_rate - a.subject_rate,
-        )[0]
-      : null;
+  // Strongest Topic — the tracked topic where the subject has its
+  // highest mention rate. When all topics have effectively the same
+  // rate (e.g. subject at 100% across every topic), picking ONE as
+  // "strongest" is misleading; the suffix below switches to
+  // "Tied across N topics" instead so the headline doesn't claim
+  // false signal. Threshold: a 5 pp gap from the mean of the
+  // remaining topics qualifies as meaningfully strongest.
+  const topicsBySubjectRateDesc = [...data.topic_leaderboard].sort(
+    (a, b) => b.subject_rate - a.subject_rate,
+  );
+  const strongestTopic = topicsBySubjectRateDesc[0] ?? null;
+  const meanOfRestTopicRates = (() => {
+    const rest = topicsBySubjectRateDesc.slice(1);
+    if (rest.length === 0) return 0;
+    return rest.reduce((s, t) => s + t.subject_rate, 0) / rest.length;
+  })();
+  const STRONGEST_GAP_MIN = 0.05;
+  const hasMeaningfulStrongest =
+    topicsBySubjectRateDesc.length > 1 &&
+    strongestTopic !== null &&
+    strongestTopic.subject_rate - meanOfRestTopicRates >= STRONGEST_GAP_MIN;
 
   // KPI tile shape mirrors the Visibility spoke's `KpiCard` so both
   // briefings render with one tile template. `value` is the headline
@@ -1018,12 +1080,14 @@ export default async function CompetitionPage({
       helper: "Comparison entity closest to the subject in Share of Voice.",
       tooltip:
         "The single entity in the comparison set whose Share of Voice is nearest the subject's. Subtitle shows the gap in percentage points and which side of the subject they sit on. A larger gap = more breathing room from your nearest rival.",
-      valueColor: toneByThreshold(
-        topCompetitorGapPp,
-        "higher_better",
-        10,
-        0,
-      ),
+      // Neutral color: the value is a competitor's NAME, not a
+      // performance metric. Painting the name green/amber by the
+      // gap polarity created a visual mismatch — reader sees "Wes
+      // Moore" in green and reads "Wes Moore is healthy", when the
+      // green was meant to celebrate the subject's lead. The gap
+      // direction + magnitude lives in the caption beneath; the
+      // headline name stays tone-free.
+      valueColor: "text-foreground",
       polarity: "higher_better",
       // Name-anchored tile (value is a competitor name) — skip the
       // gauge entirely; the subtitle carries the numeric context.
@@ -1070,16 +1134,23 @@ export default async function CompetitionPage({
       value: strongestTopic
         ? `${Math.round(strongestTopic.subject_rate * 100)}%`
         : "—",
-      // Topic name folds into the headline as a smaller suffix —
-      // same pattern as Visibility's Weakest Topic tile, so the
-      // two spokes' name-anchored tiles render identically.
-      valueSuffix: strongestTopic
-        ? capitalizeFirst(strongestTopic.topic_label)
-        : null,
+      // Suffix logic: when one topic is materially stronger than
+      // the others, name it (same pattern as Visibility's Weakest
+      // Topic). When topics are tied (subject hits the same rate
+      // across every tracked topic), naming one as "strongest" is
+      // misleading — switch to "Tied across N topics" so the
+      // headline tells the truth about the cluster instead of
+      // arbitrarily picking the first sort hit.
+      valueSuffix: !strongestTopic
+        ? null
+        : hasMeaningfulStrongest ||
+            topicsBySubjectRateDesc.length === 1
+          ? capitalizeFirst(strongestTopic.topic_label)
+          : `Tied across ${topicsBySubjectRateDesc.length} topics`,
       subtitle: undefined,
       helper: "Topic where the subject's mention rate is highest.",
       tooltip:
-        "Tracked topic where the subject's mention rate is highest in this snapshot. The headline shows the rate; the topic name follows as a smaller qualifier. Useful as a positive anchor when the rest of the briefing skews negative.",
+        "Tracked topic where the subject's mention rate is highest in this snapshot. The headline shows the rate; the topic name follows as a smaller qualifier (or 'Tied across N topics' when the rate is uniform). Useful as a positive anchor when the rest of the briefing skews negative.",
       // Tone reflects the strongest topic's absolute mention rate
       // — even the "best" topic is worth flagging if it's still
       // below 40%. Mirrors the thresholds the Visibility spoke
@@ -1113,6 +1184,13 @@ export default async function CompetitionPage({
     competitiveSetSize,
     topicsLed,
     topicsTracked,
+    // Filter-aware framing — see helper comment. The rank/SoV/gap
+    // numbers above are already scoped via landscapeEntities; this
+    // tells the helper to add the matching prefix to the sentence.
+    scopedPlatformName: scopedLandscapePlatformName,
+    scopedTopicLabel: prominenceTopic
+      ? capitalizeFirst(prominenceTopic).toLowerCase()
+      : null,
   });
 
   // Inline advisory used on sections that genuinely CAN'T scope on
@@ -1238,12 +1316,44 @@ export default async function CompetitionPage({
                       {competitiveBottomLine ??
                         `${data.subject_name}'s competitive position across AI answers in this snapshot.`}
                     </p>
-                    {data.meta.n_platforms > 0 && (
-                      <p className="mt-2 text-[12.5px] text-muted-foreground">
-                        Snapshot covers {data.meta.n_platforms} AI platform
-                        {data.meta.n_platforms === 1 ? "" : "s"}.
-                      </p>
-                    )}
+                    {(() => {
+                      // Filter-aware coverage caveat. Unfiltered: a
+                      // simple "N platforms × M topics" frame. When
+                      // filters are active, leads with the filter
+                      // scope so the reader knows the briefing above
+                      // is a filtered view, then surfaces the
+                      // underlying snapshot dimensions in
+                      // parentheses for context. Mirrors the
+                      // bottom-line's scope-prefix pattern so the
+                      // two lines tell the same scope story.
+                      if (data.meta.n_platforms === 0) return null;
+                      const topicCount = data.topic_leaderboard.length;
+                      const filterParts: string[] = [];
+                      if (scopedLandscapePlatformName) {
+                        filterParts.push(
+                          `${scopedLandscapePlatformName} only`,
+                        );
+                      }
+                      if (prominenceTopic) {
+                        filterParts.push(
+                          `${capitalizeFirst(prominenceTopic)} only`,
+                        );
+                      }
+                      const snapshotDims = `${data.meta.n_platforms} platform${
+                        data.meta.n_platforms === 1 ? "" : "s"
+                      }${topicCount > 0 ? ` × ${topicCount} topic${topicCount === 1 ? "" : "s"}` : ""}`;
+                      const text =
+                        filterParts.length > 0
+                          ? `Filtered scope: ${filterParts.join(" · ")} (snapshot has ${snapshotDims}).`
+                          : `Snapshot covers ${data.meta.n_platforms} AI platform${
+                              data.meta.n_platforms === 1 ? "" : "s"
+                            }${topicCount > 0 ? ` across ${topicCount} tracked topic${topicCount === 1 ? "" : "s"}` : ""}.`;
+                      return (
+                        <p className="mt-2 text-[12.5px] text-muted-foreground">
+                          {text}
+                        </p>
+                      );
+                    })()}
                   </div>
                   <div className="relative mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
                     {competitionKpis.map((k) => {
@@ -1370,12 +1480,61 @@ export default async function CompetitionPage({
                           }))
                           .sort((a, b) => a.sov - b.sov)
                       : [];
+                    // Full set of subject cells (any tier) — used by
+                    // the no-gaps branch to name strongest + weakest
+                    // platforms specifically rather than emitting a
+                    // generic "at least contested" line that carries
+                    // no actionable signal.
+                    const subjectCellsSorted = subjectName
+                      ? ownershipCells
+                          .filter(
+                            (c) =>
+                              c.entity_name === subjectName &&
+                              c.sov !== null &&
+                              Number.isFinite(c.sov),
+                          )
+                          .map((c) => ({
+                            platformName:
+                              ownershipPlatforms.find(
+                                (p) => p.slug === c.platform_slug,
+                              )?.name ?? c.platform_slug,
+                            sov: c.sov as number,
+                          }))
+                          .sort((a, b) => b.sov - a.sov)
+                      : [];
                     const summary = (() => {
                       if (!subjectName) {
                         return "Subject not in the platform-ownership matrix.";
                       }
                       if (subjectMarginalCells.length === 0) {
-                        return `${subjectName} holds at least contested share on every covered platform.`;
+                        // No gaps — replace the prior generic "at
+                        // least contested" line with named strongest
+                        // + most-contested platforms. When SoV is
+                        // uniform across all platforms the strongest/
+                        // weakest collapse to the same cell, so
+                        // surface that explicitly instead.
+                        if (subjectCellsSorted.length === 0) {
+                          return `${subjectName} has no measured platform share in this snapshot.`;
+                        }
+                        if (subjectCellsSorted.length === 1) {
+                          const only = subjectCellsSorted[0];
+                          return `${subjectName} holds ${Math.round(
+                            only.sov * 100,
+                          )}% SoV on ${only.platformName} (only covered platform).`;
+                        }
+                        const strongest = subjectCellsSorted[0];
+                        const weakest =
+                          subjectCellsSorted[subjectCellsSorted.length - 1];
+                        if (strongest.sov === weakest.sov) {
+                          return `${subjectName} holds a uniform ${Math.round(
+                            strongest.sov * 100,
+                          )}% SoV across all ${subjectCellsSorted.length} covered platforms.`;
+                        }
+                        return `Strongest on ${strongest.platformName} (${Math.round(
+                          strongest.sov * 100,
+                        )}%); most contested on ${weakest.platformName} (${Math.round(
+                          weakest.sov * 100,
+                        )}%).`;
                       }
                       if (subjectMarginalCells.length === 1) {
                         const g = subjectMarginalCells[0];
@@ -1432,11 +1591,18 @@ export default async function CompetitionPage({
                                 key={e.name}
                                 style={{ display: "contents" }}
                               >
+                                {/* Subject row name cell: bumped to
+                                    bold + primary-tinted left accent
+                                    + slightly larger font so the
+                                    subject's row reads as the row
+                                    that matters. Same emphasis stack
+                                    as the Ranking table — the two
+                                    tables now match treatment. */}
                                 <div
-                                  className={`self-center pr-2 text-[12px] ${
+                                  className={`self-center text-[12px] ${
                                     e.is_subject
-                                      ? "font-semibold text-foreground"
-                                      : "text-foreground/80"
+                                      ? "font-bold text-foreground border-l-2 border-l-primary/60 pl-2 pr-2"
+                                      : "pr-2 text-foreground/80"
                                   }`}
                                 >
                                   {e.name}
@@ -1458,9 +1624,16 @@ export default async function CompetitionPage({
                                   return (
                                     <div
                                       key={p.slug}
+                                      // Subject cell: bumped ring
+                                      // from ring-1 ring-primary/30
+                                      // to ring-2 ring-primary/50 so
+                                      // the frame is clearly visible
+                                      // against the tier-colored fill
+                                      // instead of whispering at the
+                                      // edge.
                                       className={`relative flex h-7 items-center justify-center rounded-sm ${
                                         e.is_subject
-                                          ? "ring-1 ring-primary/30"
+                                          ? "ring-2 ring-primary/50"
                                           : ""
                                       }`}
                                       style={{
@@ -1470,7 +1643,9 @@ export default async function CompetitionPage({
                                       title={titleLabel}
                                     >
                                       <span
-                                        className={`text-[10.5px] tabular-nums ${ts.textClass}`}
+                                        className={`text-[10.5px] tabular-nums ${ts.textClass} ${
+                                          e.is_subject ? "font-bold" : ""
+                                        }`}
                                       >
                                         {sov === null
                                           ? "—"
@@ -1540,13 +1715,15 @@ export default async function CompetitionPage({
                       helperText="Mention rate shows the share of AI answers that mentioned each entity in the tracked prompt set."
                       overlayOpacity={0.5}
                       height={340}
-                      // Axis fits the subject's range only so
-                      // Newsom's movement reads cleanly even with
-                      // 6 competitor overlays spanning the lower
-                      // half of the chart. Competitor lines still
-                      // render — they just don't stretch the axis
-                      // to a flat-looking 0-100%.
-                      subjectOnlyAxis
+                      // Axis fits all series (subject + competitor
+                      // overlays) — same algorithm Visibility uses.
+                      // Subject-only fitting was attempted but the
+                      // axis collapsed to the subject's narrow band
+                      // and clipped competitor lines at the chart
+                      // floor; honest all-series fit + the 25-point
+                      // MIN_AXIS_SPAN floor in TrendOverTime keeps
+                      // every line on-canvas while still giving
+                      // Newsom's variation visible territory.
                     />
                     {(() => {
                       const result = composeCompetitionWhatChanged({
@@ -1847,11 +2024,29 @@ export default async function CompetitionPage({
                               return (
                                 <tr
                                   key={c.name}
-                                  className={`border-b border-border/30 last:border-0 text-[14px] ${c.is_subject ? "bg-primary/[0.04]" : ""}`}
+                                  // Subject row gets a stronger
+                                  // emphasis stack so the eye lands
+                                  // on it first: doubled background
+                                  // tint, left accent border (primary
+                                  // tone, 2px), and a bolder font
+                                  // weight on the entity name itself.
+                                  // The earlier subtle bg-primary/[0.04]
+                                  // alone disappeared into the row
+                                  // stripe alternation and was easy to
+                                  // miss at a glance.
+                                  className={`border-b border-border/30 last:border-0 text-[14px] ${c.is_subject ? "bg-primary/[0.08] border-l-2 border-l-primary/50" : ""}`}
                                 >
                                   <td className="py-3.5 pr-4 font-medium text-foreground">
                                     <span className="inline-flex items-center gap-2">
-                                      {c.name}
+                                      <span
+                                        className={
+                                          c.is_subject
+                                            ? "font-semibold"
+                                            : undefined
+                                        }
+                                      >
+                                        {c.name}
+                                      </span>
                                       {c.is_subject && (
                                         <Pill tone="primary">Selected</Pill>
                                       )}
@@ -1934,7 +2129,7 @@ export default async function CompetitionPage({
               <section id="co-mentions" className="scroll-mt-28">
                 <SectionTitle
                   eyebrow="Co-Mentions"
-                  title={`Entities Mentioned Alongside ${data.subject_name}`}
+                  title={`Who Else Appears Alongside ${data.subject_name}`}
                   description={`Figures that appear in the same AI answers as ${data.subject_name}.`}
                 />
                 {/* Filter advisory shown when topic/platform scope is
