@@ -28,7 +28,7 @@ import {
   SiPerplexity,
 } from "react-icons/si";
 import { Header } from "@/components/dashboard/Header";
-import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
+import { Card, SectionTitle, Pill, KpiGauge } from "@/components/dashboard/ui";
 import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
 import {
   getSubject,
@@ -1008,7 +1008,24 @@ function deriveCompetitivePosition(
   };
 }
 
-function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajectory"] }) {
+// KpiGauge moved to @/components/dashboard/ui so the Visibility
+// briefing tiles can reuse the exact same component.
+
+function TrajectoryStrip({
+  trajectory,
+  benchmarks,
+}: {
+  trajectory: SubjectOverview["trajectory"];
+  benchmarks: SubjectOverview["subject_set_benchmarks"];
+}) {
+  // Cross-subject benchmark caption — null when there's only one
+  // subject in the set (no peer to compare against) or when the
+  // backend hasn't computed an average for this metric.
+  const bmCaption = (avg: number | null): string | null => {
+    if (avg === null || !Number.isFinite(avg)) return null;
+    if (!benchmarks || benchmarks.n_subjects <= 1) return null;
+    return `vs ${formatPct(avg, 0)} subject-set avg`;
+  };
   const metrics: {
     title: string;
     subtitle?: string;
@@ -1019,6 +1036,13 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
     // Uses the same thresholds the Hero KPI tiles use, so the same
     // metric carries identical color semantics across both surfaces.
     colorKind: "mention_rate" | "avg_tone" | "top_result_rate";
+    // Optional cross-subject benchmark used to render the gauge's
+    // tick mark + the "vs N% subject-set avg" caption beneath.
+    // null when the metric has no comparable cross-subject average
+    // (currently Net Favorability — sentiment doesn't roll up to
+    // a single set-wide number meaningfully).
+    benchmark: number | null;
+    benchmarkCaption: string | null;
   }[] = [
     {
       title: "AI Mention Rate",
@@ -1034,6 +1058,8 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
       format: (v) => formatPct(v, 0),
       tooltip: "Share of AI answers that mention this subject on topic-area questions (where the prompt doesn't name them directly), plotted across each weekly snapshot. Higher is better. Rising means AI is more reliably surfacing the subject when asked about their topic areas.",
       colorKind: "mention_rate",
+      benchmark: benchmarks?.ai_mention_rate_avg ?? null,
+      benchmarkCaption: bmCaption(benchmarks?.ai_mention_rate_avg ?? null),
     },
     {
       title: "Net Favorability",
@@ -1041,6 +1067,11 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
       format: (v) => formatTonePct(v),
       tooltip: "Net favorability — the mean sentiment score across all AI answers in this snapshot, weighted by intensity. Range −100% (most unfavorable) to +100% (most favorable); 0% is neutral. Measures how favorably AI characterizes the subject when it does mention them.",
       colorKind: "avg_tone",
+      // Sentiment doesn't have a cross-subject average on the
+      // payload — would be misleading anyway since each subject's
+      // sentiment distribution is shaped by their topic mix.
+      benchmark: null,
+      benchmarkCaption: null,
     },
     {
       title: "First Result Mentioned",
@@ -1048,6 +1079,13 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
       format: (v) => formatPct(v, 0),
       tooltip: "Share of AI answers where this subject is named FIRST among all entities mentioned. A top-of-mind signal. Distinct from Mention Rate (any mention, anywhere in the answer) — this measures whether AI leads with this subject when it lists entities.",
       colorKind: "top_result_rate",
+      // first_mention_rate_avg is the closest cross-subject
+      // benchmark on the payload — top_result_rate and
+      // competitive[].first_mention_rate share the same definition
+      // (share of unnamed-layer responses where the subject ranks
+      // first), per the api.ts type comment.
+      benchmark: benchmarks?.first_mention_rate_avg ?? null,
+      benchmarkCaption: bmCaption(benchmarks?.first_mention_rate_avg ?? null),
     },
   ];
 
@@ -1089,16 +1127,16 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
           ? "text-muted-foreground"
           : getKpiValueColor(m.colorKind, latestValue);
         return (
-          // Flat tile — no Card wrapper. Matches the page's flatter
-          // editorial register (Sources, Evidence section header).
-          // Visual separation comes from the grid gap, not borders.
+          // Secondary-surface tile — matches the StatCard treatment
+          // (bg-muted/40 rounded-md p-4) so Visibility briefing
+          // tiles + Overview Vitals tiles read with the same chrome.
           // h-full + flex-col + mt-auto on the sparkline ensures
-          // the sparkline baselines align across all three tiles
-          // regardless of title-block height variance (e.g. one
-          // metric has a subtitle, two don't). Combined with the
-          // subtitle placeholder below, the title row is also
-          // height-equalized across the strip.
-          <div key={m.title} className="flex h-full flex-col">
+          // baselines align across all three tiles regardless of
+          // title-block height variance.
+          <div
+            key={m.title}
+            className="flex h-full flex-col rounded-md bg-muted/40 p-4"
+          >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
@@ -1143,6 +1181,37 @@ function TrajectoryStrip({ trajectory }: { trajectory: SubjectOverview["trajecto
                 </span>
               )}
             </div>
+            {/* Gauge bar — fill = current value, tick mark = subject-set
+                benchmark. Same visual language as the Visibility
+                briefing tiles' designed gauge. Only renders when a
+                benchmark exists for this metric (Net Favorability
+                doesn't have one, so its tile shows just value +
+                delta + sparkline). Color derived from the same
+                valueColor class the headline number uses so the
+                gauge and the value tone agree. */}
+            {!notMeasured &&
+              latestValue !== null &&
+              Number.isFinite(latestValue) &&
+              m.benchmark !== null && (
+                <div className="mt-3 space-y-1.5">
+                  <KpiGauge
+                    value={latestValue}
+                    benchmark={m.benchmark}
+                    fillColor={
+                      valueColor === "text-success"
+                        ? "var(--success)"
+                        : valueColor === "text-warning"
+                          ? "var(--warning)"
+                          : "var(--primary)"
+                    }
+                  />
+                  {m.benchmarkCaption && (
+                    <div className="text-[11px] text-muted-foreground leading-snug">
+                      {m.benchmarkCaption}
+                    </div>
+                  )}
+                </div>
+              )}
             <div className="mt-auto pt-3">
               <MiniSpark
                 values={m.values}
@@ -1983,7 +2052,10 @@ export default async function SubjectOverviewPage({
                     page doesn't repeat them twice. */}
                 {data.trajectory.weeks.length >= 1 && (
                   <div className="mt-6 pt-5 border-t border-border/40">
-                    <TrajectoryStrip trajectory={data.trajectory} />
+                    <TrajectoryStrip
+                      trajectory={data.trajectory}
+                      benchmarks={data.subject_set_benchmarks}
+                    />
                     {/* Per-platform mention-rate strip — answers
                         "is the verdict above driven by one platform
                         or universal?" The Vitals KPIs are

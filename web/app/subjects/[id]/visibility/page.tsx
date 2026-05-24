@@ -24,7 +24,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
-import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
+import { Card, SectionTitle, Pill, KpiGauge } from "@/components/dashboard/ui";
 import { TrendOverTime } from "./TrendOverTime";
 import { OverviewSubNav } from "../OverviewSubNav";
 import { VisibilityTopicFilter } from "./VisibilityTopicFilter";
@@ -150,11 +150,15 @@ function capitalizeFirst(s: string): string {
 // (`formatSignedPp`) was removed when the Largest Movement card was
 // folded into the Topic Visibility table; every remaining caller
 // hands deltas in pp units already.
+// Returns a signed "±N pts" string (or "0 pts"). Unit changed from
+// "pp" → "pts" to match Overview's delta formatter and the
+// Competitive Position stat stack, so every delta on every spoke
+// reads in the same unit.
 function formatSignedPpRaw(v: number | null | undefined): string {
   if (v === null || v === undefined) return "—";
   const pts = Math.round(v);
-  if (pts === 0) return "0 pp";
-  return `${pts > 0 ? "+" : ""}${pts} pp`;
+  if (pts === 0) return "0 pts";
+  return `${pts > 0 ? "+" : ""}${pts} pts`;
 }
 
 function deltaToneClass(v: number | null | undefined): string {
@@ -164,6 +168,22 @@ function deltaToneClass(v: number | null | undefined): string {
 
 // Status pill semantics for Platform Breakdown. Order matters — the
 // first matching rule wins.
+// Pill semantics = CURRENT LEVEL only (Option A). Trend/decline is
+// NOT an input — the Change column carries that signal. A
+// high-mention-rate platform that just dropped 20 pts still reads
+// as "Strong" with the Change column showing the −20. This keeps
+// the pill encoding exactly one dimension (level), and avoids
+// muddling level + direction into a single signal that contradicts
+// either column.
+//
+// Thresholds lifted to named constants so they're tunable in one
+// place across both the Platforms and Topics tables (both consume
+// platformStatus). The "Mixed" label was renamed to "Moderate" —
+// "Mixed" reads as a trend word ("mixed signals"), inappropriate
+// for a purely-level judgment.
+const STATUS_STRONG_MENTION_RATE = 0.6;
+const STATUS_STRONG_AVG_RANK_MAX = 3;
+const STATUS_WEAK_MENTION_RATE = 0.3;
 function platformStatus(row: {
   mention_rate: number | null;
   avg_rank: number | null;
@@ -172,13 +192,16 @@ function platformStatus(row: {
   if (row.n_responses === 0 || row.mention_rate === null) {
     return { label: "Limited Data", tone: "neutral" };
   }
-  if (row.mention_rate >= 0.6 && (row.avg_rank ?? 999) <= 3) {
+  if (
+    row.mention_rate >= STATUS_STRONG_MENTION_RATE &&
+    (row.avg_rank ?? 999) <= STATUS_STRONG_AVG_RANK_MAX
+  ) {
     return { label: "Strong", tone: "success" };
   }
-  if (row.mention_rate < 0.3) {
+  if (row.mention_rate < STATUS_WEAK_MENTION_RATE) {
     return { label: "Weak", tone: "warning" };
   }
-  return { label: "Mixed", tone: "primary" };
+  return { label: "Moderate", tone: "primary" };
 }
 
 // Compose the Visibility Briefing's natural-language summary from
@@ -758,14 +781,20 @@ export default async function VisibilityPage({
     // when omitted. Lets the visible caption stay short while
     // the tooltip carries the full definition + polarity hint.
     tooltip?: string;
-    subtitle?: string;
     valueColor: string;
     polarity: Polarity;
-    // Subject-set benchmark caption — pre-formatted so each KPI
-    // can supply its own scale (pct vs rank). null when no
-    // benchmark exists for that metric (e.g. Largest Visibility
-    // Gap doesn't have a cross-subject avg yet).
-    benchmark: string | null;
+    // 0..1 fraction for the KpiGauge fill. Null when this metric
+    // doesn't have a meaningful 0..1 scale or when we want to skip
+    // the gauge (Weakest Topic uses caption-only framing).
+    gaugeValue: number | null;
+    // Optional 0..1 benchmark for the gauge tick. Null = bar
+    // renders as plain fill (no comparison tick).
+    gaugeBenchmark: number | null;
+    // Sub-line rendered below the value (and below the gauge when
+    // present). Carries either "vs N% subject-set avg" for metrics
+    // with a benchmark, or descriptive text for metrics without
+    // (Weakest Topic uses this for the topic name / no-gap copy).
+    caption: string | null;
     // Anchor on this same page that the tile navigates to when
     // clicked — turns the briefing tiles into entry points into
     // the deeper sections rather than passive numbers.
@@ -790,6 +819,15 @@ export default async function VisibilityPage({
     if (bm.n_subjects <= 1) return null;
     return `vs ${formatter(avg)} subject-set avg`;
   };
+  // Normalize a rank value (1.0 = best, ~10 = worst) into a 0..1
+  // fraction for the gauge bar where 1.0 → 100% (best) and 10.0 →
+  // 0% (worst). Lets Avg Mention Position render the same gauge
+  // shape as the percentage-based tiles even though its raw scale
+  // is opposite-direction.
+  const rankToFrac = (rank: number | null): number | null => {
+    if (rank === null || !Number.isFinite(rank)) return null;
+    return Math.max(0, Math.min(1, 1 - (rank - 1) / 9));
+  };
   const kpis: KpiCard[] = [
     {
       label: "AI Mention Rate",
@@ -797,7 +835,9 @@ export default async function VisibilityPage({
       helper: "Share of monitored prompts where the subject appeared.",
       valueColor: toneByThreshold(mentionRate, "higher_better", 0.7, 0.4),
       polarity: "higher_better",
-      benchmark: bmCaption(bm.ai_mention_rate_avg, (v) => formatPct(v)),
+      gaugeValue: mentionRate,
+      gaugeBenchmark: bm.ai_mention_rate_avg,
+      caption: bmCaption(bm.ai_mention_rate_avg, (v) => formatPct(v)),
       anchor: "trend",
     },
     {
@@ -806,14 +846,15 @@ export default async function VisibilityPage({
       helper: "Average position when this entity appears in an answer.",
       tooltip:
         "Average answer position among responses where the entity is mentioned. Lower values mean the entity appears earlier in the answer.",
-      valueColor: toneByThreshold(
-        focal?.avg_rank ?? null,
-        "lower_better",
-        2,
-        4,
-      ),
+      // Neutral by default — lower is better on this scale and a
+      // green/orange tone risks implying high = good (opposite of
+      // truth). Direction is encoded by the value's numeric meaning
+      // and the tooltip; color stays out of it.
+      valueColor: "text-foreground",
       polarity: "lower_better",
-      benchmark: bmCaption(bm.avg_mention_rank_avg, (v) => v.toFixed(1)),
+      gaugeValue: rankToFrac(focal?.avg_rank ?? null),
+      gaugeBenchmark: rankToFrac(bm.avg_mention_rank_avg),
+      caption: bmCaption(bm.avg_mention_rank_avg, (v) => v.toFixed(1)),
       anchor: "position",
     },
     {
@@ -827,19 +868,23 @@ export default async function VisibilityPage({
         0.2,
       ),
       polarity: "higher_better",
-      benchmark: bmCaption(bm.first_mention_rate_avg, (v) => formatPct(v)),
+      gaugeValue: focal?.first_mention_rate ?? null,
+      gaugeBenchmark: bm.first_mention_rate_avg,
+      caption: bmCaption(bm.first_mention_rate_avg, (v) => formatPct(v)),
       anchor: "position",
     },
     (() => {
       // Reformed to mirror the Overview spoke's "Weakest topic
       // visibility" hero tile so a reader switching between the two
-      // pages sees one consistent framing of this signal. The value
-      // is the weakest topic's mention rate (a %), not a pp gap; the
-      // subtitle names the topic when the gap is materially below
+      // pages sees one consistent framing of this signal. Caption
+      // (renders BELOW the value, matching the screenshot's tile-4
+      // pattern) names the topic when the gap is materially below
       // the mean of the other topics (15pp threshold matches the
       // Overview tile and the backend's Message Gap rule), otherwise
       // signals that all tracked topics are clustered together so a
-      // reader doesn't chase a non-issue.
+      // reader doesn't chase a non-issue. No gauge — the gap
+      // framing carries the signal, and there's no subject-set
+      // benchmark for "weakest" to compare against.
       const MIN_GAP_PP = 15;
       const withRecall = topicsSortedDesc.filter(
         (t) => t.ai_recall !== null && Number.isFinite(t.ai_recall),
@@ -859,13 +904,8 @@ export default async function VisibilityPage({
       return {
         label: "Weakest Topic Visibility",
         value: formatPct(weakestRecall),
-        subtitle: weakestTopic
-          ? hasMeaningfulGap
-            ? capitalizeFirst(weakestTopic.label)
-            : "No material gap across tracked topics"
-          : "No tracked topics",
         helper:
-          "Lowest topic-level mention rate in this snapshot. The subtitle names the topic only when its rate is at least 15 pp below the average of the other tracked topics.",
+          "Lowest topic-level mention rate in this snapshot. The caption names the topic only when its rate is at least 15 pp below the average of the other tracked topics.",
         valueColor: toneByThreshold(
           weakestRecall,
           "higher_better",
@@ -873,10 +913,13 @@ export default async function VisibilityPage({
           0.4,
         ),
         polarity: "higher_better" as const,
-        // No cross-subject benchmark for this tile — mirrors the
-        // Overview hero tile which also intentionally omits one
-        // (each subject's topic set is different).
-        benchmark: null,
+        gaugeValue: null,
+        gaugeBenchmark: null,
+        caption: weakestTopic
+          ? hasMeaningfulGap
+            ? `Weakest: ${capitalizeFirst(weakestTopic.label)}`
+            : "No material gap across tracked topics"
+          : "No tracked topics",
         anchor: "topics",
       };
     })(),
@@ -969,8 +1012,13 @@ export default async function VisibilityPage({
                 }}
               />
               <div className="relative">
-              {/* Executive summary line — composed from real data. */}
-              <p className="text-[15.5px] leading-relaxed text-foreground/90">
+              {/* BOTTOM LINE eyebrow + verdict prose — same pattern
+                  Overview's Vitals card uses (BottomLineBlock), so
+                  the two heroes lead with identical chrome. */}
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-primary">
+                Bottom line
+              </div>
+              <p className="mt-1.5 text-[15.5px] leading-relaxed text-foreground/90">
                 {briefingSummary}
               </p>
 
@@ -995,42 +1043,28 @@ export default async function VisibilityPage({
                   briefing tile becomes an entry point into the
                   deeper section (e.g. clicking AI Mention Rate
                   scrolls down to the Trend section). */}
-              {/* Flat KPI tile strip — matches the Overview Vitals
-                  card's TrajectoryStrip pattern: no bordered Card
-                  wrapper, label + reserved subtitle slot + tooltip
-                  icon at top, value at text-2xl, supporting line
-                  pinned to bottom via mt-auto. Helper + polarity
-                  lines were dropped from the visible body in favor
-                  of the same tooltip-only treatment Overview uses.
-                  Benchmark line stays because it carries data
-                  Overview doesn't have an equivalent for. Anchor
-                  wraps with a subtle hover-text treatment instead
-                  of the prior border-tinting since there's no
-                  border to tint. gap-8 between tiles matches the
-                  Overview strip's spacing too. */}
+              {/* KPI tile strip — matches the Overview Vitals strip.
+                  Each tile: label → value → optional comparison-bar
+                  gauge → caption. Caption sits BELOW the value
+                  (the prior version put Weakest Topic's caption
+                  ABOVE the value, which read as misordered). Gauge
+                  uses the shared KpiGauge component from ui.tsx
+                  so the bar treatment is pixel-identical across
+                  spokes. */}
               <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 items-stretch">
                 {kpis.map((k) => {
+                  const gaugeFill =
+                    k.valueColor === "text-success"
+                      ? "var(--success)"
+                      : k.valueColor === "text-warning"
+                        ? "var(--warning)"
+                        : "var(--primary)";
                   const tileInner = (
                     <>
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <div className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
                             {k.label}
-                          </div>
-                          {/* Subtitle slot reserved on EVERY tile
-                              (non-breaking space placeholder when
-                              empty) so the title block occupies the
-                              same vertical space across all four
-                              tiles — Weakest Topic Visibility's
-                              subtitle would otherwise push its
-                              value + benchmark down, misaligning
-                              with the other three. Same pattern
-                              the Overview TrajectoryStrip uses. */}
-                          <div
-                            className="text-[10px] text-muted-foreground/75 mt-0.5 line-clamp-1"
-                            title={k.subtitle || undefined}
-                          >
-                            {k.subtitle || " "}
                           </div>
                         </div>
                         <KpiTooltipIcon
@@ -1045,14 +1079,32 @@ export default async function VisibilityPage({
                           {k.value}
                         </span>
                       </div>
-                      {k.benchmark && (
-                        <div className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug">
-                          {k.benchmark}
+                      {k.gaugeValue !== null &&
+                        Number.isFinite(k.gaugeValue) && (
+                          <div className="mt-3">
+                            <KpiGauge
+                              value={k.gaugeValue}
+                              benchmark={k.gaugeBenchmark}
+                              fillColor={gaugeFill}
+                            />
+                          </div>
+                        )}
+                      {k.caption && (
+                        <div
+                          className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug line-clamp-2"
+                          title={k.caption}
+                        >
+                          {k.caption}
                         </div>
                       )}
                     </>
                   );
-                  const baseClasses = "flex h-full flex-col";
+                  // Secondary-surface bg + rounded-md + p-4 matches
+                  // the Overview StatCard treatment (bg-muted/40
+                  // rounded-md) so Visibility KPI tiles read with
+                  // the same chrome as Overview's KPI cards.
+                  const baseClasses =
+                    "flex h-full flex-col rounded-md bg-muted/40 p-4";
                   if (k.anchor) {
                     return (
                       <a
@@ -1075,9 +1127,50 @@ export default async function VisibilityPage({
               {/* Platform Visibility Snapshot — secondary heatmap
                   inside the briefing card. Same matrix data as
                   before but visually de-emphasized: smaller header,
-                  more compact cells, no "Build-on/Fix" callout. */}
+                  more compact cells, no "Build-on/Fix" callout.
+                  When every cell rounds to the same mention rate
+                  the heatmap reads as monotone (the user's complaint:
+                  four identical 100% bars), so we collapse to a
+                  single line summarizing the uniform value
+                  instead. */}
               {data.platform_topic_matrix.platforms.length > 0 &&
-                data.platform_topic_matrix.topics.length > 0 && (
+                data.platform_topic_matrix.topics.length > 0 && (() => {
+                  const finiteCells = data.platform_topic_matrix.cells.filter(
+                    (c) =>
+                      c.mention_rate !== null &&
+                      Number.isFinite(c.mention_rate),
+                  );
+                  const expectedCellCount =
+                    data.platform_topic_matrix.platforms.length *
+                    data.platform_topic_matrix.topics.length;
+                  const uniformPct = (() => {
+                    if (finiteCells.length === 0) return null;
+                    if (finiteCells.length < expectedCellCount) return null;
+                    const first = Math.round(
+                      (finiteCells[0].mention_rate ?? 0) * 100,
+                    );
+                    const allSame = finiteCells.every(
+                      (c) => Math.round((c.mention_rate ?? 0) * 100) === first,
+                    );
+                    return allSame ? first : null;
+                  })();
+                  if (uniformPct !== null) {
+                    return (
+                      <div className="mt-8 border-t border-border/50 pt-6">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 inline-flex items-center gap-1">
+                          Current Platform Snapshot
+                          <KpiTooltipIcon
+                            text="Mention rate for each AI platform on each tracked topic — share of that platform's monitored prompts in this topic area where the subject was mentioned."
+                            align="left"
+                          />
+                        </div>
+                        <p className="mt-1.5 text-[13px] text-foreground/75">
+                          {uniformPct}% across all platforms and topics.
+                        </p>
+                      </div>
+                    );
+                  }
+                  return (
                   <div className="mt-8 border-t border-border/50 pt-6">
                     <div className="mb-3">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 inline-flex items-center gap-1">
@@ -1191,7 +1284,8 @@ export default async function VisibilityPage({
                       </div>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             </Card>
           </section>
@@ -1210,6 +1304,7 @@ export default async function VisibilityPage({
               className="mb-5"
               right={<TrendWindowToggle />}
             />
+            <Card className="p-6 border-border/60">
             {/* Chart + "What changed" share a single card. The
                 earlier 1fr_300px split created a tall empty sidebar
                 because 3-4 short deltas couldn't fill the chart's
@@ -1298,6 +1393,7 @@ export default async function VisibilityPage({
                   </div>
                 );
               })()}
+            </Card>
           </section>
 
           {/* ── 3. PLATFORM BREAKDOWN ───────────────────────────── */}
@@ -1312,6 +1408,7 @@ export default async function VisibilityPage({
               }
               className="mb-5"
             />
+            <Card className="p-6 border-border/60">
               {(() => {
                 // When a topic is selected, swap in the per-(platform,
                 // topic) breakdown so all four metric columns reflect
@@ -1337,6 +1434,14 @@ export default async function VisibilityPage({
                   <>
                     <div>
                       <table className="w-full text-left">
+                        <colgroup>
+                          <col style={{ width: "25%" }} />
+                          <col style={{ width: "13%" }} />
+                          <col style={{ width: "16%" }} />
+                          <col style={{ width: "16%" }} />
+                          <col style={{ width: "14%" }} />
+                          <col style={{ width: "16%" }} />
+                        </colgroup>
                         <thead>
                           <tr className="border-b border-border/60 text-[10.5px] uppercase tracking-[0.06em] text-foreground/65">
                             <th className="py-2.5 pr-3 font-semibold">
@@ -1386,7 +1491,7 @@ export default async function VisibilityPage({
                               <span className="inline-flex items-center justify-end gap-1">
                                 Status
                                 <KpiTooltipIcon
-                                  text="At-a-glance verdict combining mention rate and position: Strong = mention rate ≥60% AND avg position ≤3; Weak = mention rate <30%; Mixed = anything in between; Limited Data = platform has no measured responses in this snapshot."
+                                  text="Current visibility level (level only — trend lives in the Change column). Strong = mention rate ≥60% AND avg position ≤3; Weak = mention rate <30%; Moderate = anything in between; Limited Data = platform has no measured responses in this snapshot."
                                   align="right"
                                   direction="below"
                                 />
@@ -1454,20 +1559,12 @@ export default async function VisibilityPage({
                                 <td className="py-3 px-3 text-right tabular-nums text-foreground/90">
                                   {formatPct(p.first_mention_rate)}
                                 </td>
-                                <td className="py-3 px-3 text-right">
+                                <td className="py-3 px-3 text-right tabular-nums">
                                   {change === null ? (
-                                    <span className="tabular-nums text-foreground/40">
-                                      —
-                                    </span>
+                                    <span className="text-muted-foreground">—</span>
                                   ) : (
                                     <span
-                                      className={`inline-flex items-center rounded-md px-2 py-0.5 text-[13px] font-semibold tabular-nums ${
-                                        change > 0
-                                          ? "bg-success/10 text-success"
-                                          : change < 0
-                                            ? "bg-warning/10 text-warning"
-                                            : "bg-muted/60 text-foreground/65"
-                                      }`}
+                                      className={`font-semibold ${deltaToneClass(change)}`}
                                     >
                                       {formatSignedPpRaw(change)}
                                     </span>
@@ -1491,6 +1588,7 @@ export default async function VisibilityPage({
                   </>
                 );
               })()}
+            </Card>
           </section>
 
           {/* ── 4. TOPIC VISIBILITY ─────────────────────────────── */}
@@ -1505,6 +1603,7 @@ export default async function VisibilityPage({
               }
               className="mb-5"
             />
+            <Card className="p-6 border-border/60">
             {/* Single table — same column structure as the Platforms
                 table (Mention Rate · Avg. Mention Position · First
                 Mention Share · Change · Status). Replaces the prior
@@ -1520,6 +1619,14 @@ export default async function VisibilityPage({
               ) : (
                 <div>
                   <table className="w-full text-left">
+                    <colgroup>
+                      <col style={{ width: "25%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "16%" }} />
+                      <col style={{ width: "16%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col style={{ width: "16%" }} />
+                    </colgroup>
                     <thead>
                       <tr className="border-b border-border/60 text-[10.5px] uppercase tracking-[0.06em] text-foreground/65">
                         <th className="py-2.5 pr-3 font-semibold">Topic</th>
@@ -1567,7 +1674,7 @@ export default async function VisibilityPage({
                           <span className="inline-flex items-center justify-end gap-1">
                             Status
                             <KpiTooltipIcon
-                              text="At-a-glance verdict combining mention rate and position: Strong = mention rate ≥60% AND avg position ≤3; Weak = mention rate <30%; Mixed = anything in between; Limited Data = topic has no measured responses in this snapshot."
+                              text="Current visibility level (level only — trend lives in the Change column). Strong = mention rate ≥60% AND avg position ≤3; Weak = mention rate <30%; Moderate = anything in between; Limited Data = topic has no measured responses in this snapshot."
                               align="right"
                               direction="below"
                             />
@@ -1638,6 +1745,7 @@ export default async function VisibilityPage({
                   </table>
                 </div>
               )}
+            </Card>
           </section>
 
           {/* ── 5. ANSWER POSITION ──────────────────────────────── */}
@@ -1648,6 +1756,7 @@ export default async function VisibilityPage({
               description="When mentioned, where this subject appears in the AI answer."
               className="mb-5"
             />
+            <Card className="p-6 border-border/60">
               {(() => {
                 // Four scope states for Answer Prominence:
                 //   - neither filter set → aggregate `rank_distribution`
@@ -1773,7 +1882,12 @@ export default async function VisibilityPage({
                     )}
                   </p>
                   <div className="mt-5 flex items-baseline gap-3">
-                    <div className="text-[32px] font-semibold leading-none tracking-tight tabular-nums text-foreground">
+                    {/* text-2xl matches the Overview KPI value
+                        typography (e.g. AI Mention Rate's "90%")
+                        so the avg-rank stat reads in the same
+                        register as every other headline value
+                        on the page. */}
+                    <div className="text-2xl font-semibold tracking-tight tabular-nums text-foreground">
                       {formatRank(avgRank)}
                     </div>
                     <div className="inline-flex items-center gap-1 text-[11.5px] uppercase tracking-[0.06em] text-muted-foreground">
@@ -1807,15 +1921,19 @@ export default async function VisibilityPage({
 
                 {/* 5-bucket horizontal bars. Each bucket's width is
                     its share of total responses (so all bars sum to
-                    100%). "Not mentioned" gets a muted warning tone
-                    so the gap reads as a distinct category, not
-                    just an empty bucket. */}
+                    100%). Bar treatment harmonized with KpiGauge
+                    (h-1.5 track, 0.85 opacity, same rounded-full
+                    chrome) so the page reads with one consistent
+                    bar primitive across the Vitals strip and the
+                    Prominence section. "Not mentioned" gets the
+                    warning tone — it's the adverse outcome, not
+                    just another bucket. */}
                 <ul className="space-y-3">
                   {rankDist.buckets.map((b) => {
                     const pct = Math.round(b.share * 100);
-                    const tone = b.is_absence
-                      ? { bg: "var(--warning)", op: 0.45 }
-                      : { bg: "var(--primary)", op: 0.65 };
+                    const fillColor = b.is_absence
+                      ? "var(--warning)"
+                      : "var(--primary)";
                     return (
                       <li
                         key={b.label}
@@ -1824,13 +1942,13 @@ export default async function VisibilityPage({
                         <span className="text-[13px] font-medium text-foreground/80">
                           {b.label}
                         </span>
-                        <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted/70">
+                        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
                           <div
                             className="absolute inset-y-0 left-0 rounded-full"
                             style={{
                               width: `${b.share * 100}%`,
-                              background: tone.bg,
-                              opacity: tone.op,
+                              background: fillColor,
+                              opacity: 0.85,
                             }}
                           />
                         </div>
@@ -1844,6 +1962,7 @@ export default async function VisibilityPage({
               </div>
                 );
               })()}
+            </Card>
           </section>
 
           {/* Methodology footer — matches the Overview spoke's

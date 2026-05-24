@@ -61,6 +61,54 @@ export function InfoLabel({ label }: { label: string }) {
   );
 }
 
+// Compact horizontal gauge bar — filled bar from 0 to the current
+// value with an optional tick mark at a benchmark position. Used
+// across spokes (Overview Vitals KPI strip, Visibility briefing
+// tiles) to give the reader "where I am" + "where average is" at
+// a glance. Extracted to shared so both pages render the same
+// pixels.
+export function KpiGauge({
+  value,
+  benchmark,
+  fillColor,
+}: {
+  // 0..1 fraction. Out-of-range values are clamped defensively.
+  value: number;
+  // Optional benchmark in the same 0..1 scale. When null, tick mark
+  // is omitted and the bar acts as a simple value-fill indicator.
+  benchmark: number | null;
+  // CSS color value for the fill (var(--success) / --warning /
+  // --primary). Derived by the caller from the KPI's tone so the
+  // gauge and the headline value color agree.
+  fillColor: string;
+}) {
+  const safeValue = Math.max(0, Math.min(1, value));
+  const safeBenchmark =
+    benchmark !== null && Number.isFinite(benchmark)
+      ? Math.max(0, Math.min(1, benchmark))
+      : null;
+  return (
+    <div className="relative h-1.5 w-full rounded-full bg-muted">
+      <div
+        className="h-full rounded-full"
+        style={{
+          width: `${safeValue * 100}%`,
+          background: fillColor,
+          opacity: 0.85,
+        }}
+      />
+      {safeBenchmark !== null && (
+        <div
+          aria-hidden
+          className="absolute top-1/2 -translate-y-1/2 h-3 w-[2px] rounded-sm bg-foreground/55"
+          style={{ left: `calc(${safeBenchmark * 100}% - 1px)` }}
+          title={`Subject-set average: ${Math.round(safeBenchmark * 100)}%`}
+        />
+      )}
+    </div>
+  );
+}
+
 export function Pill({
   children,
   tone = "neutral",

@@ -237,15 +237,14 @@ export function TrendOverTime({
   ).length;
 
   if (subjectMeasuredWeeks < 2) {
+    // Compact empty state — shrunk from h-[260px] to h-[88px] so an
+    // empty state isn't the tallest block on the tab. Single line
+    // of explanatory text replaces the prior 2-line body.
     return (
-      <div className="flex h-[260px] flex-col items-center justify-center rounded-md border border-dashed border-border/70 bg-muted/20 px-6 text-center">
-        <div className="text-[14px] font-medium text-foreground/75">
-          Not enough history to chart yet
-        </div>
-        <div className="mt-1 max-w-[420px] text-[12.5px] leading-relaxed text-foreground/55">
-          Weekly snapshots populate this chart as new refreshes land.
-          Typically two or more snapshots are needed before a trend
-          line is meaningful.
+      <div className="flex h-[88px] items-center justify-center rounded-md border border-dashed border-border/70 bg-muted/20 px-6 text-center">
+        <div className="text-[12.5px] leading-relaxed text-foreground/65">
+          Not enough history to chart yet — chart populates once a
+          second weekly snapshot lands.
         </div>
       </div>
     );
