@@ -904,6 +904,103 @@ clamp on the (often-truncated) excerpt was redundant.
 
 ---
 
+## Follow-up session #4 (2026-05-24) — Visibility/Competition design parity pass + chart polish
+
+Five commits on `main`:
+
+- **`73f057d`** — Visibility/Overview: shared KpiGauge + design parity + pts unit + status pill clarity. 4 files, 353 ins / 115 del.
+- **`e436b6b`** — Competition + Visibility + Overview: cross-spoke layout + chart parity (Competition rebuild). 7 files, 900 ins / 437 del.
+- **`4fb75b8`** — Competition: filter-aware Vitals + heatmap polish + chart fixes. 3 files, 301 ins / 72 del.
+- **`d0a233b`** — Trend chart end-of-line labels + heatmap legends + cross-spoke copy fixes. 3 files, 313 ins / 47 del.
+- **`6ab1f27`** — Trend end-labels opt-in + Position vs Share axis titles. 3 files, 124 ins / 71 del.
+
+Brings the Competitive Visibility spoke into full structural alignment with the Visibility spoke, and pushes both spokes (plus Overview) through a polish pass: shared chart component, shared KPI tile primitive, tiered heatmaps, filter-aware copy, axis-title clarity, and a lot of small signal-quality fixes.
+
+### Shared `KpiGauge` extracted (used by all three spokes)
+
+`KpiGauge` lifted out of Overview's page into `web/components/dashboard/ui.tsx`. Accepts `value` (0..1), `benchmark` (0..1 | null), `fillColor`, and `benchmarkLabel`. When a benchmark is provided AND a label is passed, the gauge renders an inline legend beneath the bar: the same tick glyph that lives on the bar, paired with the caption text — so the eye reads "this glyph on the bar = this glyph in the legend = subject-set avg" without needing an external decoder. All three spokes (Overview Vitals, Visibility Briefing, Competition Vitals) render KPI tile gauges from the same component.
+
+### Visibility spoke — full restyle + tiered heatmap + Trend axis rework
+
+- **Sub-nav gained a `01 Vitals` item.** First briefing section anchored to `#vitals scroll-mt-28` so the sticky rail can land on it. Five items now: Vitals · Trend · Platforms · Topics · Prominence.
+- **KPI tile rebuild.** Briefing tiles now consume `KpiGauge` with `benchmarkLabel` (subject-set-avg caption renders inside the gauge as the tick legend). `bg-muted/40 rounded-md p-4` tile chrome; label `text-[11px] uppercase tracking-wider`; value `text-2xl font-semibold tabular-nums`. **Weakest Topic** tile splits value into rate + topic-name suffix via new `valueSuffix` field on `KpiCard`: `"50%"` at `text-2xl` + topic at `text-base font-medium` — same row, baseline-aligned, eye lands on rate first.
+- **Status pill semantics tightened.** "Mixed" → "Moderate" (mixed read as a trend word). Thresholds lifted to module constants `STATUS_STRONG_MENTION_RATE = 0.6` / `STATUS_STRONG_AVG_RANK_MAX = 3` / `STATUS_WEAK_MENTION_RATE = 0.3` so both the Platforms and Topics tables share one tunable source. Both Status column tooltips updated to explicitly state "Current visibility level (level only — trend lives in the Change column)" so the pill's meaning isn't ambiguous against the Change column it sits next to.
+- **`pp` → `pts` sweep** across the entire spoke (Change columns, tooltips, "What changed" footer, copy).
+- **Trend chart data-driven Y-axis.** Hardcoded `[0, 105]` domain replaced with floor/ceil rounding to nearest 5/10/20 step, clamped `[0, 105]`. Tick labels cap at 100. Default height dropped 420 → 320 so the chart no longer dominates the page. Empty-state height tracks the populated height. **`MIN_AXIS_SPAN = 25` floor** added later so tight clusters (subject hugging 90-100%) don't collapse the axis into a 10-pt window — distributes padding around the data midpoint.
+- **"What changed" footer merged into the chart card** as its own footer (no `border-t`, text dropped 13px → 11.5px, padding tightened to `mt-3`). Reads as chart annotation, not a sibling section.
+- **Current Platform Snapshot heatmap rewritten.** Continuous primary alpha ramp replaced with 3-tier `heatTier` system: `Gap <30%` (warning amber + warning border) · `Mid 30-60%` (neutral muted fill) · `Healthy ≥60%` (calm primary at 10% alpha) · null (dashed muted). Auto-summary line beneath: "One gap: X doesn't mention Y on Z." / "N gaps — largest:..." / "Full coverage..." derived from data, never empty. Color legend strip added below the grid so tier semantics don't require hover.
+- **`line-clamp-2` + `flex` collision bug fixed** on heatmap topic headers (line-clamp forces `display:-webkit-box` which collides with `display:flex` — refactored to outer flex container + inner span with the clamp).
+- **"Back to {subject} Overview" link removed.** Sub-nav handles spoke navigation.
+
+### Competition spoke — full alignment with Visibility
+
+The big lift of the session. Competition was on pre-treatment chrome (right-rail `SectionNav`, no shared `KpiGauge`, bordered tile cards with helper + polarity hints, continuous-alpha heatmap, no Vitals briefing copy). Brought it into structural parity:
+
+- **`SectionNav` replaced with top-sticky `OverviewSubNav`.** Five items: Vitals · Trend · Landscape · Ranking · Co-Mentions. Filters (Topic + Platform dropdowns) migrated into the sub-nav's `right` slot via new `inline` prop on `TopicProminenceFilter` and `LandscapePlatformFilter`. Right-rail container deleted entirely. `<main>` lost `xl:pr-44` (no rail to reserve space for) and dropped `space-y-12` → `space-y-10` for tighter section rhythm.
+- **Vitals briefing card built from scratch.** New `composeCompetitiveBottomLine()` helper generates a 1-2 sentence data-derived summary: rank + SoV + nearest-rival gap, then topic-win clause. "BOTTOM LINE" eyebrow + primary-tinted gradient overlay + coverage caveat — same hero treatment as Visibility's vitals card.
+- **KPI tiles rebuilt to KpiGauge shape.** 4 tiles: Competitive Rank (gauge fills to subject SoV), Top Competitor (name-anchored, no gauge), Topic Win Rate (gauge fills to topicsLed/topicsTracked), Strongest Topic (name-anchored with `valueSuffix`). `gaugeBenchmark` stays null on every tile (no per-tile benchmark data shipped today; gauges render fill-only). Polarity hint line (`↑ higher is better`) dropped — tooltip already explains polarity.
+- **Filter-aware Vitals copy** added later. Bottom-line and coverage caveat now prefix with the active scope when topic/platform filters are set: `"On ChatGPT, Newsom leads its 7-way comparison set..."` and `"Filtered scope: ChatGPT only (snapshot has 2 platforms × 4 topics)."` Topic-win clause suppressed when topic filter is active (would be a global claim inside a scoped view). Numbers were already filter-aware (computed from `landscapeEntities`); only the framing prose was misleading.
+- **Current Platform Ownership heatmap rewritten.** Continuous SoV alpha ramp replaced with 3-tier `sovTier` system: `Marginal <15%` (warning amber) · `Contested 15-40%` (muted) · `Dominant ≥40%` (calm primary). SoV-tuned thresholds because mention-rate's 60%/30% bands don't translate (in a 5-competitor field even a dominant subject sits 25-40%). Auto-summary line beneath: "Strongest on X (N%); most contested on Y (M%)." or "N marginal platforms — weakest:..." Subject row emphasis: bold + primary left-accent border on name cell, `ring-2 ring-primary/50` + bold % on each value cell (matches the Ranking table's subject row treatment).
+- **Color legend strip** added beneath the heatmap (same pattern as Visibility's legend, SoV-tuned labels).
+- **All Cards unified to `p-6 border-border/60`.** Previously a mix of `p-5 md:p-6` / `p-6 md:p-8` / no border. Section anchors bumped `scroll-mt-20` → `scroll-mt-28`. SectionTitle eyebrows lost the "NN · " numeric prefix since the sub-nav owns numbering.
+- **Trend chart "What changed" footer tightened** to match Visibility (no border-t divider, text-13px → text-11.5px, mt-6/pt-5 → mt-3). **Field-wide consolidation**: when all rendered deltas share the same rounded value (the Newsom `-10 pts × 4` case), strip collapses to a single "All N tracked movers · X pts" line.
+- **Trend chart axis**: Competition tried `subjectOnlyAxis` first (subject-only fit), but that clipped competitor mention rates below the chart floor. Reverted to all-series fit + the `MIN_AXIS_SPAN=25` floor on `TrendOverTime`, which keeps every line on-canvas while still giving the subject's variation visible territory.
+- **Ranking table subject row emphasis bumped** from `bg-primary/[0.04]` alone to `bg-primary/[0.08]` + `border-l-2 border-l-primary/50` + bold entity name. Doubled tint + left accent + bold so eye lands immediately.
+- **Strongest Topic tied-detection.** When subject's mention rate is uniform across topics (e.g. 100% on all 4), tile no longer picks an arbitrary one — renders `"100% · Tied across N topics"` via `hasMeaningfulStrongest` flag (5 pp gap from mean of rest required for "strongest" framing).
+- **Top Competitor tile color fixed.** Was painted by `toneByThreshold` on gap pp → green when subject was comfortably ahead, which made "Wes Moore" read as a healthy entity instead of a competitor name. Reverted to neutral `text-foreground`; gap direction lives in the caption.
+- **Co-Mentions** title: `"Entities Mentioned Alongside X"` → `"Who Else Appears Alongside X"` (no noun mismatch with helper text below). Row values switched from `count · share%` to share-only (count was redundant; share is comparable across snapshots).
+- **`pp` → `pts` sweep** across the spoke + Vitals bottom-line "entity" → "way" copy fix ("7-way comparison set" reads as natural English vs the tech-doc "7-entity").
+- **Methodology footer** added at end of `<main>` (mirrors Visibility + Overview).
+- **Back-link removed** (Sub-nav handles spoke nav).
+
+### Position vs Share scatter (Competition)
+
+- **Renamed** from "Visibility vs. Prominence" — the chart's axes are Avg Mention Position (X) and Share of Voice (Y), both visibility measures, so the old title was at odds with the data.
+- **Sub-card merged into single Card with internal divider.** SoV bars + Position vs Share scatter were two stacked bordered Cards in a `lg:grid-cols-2` — now one Card with `lg:divide-x` (vertical divider at wide widths, `border-t` at narrow). Same one-card-one-divider pattern as the Trend chart + What-changed footer.
+- **Visible axis titles added** via Recharts `<Label>` — `"Avg Mention Position (← earlier in answer)"` below the X tick labels, `"Share of Voice (↑ more visible)"` rotated -90° to the left of Y. Folds the directional hint into the title itself. Bottom directional caption removed (redundant). Chart height 280 → 300; bottom margin 8 → 32, left margin 12 → 28 to make room for titles.
+- **Label collision detection** in `CompetitiveScatter` rewritten — switched from data-space proximity (5% of X span) to label-width-aware: estimates each label's pixel width by char count, compares to actual pixel distance between dots. `LABEL_GAP_PX` later bumped 8 → 14 after observed near-miss collisions ("J.B. Pritzker" + "Josh Shapiro" cluster). Three-tier label placement (above/below/far-below).
+
+### TrendOverTime (shared chart component)
+
+- **Default height** 420 → 320 so Trend is no longer the tallest block on the spoke.
+- **Hardcoded `h-[420px]` wrapper bug fixed** — was breaking Competition's `height={340}` prop. Wrapper now uses `style={{ height }}`.
+- **Empty state height** matches the populated height (no layout jump).
+- **Data-driven Y-axis** (see Visibility section above for details).
+- **`subjectOnlyAxis` prop** — fits axis to subject values only; ignored overlays. Used briefly on Competition but reverted (clipped competitor lines). Visibility keeps default `false`.
+- **`showEndLabels` prop, default `false`** — opt-in end-of-line labels rendered as inline text next to each series' rightmost data point. Right margin widens 16 → 130 when enabled. **Collision avoidance via label-rail algorithm**: pre-computes each label's pixel-Y from the yDomain projection, sorts ascending, walks through pushing each subsequent label down by ≥14px if it would collide. Subject label rendered bolder (600) than overlays (400 + 0.75 opacity). Visibility opts in (3 well-spread per-platform overlays); Competition leaves it off after the 5-competitor cluster case stacked labels in a tight column disconnected from where their lines ended.
+- **`LabelList` import** added (`recharts`).
+
+### Overview spoke — small polish
+
+- **Bottom-line phrasing.** `formatStrongClause(pct, comparator)` and `formatWeakestClause(pct, label)` helpers added: 100% → `"in every answer about X"` (instead of `"in 100% of answers about X"`); 50% → `"only half on X"` (instead of `"only 50% on X"`). Other percentages keep the numeric shape so data still leads.
+- **TrajectoryStrip uses shared `KpiGauge`** with `benchmarkLabel` (matches Visibility's gauge tile treatment).
+
+### Cross-spoke / shared component changes
+
+- **`KpiGauge`** in `components/dashboard/ui.tsx` — extracted, gained `benchmarkLabel` legend rendering.
+- **`TrendOverTime`** — `subjectOnlyAxis`, `showEndLabels`, `MIN_AXIS_SPAN`, end-of-line label-rail, hardcoded wrapper bug fixed.
+- **`OverviewSubNav`** — already had `right` slot; no changes this session.
+- **`TopicProminenceFilter` / `LandscapePlatformFilter`** — gained `inline` prop (same pattern as Visibility filters).
+- **`SectionNav` (Competition)** — orphaned from page.tsx but file kept (unused; clean-delete candidate).
+- **`CompetitiveScatter`** — axis titles + label collision rewrite.
+
+### Tooltip wording divergences resolved (Visibility tables)
+
+Three known inconsistencies between the Platforms and Topics table tooltips, surfaced early in the session, fixed before commit:
+
+- **Avg Position**: "the entity" → "the subject" across both Vitals tile helper + Platforms table tooltip (matches Topics' canonical phrasing).
+- **Change tooltip**: color-encoding clause added to Topics tooltip so both tables now spell out the green/amber semantics. Methodology language stays accurate to each (Platforms = prior-snapshot delta, Topics = window-spanning first-vs-latest) since those are genuine backend computation differences.
+
+### Open follow-ups (not done in this pass)
+
+- **Narrative + Sources spokes** still on pre-treatment chrome — old `SectionTitle` styles, no shared `KpiGauge`, no `OverviewSubNav`, back-link present, probably `pp` instead of `pts`, Card padding drift. Playbook is well-established now; mostly mechanical work.
+- **Refactor large page files.** Visibility ~2200 lines, Competition ~2400 lines. Each section could be extracted into its own component file for maintainability.
+- **Extract `heatTier` / `sovTier` to shared lib.** Both have nearly identical `*TierStyle` mappers with different thresholds. Parameterizing into `bandTier(value, { highMin, lowMax })` in `lib/visibility/heatTier.ts` would prevent silent drift.
+- **`CompetitiveSharePanel` unused-var warning** in Overview (pre-existing from `bfda60f`, ESLint flags it as unused — clean-delete candidate).
+- **Pre-existing `[recurring]` validation hook noise** on `URLSearchParams` constructions in both Visibility + Competition page files. Hook flags them as "params is async" — false-positive (it's a local URL helper, not the Next.js page `params` prop). Worth filing if the hook can be made smarter.
+
+---
+
 ## When you come back — quick resume
 
 The active branch is **`main`**. The `fastapi-scaffold` branch was merged

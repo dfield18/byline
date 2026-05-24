@@ -379,28 +379,49 @@ function sovTierStyle(tier: SovTier): {
 } {
   switch (tier) {
     case "dominant":
+      // Strong primary fill (was 18% — too close to contested). The
+      // Competition heatmap inverts the Visibility heatmap's intent:
+      // here the dominant cells SHOULD pop because they're the wins.
+      // 55% primary + primary-toned border gives an obvious step up
+      // from contested's neutral gray; the border doubles as a
+      // weight cue so the separation survives in grayscale.
       return {
-        background: "color-mix(in oklab, var(--primary) 18%, transparent)",
-        border: "1px solid transparent",
-        textClass: "text-foreground/85 font-semibold",
+        background: "color-mix(in oklab, var(--primary) 55%, transparent)",
+        border: "1px solid color-mix(in oklab, var(--primary) 75%, transparent)",
+        // Light text on the saturated fill — the % stays legible.
+        textClass: "text-background font-bold",
       };
     case "contested":
+      // Mid-gray neutral tint, clearly weaker than dominant's strong
+      // primary, clearly stronger than the marginal warning tint.
+      // 75% muted (was 65%) widens the gap from no-data's hatched
+      // treatment below.
       return {
-        background: "color-mix(in oklab, var(--muted) 65%, transparent)",
+        background: "color-mix(in oklab, var(--muted) 75%, transparent)",
         border: "1px solid transparent",
         textClass: "text-foreground/75 font-medium",
       };
     case "marginal":
+      // Warning amber + border. Distinct COLOR family from the
+      // calm primary/muted dominant/contested cells, not just a
+      // lightness step — signals "weakest non-empty state" by hue,
+      // which survives colorblind perception better than alpha alone.
       return {
         background: "color-mix(in oklab, var(--warning) 22%, transparent)",
         border: "1px solid color-mix(in oklab, var(--warning) 55%, transparent)",
         textClass: "text-warning font-bold",
       };
     case "none":
+      // Diagonal hatch pattern via repeating-linear-gradient —
+      // visually distinct from "low value" so a 0% cell (which can't
+      // happen here since 0 collapses to marginal) and a no-data
+      // cell never look identical. The hatch reads as "empty slot,
+      // intentionally" rather than as a faint fill.
       return {
-        background: "color-mix(in oklab, var(--muted) 35%, transparent)",
+        background:
+          "repeating-linear-gradient(45deg, color-mix(in oklab, var(--muted) 25%, transparent), color-mix(in oklab, var(--muted) 25%, transparent) 4px, color-mix(in oklab, var(--muted-foreground) 12%, transparent) 4px, color-mix(in oklab, var(--muted-foreground) 12%, transparent) 8px)",
         border:
-          "1px dashed color-mix(in oklab, var(--muted-foreground) 30%, transparent)",
+          "1px dashed color-mix(in oklab, var(--muted-foreground) 45%, transparent)",
         textClass: "text-muted-foreground",
       };
   }
@@ -1069,17 +1090,30 @@ export default async function CompetitionPage({
     {
       label: "Top Competitor",
       value: topCompetitorName ?? "—",
-      subtitle:
-        topCompetitorName === null || topCompetitorGapPp === null
-          ? undefined
-          : topCompetitorGapPp === 0
-            ? "tied on SoV"
-            : topCompetitorGapPp > 0
-              ? `${topCompetitorGapPp} pts behind subject`
-              : `${Math.abs(topCompetitorGapPp)} pts ahead of subject`,
+      // Caption framed from the SUBJECT'S perspective ("Newsom
+      // leads by N", "Newsom trails by N") so it lines up with the
+      // Bottom Line sentence above, which also describes the gap
+      // from the subject's perspective ("ahead of Wes Moore by 40
+      // pts"). Earlier framing inverted the perspective to the
+      // competitor's ("Wes Moore is 40 pts behind subject"), which
+      // described the same number twice but from opposite angles
+      // — readers paused to confirm the two lines were saying the
+      // same thing. "SoV pts" identifies the metric inline so the
+      // unit is unambiguous.
+      subtitle: (() => {
+        if (topCompetitorName === null || topCompetitorGapPp === null) {
+          return undefined;
+        }
+        if (topCompetitorGapPp === 0) {
+          return "Tied on Share of Voice";
+        }
+        return topCompetitorGapPp > 0
+          ? `${data.subject_name} leads by ${topCompetitorGapPp} SoV pts`
+          : `${data.subject_name} trails by ${Math.abs(topCompetitorGapPp)} SoV pts`;
+      })(),
       helper: "Comparison entity closest to the subject in Share of Voice.",
       tooltip:
-        "The single entity in the comparison set whose Share of Voice is nearest the subject's. Subtitle shows the gap in percentage points and which side of the subject they sit on. A larger gap = more breathing room from your nearest rival.",
+        "The single entity in the comparison set whose Share of Voice is nearest the subject's. Caption shows the gap in Share-of-Voice percentage points and which side of the subject they sit on. A larger gap = more breathing room from your nearest rival.",
       // Neutral color: the value is a competitor's NAME, not a
       // performance metric. Painting the name green/amber by the
       // gap polarity created a visual mismatch — reader sees "Wes
@@ -1090,17 +1124,20 @@ export default async function CompetitionPage({
       valueColor: "text-foreground",
       polarity: "higher_better",
       // Name-anchored tile (value is a competitor name) — skip the
-      // gauge entirely; the subtitle carries the numeric context.
+      // gauge entirely; the caption carries the numeric context.
       gaugeValue: null,
       gaugeBenchmark: null,
-      caption:
-        topCompetitorName === null || topCompetitorGapPp === null
-          ? null
-          : topCompetitorGapPp === 0
-            ? "tied on SoV"
-            : topCompetitorGapPp > 0
-              ? `${topCompetitorGapPp} pts behind subject`
-              : `${Math.abs(topCompetitorGapPp)} pts ahead of subject`,
+      caption: (() => {
+        if (topCompetitorName === null || topCompetitorGapPp === null) {
+          return null;
+        }
+        if (topCompetitorGapPp === 0) {
+          return "Tied on Share of Voice";
+        }
+        return topCompetitorGapPp > 0
+          ? `${data.subject_name} leads by ${topCompetitorGapPp} SoV pts`
+          : `${data.subject_name} trails by ${Math.abs(topCompetitorGapPp)} SoV pts`;
+      })(),
       anchor: "landscape",
     },
     {
@@ -1456,97 +1493,10 @@ export default async function CompetitionPage({
                     // alpha ramp — same visual logic as the Visibility
                     // spoke's Current Platform Snapshot, just with
                     // SoV-tuned thresholds since SoV distributions
-                    // sit lower than mention rates. Auto-summary line
-                    // below restates the read in words so color
-                    // isn't the sole carrier (accessibility + faster
-                    // scan).
-                    const subjectRow = ownershipRows.find(
-                      (e) => e.is_subject,
-                    );
-                    const subjectName = subjectRow?.name ?? null;
-                    const subjectMarginalCells = subjectName
-                      ? ownershipCells
-                          .filter(
-                            (c) =>
-                              c.entity_name === subjectName &&
-                              sovTier(c.sov) === "marginal",
-                          )
-                          .map((c) => ({
-                            platformName:
-                              ownershipPlatforms.find(
-                                (p) => p.slug === c.platform_slug,
-                              )?.name ?? c.platform_slug,
-                            sov: c.sov,
-                          }))
-                          .sort((a, b) => a.sov - b.sov)
-                      : [];
-                    // Full set of subject cells (any tier) — used by
-                    // the no-gaps branch to name strongest + weakest
-                    // platforms specifically rather than emitting a
-                    // generic "at least contested" line that carries
-                    // no actionable signal.
-                    const subjectCellsSorted = subjectName
-                      ? ownershipCells
-                          .filter(
-                            (c) =>
-                              c.entity_name === subjectName &&
-                              c.sov !== null &&
-                              Number.isFinite(c.sov),
-                          )
-                          .map((c) => ({
-                            platformName:
-                              ownershipPlatforms.find(
-                                (p) => p.slug === c.platform_slug,
-                              )?.name ?? c.platform_slug,
-                            sov: c.sov as number,
-                          }))
-                          .sort((a, b) => b.sov - a.sov)
-                      : [];
-                    const summary = (() => {
-                      if (!subjectName) {
-                        return "Subject not in the platform-ownership matrix.";
-                      }
-                      if (subjectMarginalCells.length === 0) {
-                        // No gaps — replace the prior generic "at
-                        // least contested" line with named strongest
-                        // + most-contested platforms. When SoV is
-                        // uniform across all platforms the strongest/
-                        // weakest collapse to the same cell, so
-                        // surface that explicitly instead.
-                        if (subjectCellsSorted.length === 0) {
-                          return `${subjectName} has no measured platform share in this snapshot.`;
-                        }
-                        if (subjectCellsSorted.length === 1) {
-                          const only = subjectCellsSorted[0];
-                          return `${subjectName} holds ${Math.round(
-                            only.sov * 100,
-                          )}% SoV on ${only.platformName} (only covered platform).`;
-                        }
-                        const strongest = subjectCellsSorted[0];
-                        const weakest =
-                          subjectCellsSorted[subjectCellsSorted.length - 1];
-                        if (strongest.sov === weakest.sov) {
-                          return `${subjectName} holds a uniform ${Math.round(
-                            strongest.sov * 100,
-                          )}% SoV across all ${subjectCellsSorted.length} covered platforms.`;
-                        }
-                        return `Strongest on ${strongest.platformName} (${Math.round(
-                          strongest.sov * 100,
-                        )}%); most contested on ${weakest.platformName} (${Math.round(
-                          weakest.sov * 100,
-                        )}%).`;
-                      }
-                      if (subjectMarginalCells.length === 1) {
-                        const g = subjectMarginalCells[0];
-                        return `One marginal platform: ${subjectName} holds only ${Math.round(
-                          g.sov * 100,
-                        )}% SoV on ${g.platformName}.`;
-                      }
-                      const lowest = subjectMarginalCells[0];
-                      return `${subjectMarginalCells.length} marginal platforms — weakest: ${lowest.platformName} (${Math.round(
-                        lowest.sov * 100,
-                      )}% SoV).`;
-                    })();
+                    // sit lower than mention rates. The prior
+                    // auto-summary line below the grid was removed
+                    // at request; the color legend + per-cell
+                    // tooltips still carry the read.
                     return (
                       <div className="relative mt-8 border-t border-border/50 pt-6">
                         <div className="mb-3">
@@ -1676,7 +1626,9 @@ export default async function CompetitionPage({
                               className="inline-block h-3 w-3 rounded-sm"
                               style={{
                                 background:
-                                  "color-mix(in oklab, var(--primary) 18%, transparent)",
+                                  "color-mix(in oklab, var(--primary) 55%, transparent)",
+                                border:
+                                  "1px solid color-mix(in oklab, var(--primary) 75%, transparent)",
                               }}
                             />
                             Dominant ≥40%
@@ -1687,7 +1639,7 @@ export default async function CompetitionPage({
                               className="inline-block h-3 w-3 rounded-sm"
                               style={{
                                 background:
-                                  "color-mix(in oklab, var(--muted) 65%, transparent)",
+                                  "color-mix(in oklab, var(--muted) 75%, transparent)",
                               }}
                             />
                             Contested 15-40%
@@ -1711,17 +1663,14 @@ export default async function CompetitionPage({
                               className="inline-block h-3 w-3 rounded-sm"
                               style={{
                                 background:
-                                  "color-mix(in oklab, var(--muted) 35%, transparent)",
+                                  "repeating-linear-gradient(45deg, color-mix(in oklab, var(--muted) 25%, transparent), color-mix(in oklab, var(--muted) 25%, transparent) 2px, color-mix(in oklab, var(--muted-foreground) 12%, transparent) 2px, color-mix(in oklab, var(--muted-foreground) 12%, transparent) 4px)",
                                 border:
-                                  "1px dashed color-mix(in oklab, var(--muted-foreground) 30%, transparent)",
+                                  "1px dashed color-mix(in oklab, var(--muted-foreground) 45%, transparent)",
                               }}
                             />
                             No data
                           </span>
                         </div>
-                        <p className="mt-3 text-[12.5px] leading-relaxed text-foreground/80">
-                          {summary}
-                        </p>
                       </div>
                     );
                   })()}

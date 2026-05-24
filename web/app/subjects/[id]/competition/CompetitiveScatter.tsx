@@ -187,14 +187,24 @@ export function CompetitiveScatter({
     if (a.sov !== b.sov) return b.sov - a.sov;
     return a.rank - b.rank;
   });
-  // Three vertical tiers so a cluster of three (or more) nearby
-  // dots can each claim a distinct label slot instead of pairing
-  // off and leaving the third overlapping. Priority is
-  // above → below → far-below; "far-below" sits one extra label
-  // height down, leaving the dot itself clean.
-  type LabelTier = "above" | "below" | "far-below";
+  // Five vertical tiers so a dense cluster (e.g. the 5 competitors
+  // all sitting at 40% SoV in the Newsom view) can each claim a
+  // distinct label slot instead of running out of tiers and stacking
+  // labels on top of each other. Tiers alternate around the dot's
+  // natural Y position so the closer-to-natural tiers fill first:
+  // above, below, far-above, far-below, far2-below. Any label NOT
+  // at the natural "above" slot draws a thin leader line back to
+  // its dot in the render path so the offset can't create ambiguity
+  // about which label belongs to which point.
+  type LabelTier = "above" | "below" | "far-above" | "far-below" | "far2-below";
   const labelPositionByName: Record<string, LabelTier> = {};
-  const TIER_ORDER: LabelTier[] = ["above", "below", "far-below"];
+  const TIER_ORDER: LabelTier[] = [
+    "above",
+    "below",
+    "far-above",
+    "far-below",
+    "far2-below",
+  ];
   for (let i = 0; i < orderedForPlacement.length; i++) {
     const p = orderedForPlacement[i];
     // Collect tiers already claimed by neighbors that fall within
@@ -346,31 +356,61 @@ export function CompetitiveScatter({
                         textAnchor = "start";
                         dx = 8;
                       }
-                      // Y offset by tier: "above" sits 10px above
-                      // the dot center; "below" sits 16px below
-                      // (dot radius + breathing gap); "far-below"
-                      // sits 30px below so a third clustered label
-                      // can stack cleanly under the "below" one
-                      // without overlapping it.
+                      // Y offset by tier. 5 slots distribute around
+                      // the dot's natural Y position so a dense
+                      // cluster (up to 5 entities at the same SoV)
+                      // can give each label a distinct vertical
+                      // slot. Distances tuned so adjacent slots
+                      // clear an 11px label line height + breathing
+                      // room.
                       const labelPosition =
                         labelPositionByName[p.name] ?? "above";
-                      const labelY =
-                        labelPosition === "far-below"
-                          ? y + 30
-                          : labelPosition === "below"
-                          ? y + 16
-                          : y - 10;
+                      const Y_BY_TIER: Record<typeof labelPosition, number> = {
+                        "far-above": -28,
+                        above: -10,
+                        below: 18,
+                        "far-below": 34,
+                        "far2-below": 50,
+                      };
+                      const yOff = Y_BY_TIER[labelPosition];
+                      const labelY = y + yOff;
+                      // Any label NOT at its natural "above" position
+                      // gets a thin leader line from dot to label so
+                      // the offset doesn't create ambiguity about
+                      // which label belongs to which dot. Color
+                      // matches the dot color at low opacity so the
+                      // line is visible but doesn't compete with the
+                      // chart's grid lines.
+                      const needsLeader = labelPosition !== "above";
+                      // Leader endpoint Y stops short of the label's
+                      // baseline so the line doesn't crash into the
+                      // text glyphs. Above tiers point up (subtract);
+                      // below tiers point down (add).
+                      const leaderEndY = labelY + (yOff > 0 ? -4 : 5);
                       return (
-                        <text
-                          x={x + dx}
-                          y={labelY}
-                          textAnchor={textAnchor}
-                          fontSize={11}
-                          fontWeight={p.isSubject ? 600 : 400}
-                          fill="var(--foreground)"
-                        >
-                          {p.name}
-                        </text>
+                        <g>
+                          {needsLeader && (
+                            <line
+                              x1={x}
+                              y1={y}
+                              x2={x + dx}
+                              y2={leaderEndY}
+                              stroke={fill}
+                              strokeOpacity={0.5}
+                              strokeWidth={1}
+                            />
+                          )}
+                          <text
+                            x={x + dx}
+                            y={labelY}
+                            textAnchor={textAnchor}
+                            fontSize={11}
+                            fontWeight={p.isSubject ? 600 : 400}
+                            fill="var(--foreground)"
+                          >
+                            {p.name}
+                          </text>
+                        </g>
                       );
                     }}
                   />
