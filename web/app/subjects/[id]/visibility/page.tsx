@@ -900,7 +900,7 @@ export default async function VisibilityPage({
       value: formatRank(focal?.avg_rank ?? null),
       helper: "Average position when this entity appears in an answer.",
       tooltip:
-        "Average answer position among responses where the entity is mentioned. Lower values mean the entity appears earlier in the answer.",
+        "Average answer position among responses where the subject is mentioned. Lower values mean the subject appears earlier in the answer.",
       // Neutral by default — lower is better on this scale and a
       // green/orange tone risks implying high = good (opposite of
       // truth). Direction is encoded by the value's numeric meaning
@@ -1408,6 +1408,64 @@ export default async function VisibilityPage({
                         })}
                       </div>
                     </div>
+                    {/* Color legend — closes the loop on the tiered
+                        background colors so the reader doesn't need
+                        to hover a cell or read the section tooltip
+                        to learn what each tint means. Swatches match
+                        the tier styles exactly (color-mix expressions
+                        identical to heatTierStyle output) so legend
+                        and grid stay in sync if the palette ever
+                        shifts. */}
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          aria-hidden
+                          className="inline-block h-3 w-3 rounded-sm"
+                          style={{
+                            background:
+                              "color-mix(in oklab, var(--primary) 10%, transparent)",
+                          }}
+                        />
+                        Healthy ≥60%
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          aria-hidden
+                          className="inline-block h-3 w-3 rounded-sm"
+                          style={{
+                            background:
+                              "color-mix(in oklab, var(--muted) 65%, transparent)",
+                          }}
+                        />
+                        Mid 30-60%
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          aria-hidden
+                          className="inline-block h-3 w-3 rounded-sm"
+                          style={{
+                            background:
+                              "color-mix(in oklab, var(--warning) 22%, transparent)",
+                            border:
+                              "1px solid color-mix(in oklab, var(--warning) 55%, transparent)",
+                          }}
+                        />
+                        Gap &lt;30%
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          aria-hidden
+                          className="inline-block h-3 w-3 rounded-sm"
+                          style={{
+                            background:
+                              "color-mix(in oklab, var(--muted) 35%, transparent)",
+                            border:
+                              "1px dashed color-mix(in oklab, var(--muted-foreground) 30%, transparent)",
+                          }}
+                        />
+                        No data
+                      </span>
+                    </div>
                     {/* Auto-summary: gap count or positive line.
                         Always rendered (never empty) so the read
                         isn't carried by color alone — color +
@@ -1595,7 +1653,7 @@ export default async function VisibilityPage({
                               <span className="inline-flex items-center justify-end gap-1">
                                 Avg. Mention Position
                                 <KpiTooltipIcon
-                                  text="Average answer position among responses where the entity is mentioned. Lower values mean the entity appears earlier in the answer."
+                                  text="Average answer position among responses where the subject is mentioned. Lower values mean the subject appears earlier in the answer."
                                   align="right"
                                   direction="below"
                                 />
@@ -1798,7 +1856,7 @@ export default async function VisibilityPage({
                           <span className="inline-flex items-center justify-end gap-1">
                             Change
                             <KpiTooltipIcon
-                              text="Mention-rate change across the tracked window (first vs latest measured snapshot for this topic), in percentage points. Renders an em-dash when there's fewer than two measured snapshots."
+                              text="Mention-rate change across the tracked window (first vs latest measured snapshot for this topic), in percentage points. Positive (green) = up across the window; negative (amber) = down. Renders an em-dash when there are fewer than two measured snapshots."
                               align="right"
                               direction="below"
                             />

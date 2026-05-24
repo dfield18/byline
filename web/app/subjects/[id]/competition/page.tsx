@@ -1658,6 +1658,67 @@ export default async function CompetitionPage({
                             ))}
                           </div>
                         </div>
+                        {/* Color legend — closes the loop on the
+                            tiered background colors so the reader
+                            doesn't need to hover a cell or read the
+                            section tooltip to learn what each tint
+                            means. Swatches match the tier styles
+                            exactly (color-mix expressions identical
+                            to sovTierStyle output) so legend and
+                            grid stay in sync if the palette ever
+                            shifts. SoV-tuned labels mirror the
+                            Visibility spoke's heatmap legend
+                            pattern. */}
+                        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              aria-hidden
+                              className="inline-block h-3 w-3 rounded-sm"
+                              style={{
+                                background:
+                                  "color-mix(in oklab, var(--primary) 18%, transparent)",
+                              }}
+                            />
+                            Dominant ≥40%
+                          </span>
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              aria-hidden
+                              className="inline-block h-3 w-3 rounded-sm"
+                              style={{
+                                background:
+                                  "color-mix(in oklab, var(--muted) 65%, transparent)",
+                              }}
+                            />
+                            Contested 15-40%
+                          </span>
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              aria-hidden
+                              className="inline-block h-3 w-3 rounded-sm"
+                              style={{
+                                background:
+                                  "color-mix(in oklab, var(--warning) 22%, transparent)",
+                                border:
+                                  "1px solid color-mix(in oklab, var(--warning) 55%, transparent)",
+                              }}
+                            />
+                            Marginal &lt;15%
+                          </span>
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              aria-hidden
+                              className="inline-block h-3 w-3 rounded-sm"
+                              style={{
+                                background:
+                                  "color-mix(in oklab, var(--muted) 35%, transparent)",
+                                border:
+                                  "1px dashed color-mix(in oklab, var(--muted-foreground) 30%, transparent)",
+                              }}
+                            />
+                            No data
+                          </span>
+                        </div>
                         <p className="mt-3 text-[12.5px] leading-relaxed text-foreground/80">
                           {summary}
                         </p>
@@ -1836,41 +1897,49 @@ export default async function CompetitionPage({
                     totals across all topics.
                   </div>
                 )}
-                <div className="grid gap-5 lg:grid-cols-2">
-                  <Card className="p-6 border-border/60">
-                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
-                      Competitive Share of Voice
+                {/* Single Card wraps both sub-views, split by an
+                    internal divider (vertical at lg+, horizontal
+                    below) instead of two stacked bordered surfaces.
+                    Same pattern as the Trend chart + What-changed
+                    footer share — one card, one internal divider,
+                    less visual heaviness when the two sub-views
+                    really are one section's content. */}
+                <Card className="p-6 border-border/60">
+                  <div className="grid gap-6 lg:grid-cols-2 lg:divide-x divide-border/60">
+                    <div className="lg:pr-6">
+                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+                        Competitive Share of Voice
+                      </div>
+                      <p className="mb-4 text-[12.5px] text-muted-foreground">
+                        Share of AI answers mentioning each entity in
+                        the selected comparison set.
+                      </p>
+                      <CompetitorBarsFromData
+                        data={landscapeEntities.map((c) => ({
+                          name: c.name,
+                          sov: c.sov,
+                          is_subject: c.is_subject,
+                        }))}
+                        colorByName={entityColorByName}
+                        height={280}
+                      />
                     </div>
-                    <p className="mb-4 text-[12.5px] text-muted-foreground">
-                      Share of AI answers mentioning each entity in
-                      the selected comparison set.
-                    </p>
-                    <CompetitorBarsFromData
-                      data={landscapeEntities.map((c) => ({
-                        name: c.name,
-                        sov: c.sov,
-                        is_subject: c.is_subject,
-                      }))}
-                      colorByName={entityColorByName}
-                      height={280}
-                    />
-                  </Card>
-
-                  <Card className="p-6 border-border/60">
-                    <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
-                      Visibility vs. Prominence
+                    <div className="lg:pl-6 border-t lg:border-t-0 border-border/60 pt-6 lg:pt-0">
+                      <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+                        Position vs Share
+                      </div>
+                      <CompetitiveScatter
+                        entities={landscapeEntities.map((c) => ({
+                          name: c.name,
+                          sov: c.sov,
+                          avg_rank: c.avg_rank,
+                          is_subject: c.is_subject,
+                        }))}
+                        colorByName={entityColorByName}
+                      />
                     </div>
-                    <CompetitiveScatter
-                      entities={landscapeEntities.map((c) => ({
-                        name: c.name,
-                        sov: c.sov,
-                        avg_rank: c.avg_rank,
-                        is_subject: c.is_subject,
-                      }))}
-                      colorByName={entityColorByName}
-                    />
-                  </Card>
-                </div>
+                  </div>
+                </Card>
               </section>
 
               {/* ── 03. RANKING TABLE ───────────────────────────── */}
@@ -2173,14 +2242,15 @@ export default async function CompetitionPage({
                                 }}
                               />
                             </div>
-                            <span className="text-right text-[13px] tabular-nums text-foreground/85">
-                              <span className="font-semibold text-foreground">
-                                {row.count}
-                              </span>
-                              <span className="text-foreground/55">
-                                {" "}
-                                · {sharePct}%
-                              </span>
+                            {/* Percent only — raw count was dropped
+                                because the percent already conveys
+                                the comparison ("X appears in 56% of
+                                Newsom-mention answers") and is
+                                comparable across snapshots with
+                                different total response counts;
+                                surfacing both was double signal. */}
+                            <span className="text-right text-[13px] tabular-nums font-semibold text-foreground">
+                              {sharePct}%
                             </span>
                           </li>
                         );

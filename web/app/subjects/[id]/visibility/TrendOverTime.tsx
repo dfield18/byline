@@ -17,6 +17,7 @@ import { useState } from "react";
 import {
   CartesianGrid,
   ComposedChart,
+  LabelList,
   Line,
   ResponsiveContainer,
   Tooltip,
@@ -333,6 +334,83 @@ export function TrendOverTime({
     return { yDomain: [min, max] as [number, number], yTicks: ticks };
   })();
 
+  // End-of-line labels: for every series with a value at the chart's
+  // rightmost data point, render its name as inline text next to the
+  // line's terminus. Eye stays on the chart instead of bouncing to
+  // the chip legend below. Series that ended earlier in the window
+  // (no value at the final data row) stay legend-only — placing a
+  // label mid-chart for them would read as a value annotation on the
+  // wrong data point.
+  //
+  // Collision avoidance: when two or more series end at similar Y
+  // values (e.g. 5 competitors clustered at 40% mention rate), the
+  // labels would stack on top of each other. Pre-compute each
+  // label's pixel-Y offset via a label-rail algorithm: sort by
+  // natural pixel-Y ascending, walk through, push each subsequent
+  // label down by at least MIN_LABEL_SPACING_PX if it would collide
+  // with the previous one. The resulting offset is applied per-label
+  // inside the LabelList render below.
+  const MIN_LABEL_SPACING_PX = 14;
+  const LABEL_CHART_MARGIN_TOP = 12;
+  const LABEL_CHART_MARGIN_BOTTOM = 4;
+  const labelChartCanvasH =
+    height - LABEL_CHART_MARGIN_TOP - LABEL_CHART_MARGIN_BOTTOM;
+  // Project a percent value (in yDomain space) to its pixel Y inside
+  // the chart canvas. Inverted because SVG Y increases downward.
+  const yPxOfPct = (pct: number): number => {
+    if (yDomain[1] === yDomain[0]) {
+      return LABEL_CHART_MARGIN_TOP + labelChartCanvasH / 2;
+    }
+    return (
+      LABEL_CHART_MARGIN_TOP +
+      ((yDomain[1] - pct) / (yDomain[1] - yDomain[0])) * labelChartCanvasH
+    );
+  };
+  const lastRowIdx = data.length - 1;
+  const lastRow = lastRowIdx >= 0 ? data[lastRowIdx] : null;
+  type EndLabel = {
+    name: string;
+    value: number;
+    color: string;
+    isSubject: boolean;
+    naturalY: number;
+  };
+  const endLabelInputs: EndLabel[] = [];
+  if (lastRow) {
+    const subjVal = lastRow[subjectName];
+    if (typeof subjVal === "number") {
+      endLabelInputs.push({
+        name: subjectName,
+        value: subjVal,
+        color: PRIMARY,
+        isSubject: true,
+        naturalY: yPxOfPct(subjVal),
+      });
+    }
+    overlays.forEach((o) => {
+      const v = lastRow[o.name];
+      if (typeof v === "number") {
+        endLabelInputs.push({
+          name: o.name,
+          value: v,
+          color: o.color,
+          isSubject: false,
+          naturalY: yPxOfPct(v),
+        });
+      }
+    });
+  }
+  const sortedByY = [...endLabelInputs].sort(
+    (a, b) => a.naturalY - b.naturalY,
+  );
+  const labelYByName: Record<string, number> = {};
+  let lastPlacedY = -Infinity;
+  for (const e of sortedByY) {
+    const placedY = Math.max(e.naturalY, lastPlacedY + MIN_LABEL_SPACING_PX);
+    labelYByName[e.name] = placedY;
+    lastPlacedY = placedY;
+  }
+
   return (
     <div>
       {/* Wrapper height tracks the `height` prop so Visibility (320,
@@ -344,7 +422,12 @@ export function TrendOverTime({
         <ResponsiveContainer width="100%" height={height} minWidth={1}>
           <ComposedChart
             data={data}
-            margin={{ top: 12, right: 16, left: 0, bottom: 4 }}
+            // Right margin widened from 16 → 130 to make room for
+            // end-of-line labels next to each series' final data
+            // point. Without the extra margin, label text would
+            // either be clipped by the chart's right edge or push
+            // the lines inward. Top/left/bottom unchanged.
+            margin={{ top: 12, right: 130, left: 0, bottom: 4 }}
           >
             {/* Gradient `<defs>` removed when the subject's area
                 fill was replaced with a heavier line stroke — the
@@ -406,7 +489,35 @@ export function TrendOverTime({
                 }}
                 connectNulls={false}
                 isAnimationActive={false}
-              />
+              >
+                <LabelList
+                  dataKey={o.name}
+                  content={(props) => {
+                    if (
+                      props.index !== lastRowIdx ||
+                      typeof props.value !== "number" ||
+                      labelYByName[o.name] === undefined
+                    ) {
+                      return null;
+                    }
+                    const px =
+                      typeof props.x === "number" ? props.x : 0;
+                    return (
+                      <text
+                        x={px + 8}
+                        y={labelYByName[o.name]}
+                        dy="0.35em"
+                        fontSize={11}
+                        fill="var(--foreground)"
+                        fillOpacity={0.75}
+                        fontWeight={400}
+                      >
+                        {o.name}
+                      </text>
+                    );
+                  }}
+                />
+              </Line>
             ))}
             <Line
               type="monotone"
@@ -424,7 +535,34 @@ export function TrendOverTime({
               activeDot={{ r: 4 }}
               connectNulls={false}
               isAnimationActive={false}
-            />
+            >
+              <LabelList
+                dataKey={subjectName}
+                content={(props) => {
+                  if (
+                    props.index !== lastRowIdx ||
+                    typeof props.value !== "number" ||
+                    labelYByName[subjectName] === undefined
+                  ) {
+                    return null;
+                  }
+                  const px =
+                    typeof props.x === "number" ? props.x : 0;
+                  return (
+                    <text
+                      x={px + 8}
+                      y={labelYByName[subjectName]}
+                      dy="0.35em"
+                      fontSize={11}
+                      fill="var(--foreground)"
+                      fontWeight={600}
+                    >
+                      {subjectName}
+                    </text>
+                  );
+                }}
+              />
+            </Line>
           </ComposedChart>
         </ResponsiveContainer>
       </div>
