@@ -2,17 +2,14 @@
 
 /**
  * Click-to-expand excerpt for the Evidence cards on the Overview
- * spoke. Two layers of expansion:
- *
- * 1. "Show more"     → toggles the line-clamp on the cross-
- *                      analyzer's quoted excerpt (no fetch).
- * 2. "Show full AI response" → lazy-fetches the actual full per-
- *                      platform response text for this card's
- *                      prompt + model_slug and renders it inline.
- *                      Needed because the analyzer's extracted
- *                      excerpts often cut off mid-sentence (e.g.
- *                      "...progressive agenda across various
- *                      sectors:" with the enumerated list missing).
+ * spoke. The stored excerpt always renders line-clamped at ~4 lines;
+ * the only expansion action is "Show full AI response", which
+ * lazy-fetches the actual full per-platform response text for this
+ * card's prompt + model_slug and renders it inline. The prior
+ * "Show more" toggle on the clamped excerpt was removed — the
+ * stored excerpt is often truncated mid-sentence by the cross-
+ * analyzer extractor, so the full AI response is what readers
+ * actually want when they expand.
  *
  * Fetch hits the same-origin proxy at
  * /api/subjects/{subjectId}/prompts/{promptId}/responses, which
@@ -22,24 +19,6 @@
  */
 import { useState } from "react";
 import type { PromptResponse } from "@/lib/api";
-
-// Truncation heuristics: line-clamp-4 clamps VISUAL lines, not
-// characters, so a single check on character count misses excerpts
-// that are short overall but contain paragraph breaks. We treat
-// the excerpt as truncated if EITHER the char count exceeds the
-// long-text threshold OR it contains enough newlines to push past
-// the 4-line clamp. line-clamp-4 counts wrapped + newline-broken
-// lines together, so 3+ explicit newlines basically guarantees
-// the 4-line clamp activates.
-const TRUNCATE_THRESHOLD_CHARS = 240;
-const TRUNCATE_NEWLINE_THRESHOLD = 3;
-
-function countNewlines(s: string): number {
-  // Match \n, \r\n, and \r so we catch any line-break convention
-  // that might appear in the raw AI response text.
-  const matches = s.match(/\r\n|\r|\n/g);
-  return matches ? matches.length : 0;
-}
 
 export function EvidenceExcerpt({
   excerpt,
@@ -54,13 +33,9 @@ export function EvidenceExcerpt({
   promptId: number;
   modelSlug: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [fullResponse, setFullResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isLong =
-    excerpt.length > TRUNCATE_THRESHOLD_CHARS ||
-    countNewlines(excerpt) >= TRUNCATE_NEWLINE_THRESHOLD;
 
   async function loadFullResponse() {
     if (fullResponse !== null || loading) return;
@@ -103,29 +78,13 @@ export function EvidenceExcerpt({
   return (
     <div>
       <p
-        className={`${expanded || !isLong ? "" : "line-clamp-4"} text-sm leading-relaxed text-foreground/80 ${isLong && !expanded ? "cursor-pointer" : ""}`}
-        title={
-          !expanded && isLong
-            ? "Click to read more"
-            : rationale || undefined
-        }
-        onClick={() => {
-          if (isLong && !expanded) setExpanded(true);
-        }}
+        className="line-clamp-4 text-sm leading-relaxed text-foreground/80"
+        title={rationale || undefined}
       >
         {excerpt}
       </p>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-        {isLong && (
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
-          >
-            {expanded ? "Show less" : "Show more"}
-          </button>
-        )}
+      <div className="mt-2">
         <button
           type="button"
           onClick={() => {

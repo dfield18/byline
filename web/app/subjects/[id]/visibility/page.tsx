@@ -26,7 +26,7 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { TrendOverTime } from "./TrendOverTime";
-import { SectionNav } from "./SectionNav";
+import { OverviewSubNav } from "../OverviewSubNav";
 import { VisibilityTopicFilter } from "./VisibilityTopicFilter";
 import { VisibilityPlatformFilter } from "./VisibilityPlatformFilter";
 import { TrendWindowToggle } from "./TrendWindowToggle";
@@ -39,6 +39,25 @@ import {
   type SubjectDetail,
 } from "@/lib/api";
 import { RefreshButton } from "../refresh-button";
+import type { IconType } from "react-icons";
+import {
+  SiOpenai,
+  SiAnthropic,
+  SiGooglegemini,
+  SiPerplexity,
+} from "react-icons/si";
+
+// Brand-mark icons via react-icons/si — same set the Overview
+// spoke's Evidence cards and the landing page's "Platforms
+// monitored" strip use. Render with currentColor so platform
+// names anywhere on the Visibility spoke pick up the same
+// muted-foreground treatment instead of branded color noise.
+const PLATFORM_ICON: Record<string, IconType> = {
+  chatgpt: SiOpenai,
+  gemini: SiGooglegemini,
+  claude: SiAnthropic,
+  perplexity: SiPerplexity,
+};
 
 export const dynamic = "force-dynamic";
 
@@ -882,124 +901,38 @@ export default async function VisibilityPage({
           }
         />
 
-        {/* xl:pr-44 reserves a corridor on the right at xl+ widths
-            so the fixed SectionNav (right-6, ~140px wide) doesn't
-            overlap the main column's content — the Prominence card
-            header was getting clipped by the nav at the section's
-            right edge. */}
-        <main className="flex-1 px-4 md:px-12 xl:pr-44 py-6 space-y-16 max-w-[1280px] w-full mx-auto">
-          {/* Floating section jump-nav (xl+ only). Pure anchors —
-              the sections below carry matching id attributes. The
-              `summary` slot above the nav surfaces three executive-
-              read facts (strongest topic / strongest platform /
-              trend direction) so the rail mirrors the Competition
-              spoke's persistent-summary pattern. */}
-          <SectionNav
-            subjectId={subjectId}
-            summary={(() => {
-              type SummaryRow = { label: string; value: string };
+        {/* Horizontal sticky sub-nav pinned directly under the
+            Header — same component the Overview spoke uses. Hosts
+            both the section jump-links (left) and the page-level
+            filter dropdowns (right, via OverviewSubNav's optional
+            `right` slot) on a single sticky row, so navigation and
+            scope state ride together as the user scrolls. */}
+        <OverviewSubNav
+          items={[
+            { id: "trend", label: "Trend", num: "01" },
+            { id: "platforms", label: "Platforms", num: "02" },
+            { id: "topics", label: "Topics", num: "03" },
+            { id: "position", label: "Prominence", num: "04" },
+          ]}
+          right={
+            <>
+              <VisibilityTopicFilter
+                inline
+                topics={data.topic_coverage.map((t) => ({
+                  label: t.label,
+                }))}
+              />
+              <VisibilityPlatformFilter
+                inline
+                platforms={data.platform_topic_matrix.platforms.map(
+                  (p) => ({ slug: p.slug, name: p.name }),
+                )}
+              />
+            </>
+          }
+        />
 
-              // Strongest topic — top of the already-sorted recall
-              // list. Renders the topic name with its mention rate
-              // as a contextual suffix, mirroring how the Competitive
-              // Summary embeds a value with its row.
-              const strongest = topicsSortedDesc[0] ?? null;
-              const strongestTopicValue = strongest
-                ? `${capitalizeFirst(strongest.label)} · ${Math.round((strongest.ai_recall ?? 0) * 100)}%`
-                : "Not enough data";
-
-              // Weakest topic — already computed at page level for
-              // the briefing's "Weakest Topic Visibility" KPI tile;
-              // reused here so the rail row always agrees with the
-              // tile and the page's tail line. Same name + rate
-              // pattern as Strongest topic.
-              const weakestTopicValue = weakestTopic
-                ? `${capitalizeFirst(weakestTopic.label)} · ${Math.round((weakestTopic.ai_recall ?? 0) * 100)}%`
-                : "Not enough data";
-
-              // Strongest platform — highest mention-rate among the
-              // four AI platforms in the current snapshot. `value`
-              // is PlatformRecall's mention-rate field (0..1).
-              // Platforms missing from this snapshot are already
-              // filtered out at load time by n_responses > 0.
-              const platformsByRecall = [...data.platform_recall]
-                .filter(
-                  (p) => p.value !== null && Number.isFinite(p.value),
-                )
-                .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
-              const strongestPlatform = platformsByRecall[0] ?? null;
-              const strongestPlatformValue = strongestPlatform
-                ? `${strongestPlatform.name} · ${Math.round((strongestPlatform.value ?? 0) * 100)}%`
-                : "Not enough data";
-
-              const rows: SummaryRow[] = [
-                {
-                  label: "Strongest topic",
-                  value: strongestTopicValue,
-                },
-                {
-                  label: "Weakest topic",
-                  value: weakestTopicValue,
-                },
-                {
-                  label: "Strongest platform",
-                  value: strongestPlatformValue,
-                },
-              ];
-
-              const SummaryRow = ({
-                label,
-                value,
-              }: {
-                label: string;
-                value: string;
-              }) => (
-                <div className="space-y-1">
-                  <div className="text-[11px] leading-none text-muted-foreground">
-                    {label}
-                  </div>
-                  <div
-                    className="truncate text-sm font-semibold leading-snug text-foreground"
-                    title={value}
-                  >
-                    {value}
-                  </div>
-                </div>
-              );
-
-              return (
-                <div>
-                  <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Visibility Summary
-                  </div>
-                  <div className="space-y-4">
-                    {rows.map((r) => (
-                      <SummaryRow
-                        key={r.label}
-                        label={r.label}
-                        value={r.value}
-                      />
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-            filters={
-              <>
-                <VisibilityTopicFilter
-                  topics={data.topic_coverage.map((t) => ({
-                    label: t.label,
-                  }))}
-                />
-                <VisibilityPlatformFilter
-                  platforms={data.platform_topic_matrix.platforms.map(
-                    (p) => ({ slug: p.slug, name: p.name }),
-                  )}
-                />
-              </>
-            }
-          />
-
+        <main className="flex-1 px-4 md:px-12 py-6 space-y-10 max-w-[1280px] w-full mx-auto">
           <Link
             href={`/subjects/${subjectId}`}
             className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground hover:text-foreground transition-colors -mb-6"
@@ -1043,57 +976,70 @@ export default async function VisibilityPage({
                   briefing tile becomes an entry point into the
                   deeper section (e.g. clicking AI Mention Rate
                   scrolls down to the Trend section). */}
-              <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Flat KPI tile strip — matches the Overview Vitals
+                  card's TrajectoryStrip pattern: no bordered Card
+                  wrapper, label + reserved subtitle slot + tooltip
+                  icon at top, value at text-2xl, supporting line
+                  pinned to bottom via mt-auto. Helper + polarity
+                  lines were dropped from the visible body in favor
+                  of the same tooltip-only treatment Overview uses.
+                  Benchmark line stays because it carries data
+                  Overview doesn't have an equivalent for. Anchor
+                  wraps with a subtle hover-text treatment instead
+                  of the prior border-tinting since there's no
+                  border to tint. gap-8 between tiles matches the
+                  Overview strip's spacing too. */}
+              <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 items-stretch">
                 {kpis.map((k) => {
                   const tileInner = (
                     <>
                       <div className="flex items-start justify-between gap-2">
-                        <span className="text-[12.5px] font-semibold uppercase tracking-[0.04em] text-foreground/65">
-                          {k.label}
-                        </span>
+                        <div className="min-w-0">
+                          <div className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
+                            {k.label}
+                          </div>
+                          {/* Subtitle slot reserved on EVERY tile
+                              (non-breaking space placeholder when
+                              empty) so the title block occupies the
+                              same vertical space across all four
+                              tiles — Weakest Topic Visibility's
+                              subtitle would otherwise push its
+                              value + benchmark down, misaligning
+                              with the other three. Same pattern
+                              the Overview TrajectoryStrip uses. */}
+                          <div
+                            className="text-[10px] text-muted-foreground/75 mt-0.5 line-clamp-1"
+                            title={k.subtitle || undefined}
+                          >
+                            {k.subtitle || " "}
+                          </div>
+                        </div>
                         <KpiTooltipIcon
                           text={k.tooltip ?? k.helper}
                           align="right"
                         />
                       </div>
-                      <div className="mt-3 flex items-baseline gap-2">
+                      <div className="mt-1">
                         <span
-                          className={`text-[28px] font-semibold leading-none tracking-tight tabular-nums ${k.valueColor}`}
+                          className={`text-2xl font-semibold tracking-tight tabular-nums ${k.valueColor}`}
                         >
                           {k.value}
                         </span>
                       </div>
-                      {k.subtitle && (
-                        <div
-                          className="mt-2 line-clamp-2 text-[12.5px] leading-snug text-foreground/70"
-                          title={k.subtitle}
-                        >
-                          {k.subtitle}
+                      {k.benchmark && (
+                        <div className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug">
+                          {k.benchmark}
                         </div>
                       )}
-                      <div className="mt-auto pt-3 space-y-1 text-[11.5px] leading-snug text-muted-foreground">
-                        <div>{k.helper}</div>
-                        <div className="text-foreground/55">
-                          {k.polarity === "higher_better"
-                            ? "↑ higher is better"
-                            : "↓ lower is better"}
-                        </div>
-                        {k.benchmark && (
-                          <div className="text-foreground/55">
-                            {k.benchmark}
-                          </div>
-                        )}
-                      </div>
                     </>
                   );
-                  const baseClasses =
-                    "flex h-full flex-col rounded-lg border border-border/80 bg-background/60 p-5";
+                  const baseClasses = "flex h-full flex-col";
                   if (k.anchor) {
                     return (
                       <a
                         key={k.label}
                         href={`#${k.anchor}`}
-                        className={`${baseClasses} transition-colors hover:border-primary/40 hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}
+                        className={`${baseClasses} group transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm`}
                       >
                         {tileInner}
                       </a>
@@ -1143,13 +1089,21 @@ export default async function VisibilityPage({
                             {capitalizeFirst(t.label)}
                           </div>
                         ))}
-                        {data.platform_topic_matrix.platforms.map((p) => (
+                        {data.platform_topic_matrix.platforms.map((p) => {
+                          const Icon = PLATFORM_ICON[p.slug];
+                          return (
                           <div
                             key={p.slug}
                             style={{ display: "contents" }}
                           >
-                            <div className="self-center pr-2 text-[12px] font-medium text-foreground/80">
-                              {p.name}
+                            <div className="self-center pr-2 text-[12px] font-medium text-foreground/80 inline-flex items-center gap-1.5">
+                              {Icon && (
+                                <Icon
+                                  className="h-3 w-3 text-foreground/65 shrink-0"
+                                  aria-hidden
+                                />
+                              )}
+                              <span>{p.name}</span>
                             </div>
                             {data.platform_topic_matrix.topics.map((t) => {
                               const cell =
@@ -1213,7 +1167,8 @@ export default async function VisibilityPage({
                               );
                             })}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -1227,7 +1182,7 @@ export default async function VisibilityPage({
               space without adding signal. */}
 
           {/* ── 2. VISIBILITY TREND ─────────────────────────────── */}
-          <section id="trend" className="scroll-mt-20">
+          <section id="trend" className="scroll-mt-28">
             <SectionTitle
               eyebrow="01 · Trend"
               title="Mention Rate Over Time"
@@ -1242,7 +1197,6 @@ export default async function VisibilityPage({
                 strip inside the same card removes that dead space
                 and puts the deltas directly under the line they
                 describe. */}
-            <Card className="p-6 md:p-8">
               <TrendOverTime
                 subjectName="Overall"
                 trajectoryWeeks={trendWeeks}
@@ -1324,11 +1278,10 @@ export default async function VisibilityPage({
                   </div>
                 );
               })()}
-            </Card>
           </section>
 
           {/* ── 3. PLATFORM BREAKDOWN ───────────────────────────── */}
-          <section id="platforms" className="scroll-mt-20">
+          <section id="platforms" className="scroll-mt-28">
             <SectionTitle
               eyebrow="02 · Platforms"
               title="Platform Change Detail"
@@ -1339,7 +1292,6 @@ export default async function VisibilityPage({
               }
               className="mb-5"
             />
-            <Card className="p-5 md:p-6">
               {(() => {
                 // When a topic is selected, swap in the per-(platform,
                 // topic) breakdown so all four metric columns reflect
@@ -1445,7 +1397,20 @@ export default async function VisibilityPage({
                                 className="border-b border-border/30 last:border-0 text-[14px] target:bg-primary/[0.06] target:outline target:outline-1 target:outline-primary/30"
                               >
                                 <td className="py-3 pr-3 font-medium text-foreground">
-                                  {p.name}
+                                  {(() => {
+                                    const Icon = PLATFORM_ICON[p.slug];
+                                    return (
+                                      <span className="inline-flex items-center gap-1.5">
+                                        {Icon && (
+                                          <Icon
+                                            className="h-3.5 w-3.5 text-foreground/65 shrink-0"
+                                            aria-hidden
+                                          />
+                                        )}
+                                        <span>{p.name}</span>
+                                      </span>
+                                    );
+                                  })()}
                                 </td>
                                 <td className="py-3 px-3 text-right tabular-nums text-foreground/90">
                                   {formatPct(p.mention_rate)}
@@ -1506,11 +1471,10 @@ export default async function VisibilityPage({
                   </>
                 );
               })()}
-            </Card>
           </section>
 
           {/* ── 4. TOPIC VISIBILITY ─────────────────────────────── */}
-          <section id="topics" className="scroll-mt-20">
+          <section id="topics" className="scroll-mt-28">
             <SectionTitle
               eyebrow="03 · Topics"
               title="Topic Visibility"
@@ -1529,7 +1493,6 @@ export default async function VisibilityPage({
                 where row position IS the strongest-to-weakest story
                 and the Change column subsumes the Largest Movement
                 card. */}
-            <Card className="p-5 md:p-6">
               {topicTableRowsSorted.length === 0 ? (
                 <div className="text-[13.5px] text-muted-foreground">
                   No measured topic coverage in this snapshot.
@@ -1655,18 +1618,16 @@ export default async function VisibilityPage({
                   </table>
                 </div>
               )}
-            </Card>
           </section>
 
           {/* ── 5. ANSWER POSITION ──────────────────────────────── */}
-          <section id="position" className="scroll-mt-20">
+          <section id="position" className="scroll-mt-28">
             <SectionTitle
               eyebrow="04 · Prominence"
               title="Answer Prominence"
               description="When this entity is mentioned, how early it appears in the AI answer."
               className="mb-5"
             />
-            <Card className="p-5 md:p-6">
               {(() => {
                 // Four scope states for Answer Prominence:
                 //   - neither filter set → aggregate `rank_distribution`
@@ -1863,7 +1824,6 @@ export default async function VisibilityPage({
               </div>
                 );
               })()}
-            </Card>
           </section>
 
 

@@ -15,11 +15,22 @@
  * height + sub-nav height) so anchored sections don't hide under
  * the pinned bars.
  */
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
 type Item = { id: string; label: string; num: string };
 
-export function OverviewSubNav({ items }: { items: Item[] }) {
+export function OverviewSubNav({
+  items,
+  right,
+}: {
+  items: Item[];
+  // Optional right-aligned slot on the same row as the nav links.
+  // Used by the Visibility spoke to host its topic + platform
+  // filter dropdowns so the sub-nav carries both navigation and
+  // page-scope state in one persistent bar.
+  right?: ReactNode;
+}) {
   const [activeId, setActiveId] = useState<string | null>(null);
   // Stable content-derived key so the IntersectionObserver only
   // reattaches when the set of observed band ids ACTUALLY changes,
@@ -80,9 +91,13 @@ export function OverviewSubNav({ items }: { items: Item[] }) {
     >
       {/* Inner width capped to match the main content's max-w (1280px)
           so the links align with the bands below, while the outer
-          <nav> background + border still span the full viewport. */}
-      <div className="max-w-[1280px] mx-auto px-4 md:px-12 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <ul className="flex items-center gap-6 h-11 min-w-max">
+          <nav> background + border still span the full viewport.
+          Two-column flex row: items list on the left, optional
+          right slot anchored right via ml-auto on the same h-11
+          row. When `right` is absent (e.g. Overview spoke), the
+          list takes the full row. */}
+      <div className="max-w-[1280px] mx-auto px-4 md:px-12 flex items-center gap-4 h-11">
+        <ul className="flex items-center gap-6 min-w-max overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {items.map((i) => {
             const isActive = activeId === i.id;
             return (
@@ -117,6 +132,11 @@ export function OverviewSubNav({ items }: { items: Item[] }) {
             );
           })}
         </ul>
+        {right && (
+          <div className="ml-auto shrink-0 flex items-center gap-3">
+            {right}
+          </div>
+        )}
       </div>
     </nav>
   );
