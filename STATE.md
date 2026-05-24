@@ -8,7 +8,11 @@
 > defensive fixes across the page (tied-rank protection,
 > finite/clamp guards, label↔value consistency, threshold
 > harmonization, trajectory length normalization at the API
-> boundary). The big themes:
+> boundary), then a Visibility-spoke parity pass that brought
+> the spoke's sub-nav, briefing tiles, and section formatting
+> into alignment with Overview (shared `OverviewSubNav`,
+> filters in the sub-nav's right slot, flat KPI tiles, flat
+> sections, brand icons for platform names). The big themes:
 >
 > - **Overview spoke restructured into five bands** (commit
 >   `bfda60f`): Vitals → Gap → Competitive → Sources → Evidence,
@@ -748,6 +752,155 @@ frontend / Streamlit / test reads it from the API response
     each evidence card carries it on the payload.
   - `get_subject_overview` response dict stops emitting
     `strategic_takeaways` (still computed internally).
+
+---
+
+## Follow-up session #3 (2026-05-23, evening) — Visibility spoke: sub-nav + Overview formatting parity
+
+One commit on `main`:
+
+- **`f7609dd`** — Visibility: horizontal sub-nav + Overview
+  formatting parity. 6 files, 186 ins / 369 del.
+
+Brings the Visibility spoke's layout primitives into alignment
+with the Overview spoke so the two surfaces feel like the same
+product.
+
+### Sub-nav: right-rail → horizontal sticky bar
+
+- Replaced the right-rail `SectionNav` with the shared
+  `OverviewSubNav` component, pinned directly under the Header.
+  Items: `01 Trend · 02 Platforms · 03 Topics · 04 Prominence`.
+  Same scroll-spy + 2px primary underline + IntersectionObserver
+  pattern Overview uses.
+- Dropped the `xl:pr-44` right corridor from `<main>` (no
+  rail to reserve space for anymore). Main uses the full
+  `max-w-[1280px]` cap.
+- Section anchors bumped `scroll-mt-20` → `scroll-mt-28` so
+  anchored jumps clear both the Header + sub-nav.
+- **Deleted** `web/app/subjects/[id]/visibility/SectionNav.tsx`
+  (orphaned after the swap).
+
+### Filters in the sub-nav's right slot
+
+- **`OverviewSubNav` gained an optional `right` ReactNode slot.**
+  Inner layout flipped from `<div overflow-x-auto><ul>` to
+  `<div flex items-center gap-4 h-11><ul>{right && <div ml-auto>}</div>`.
+  Right group anchors to the row's right edge via `ml-auto`;
+  list still hosts its own horizontal scroll when items
+  overflow (no change to the unscoped Overview-spoke usage).
+- **`VisibilityTopicFilter` + `VisibilityPlatformFilter` gained
+  an `inline` prop.** Default vertical stack is preserved (the
+  prior rail/inline-row callers still work); `inline=true`
+  switches to a horizontal `label + select` layout with
+  `max-w-[180px] / [160px]` caps so long topic names don't
+  blow up the sub-nav row.
+- Visibility page wires both filters into the sub-nav's right
+  slot with `inline` enabled. The page-level filter row that
+  briefly lived inside main (between the rail-removal and the
+  right-slot wiring) is gone.
+
+### Briefing KPI tile redesign — Overview TrajectoryStrip parity
+
+The four briefing tiles at the top of the Visibility spoke
+(AI Mention Rate · Average Mention Position · First Mention
+Share · Weakest Topic Visibility) used to render as bordered
+`rounded-lg border bg-background/60 p-5` cards with helper
+text + polarity (`↑ higher is better`) + benchmark stacked
+in the body. They now match the Overview's flat KPI tiles:
+
+- **Flat tile** — `flex h-full flex-col`, no border, no
+  background.
+- **Title typography** — `text-[11px] uppercase tracking-wider
+  text-muted-foreground` (was `text-[12.5px] font-semibold
+  uppercase`).
+- **Reserved subtitle slot** — `text-[10px] text-muted-foreground/75
+  mt-0.5 line-clamp-1` with a non-breaking space placeholder
+  when no subtitle. Weakest Topic Visibility's topic-name
+  subtitle no longer pushes its value down out of alignment
+  with the other three tiles.
+- **Value typography** — `text-2xl font-semibold tracking-tight`
+  (was `text-[28px] font-semibold leading-none`).
+- **Helper + polarity removed** from the visible body. Helper
+  text still lives in the `KpiTooltipIcon` tooltip; polarity
+  has no Overview equivalent and was dropped.
+- **Benchmark line preserved** at `mt-auto pt-3` in muted
+  typography since Overview has no equivalent surface for
+  cross-subject benchmarking and that line still carries real
+  signal.
+- **Inter-tile gap** `gap-4` → `gap-8` to match Overview.
+- Anchor-wrapped tile lost the border-tinting hover (no
+  border to tint); keyboard focus ring preserved.
+
+### Cross-spoke formatting parity
+
+- **Inter-section spacing** `space-y-16` → `space-y-10` (64px
+  → 40px between sections) to match Overview's tighter rhythm.
+- **Section Card wrappers stripped** from the four section
+  bands (`<Card className="p-5 md:p-6">` / `<Card className="p-6 md:p-8">`
+  removed around Trend / Platforms / Topics / Prominence
+  sections). `SectionTitle` + content now sit flat in main —
+  same editorial register as Overview's Trends / Sources /
+  Evidence. The briefing Card at the top kept its wrapper
+  (it's the hero of the page).
+- **Brand icons for platform names** via `react-icons/si` —
+  new module-level `PLATFORM_ICON` map in
+  `visibility/page.tsx`:
+  - `chatgpt → SiOpenai`
+  - `gemini → SiGooglegemini`
+  - `claude → SiAnthropic`
+  - `perplexity → SiPerplexity`
+
+  Same icon set Overview's Evidence cards + the landing page's
+  "Platforms monitored" strip use. Wired into two surfaces:
+  - **Per-Platform Snapshot heatmap** row labels — `{Icon}
+    {name}` inline.
+  - **Per-platform KPIs table** (Platforms band) row labels
+    — same `{Icon} {name}` treatment.
+
+  Icons render with `text-foreground/65` muted treatment so
+  they don't compete with row content. Falls back to text-only
+  when a slug doesn't have a mapped icon. **Not yet** wired
+  into the `TrendOverTime` chart's legend — that's a separate
+  component file and was left untouched in this pass.
+
+### Evidence card single-expand simplification
+
+`EvidenceExcerpt` (Overview spoke) collapsed from a two-tier
+expand (`Show more` toggle + `Show full AI response` fetch)
+to a single action: **Show full AI response only**. The
+stored excerpt always renders line-clamped at 4 lines; the
+only expansion is the full per-platform AI response fetch.
+Dropped the `expanded` state, the `isLong` / `countNewlines`
+heuristic, and the `TRUNCATE_*` constants. Rationale: the
+cross-analyzer's stored excerpt is often truncated mid-
+sentence by the extractor, so the full AI response is what
+readers actually want when they expand — toggling the
+clamp on the (often-truncated) excerpt was redundant.
+
+### Component / file changes summary
+
+- **`OverviewSubNav`** — added optional `right: ReactNode`
+  prop and the corresponding inner-layout flip. Backward
+  compatible (Overview spoke usage unchanged).
+- **`VisibilityTopicFilter` / `VisibilityPlatformFilter`** —
+  added optional `inline: boolean` prop; default vertical
+  stack preserved.
+- **`PLATFORM_ICON` map** added at module scope in
+  `visibility/page.tsx`.
+- **`EvidenceExcerpt`** — simplified to single-action.
+- **Deleted**: `web/app/subjects/[id]/visibility/SectionNav.tsx`.
+
+### Open follow-ups (Visibility-scoped, not done in this pass)
+
+- `TrendOverTime` chart legend still renders platform names
+  as plain text — picking up `PLATFORM_ICON` there would
+  finish the cross-spoke icon coverage.
+- Other spokes (Narrative, Sources, Competition) still use
+  their own per-spoke `SectionNav.tsx` files with the right-
+  rail pattern. They could be migrated to `OverviewSubNav`
+  the same way Visibility was; not Overview-scoped so left
+  untouched.
 
 ---
 
