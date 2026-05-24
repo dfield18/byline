@@ -19,8 +19,13 @@ function capitalizeFirst(s: string): string {
 
 export function TopicProminenceFilter({
   topics,
+  inline = false,
 }: {
   topics: { label: string }[];
+  // inline=true renders label + select on one horizontal row
+  // (used by OverviewSubNav's right slot). Default vertical stack
+  // is for the prior right-rail placement.
+  inline?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -41,11 +46,18 @@ export function TopicProminenceFilter({
 
   if (topics.length === 0) return null;
 
+  const wrapperClass = inline
+    ? "flex items-center gap-1.5 text-[12px]"
+    : "flex flex-col gap-1 text-[12px]";
+  const selectClass = inline
+    ? "max-w-[180px] truncate rounded-md border border-border/70 bg-card px-2 py-1 text-[12px] text-foreground"
+    : "w-full truncate rounded-md border border-border/70 bg-card px-2 py-1 text-[12px] text-foreground";
+
   return (
-    <label className="flex flex-col gap-1 text-[12px]">
+    <label className={wrapperClass}>
       <span className="text-foreground/60">Topic</span>
       <select
-        className="w-full truncate rounded-md border border-border/70 bg-card px-2 py-1 text-[12px] text-foreground"
+        className={selectClass}
         value={value}
         onChange={(e) => setValue(e.target.value)}
       >

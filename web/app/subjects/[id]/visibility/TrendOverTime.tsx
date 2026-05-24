@@ -179,7 +179,8 @@ export function TrendOverTime({
   overlays,
   helperText,
   overlayOpacity = 0.7,
-  height = 420,
+  height = 320,
+  subjectOnlyAxis = false,
 }: {
   subjectName: string;
   trajectoryWeeks: SubjectOverview["trajectory"]["weeks"];
@@ -195,11 +196,23 @@ export function TrendOverTime({
   // competitor lines crowd the chart and the subject needs to read
   // as the focal series.
   overlayOpacity?: number;
-  // Chart pixel height. Default 420 keeps the Visibility spoke
-  // unchanged; the Competition spoke passes a smaller value so
-  // the line movements feel less wavy when many overlay lines
-  // are competing for vertical room.
+  // Chart pixel height for both populated and empty states. Default
+  // 320 keeps the Trend section in proportion with the other
+  // Visibility sections (summary band, tables) rather than letting
+  // a single 0-100% chart dominate the tab. Competition spoke
+  // overrides to a custom value when its overlay count warrants more
+  // vertical room.
   height?: number;
+  // When true, the data-driven Y-axis fits ONLY the subject's values
+  // — overlays are ignored for axis computation. Used by the
+  // Competition spoke where overlays are competitor mention rates
+  // (often much lower than the subject) so an all-series fit would
+  // stretch the axis to ~0-100% and hide the subject's movement in
+  // the top fifth. Visibility leaves this off because its overlays
+  // are per-platform breakdowns of the SAME metric — they cluster
+  // with the subject, so the all-series fit produces an equivalently
+  // tight axis without clipping any series.
+  subjectOnlyAxis?: boolean;
 }) {
   // Hover-to-isolate: when the user hovers a legend chip (or a line),
   // drop the opacity of every non-hovered series so the chosen one
@@ -237,11 +250,16 @@ export function TrendOverTime({
   ).length;
 
   if (subjectMeasuredWeeks < 2) {
-    // Compact empty state — shrunk from h-[260px] to h-[88px] so an
-    // empty state isn't the tallest block on the tab. Single line
-    // of explanatory text replaces the prior 2-line body.
+    // Empty state matches the populated chart's pixel height so the
+    // section reserves the same vertical space whether or not the
+    // chart has rendered. Avoids a layout jump and keeps the tab's
+    // section proportions consistent across populated / unpopulated
+    // states for the same subject.
     return (
-      <div className="flex h-[88px] items-center justify-center rounded-md border border-dashed border-border/70 bg-muted/20 px-6 text-center">
+      <div
+        className="flex items-center justify-center rounded-md border border-dashed border-border/70 bg-muted/20 px-6 text-center"
+        style={{ height }}
+      >
         <div className="text-[12.5px] leading-relaxed text-foreground/65">
           Not enough history to chart yet — chart populates once a
           second weekly snapshot lands.
@@ -250,31 +268,66 @@ export function TrendOverTime({
     );
   }
 
-  // Y-axis padding across all entity values combined.
+  // Data-driven Y-axis. The earlier hardcoded 0-100% domain crushed
+  // a 10-20pt decline into the top fifth of the chart and read as
+  // "basically flat", masking the one declining-visibility story the
+  // tab exists to surface. The replacement fits the axis to the
+  // visible data with a small pad so movement is legible, while
+  // keeping the scale honest:
+  //   - axis is rounded to a multiple of `step` (5, 10, or 20)
+  //   - bounds are clamped to [0, 105] so we never invent a negative
+  //     percentage or run past the 100% ceiling without a small lip
+  //   - ~4 evenly-spaced ticks across the resulting range
+  //   - tick labels still spell out the percent so the reader sees
+  //     immediately that the axis isn't a 0-100% scale
+  // Axis-fitting value set. Default = every series (subject +
+  // overlays); when `subjectOnlyAxis` is true, just the subject so
+  // the axis tightens to the subject's range and the subject's
+  // movement reads clearly even when overlays span a much wider
+  // band. Overlay lines still render normally — they just don't
+  // pull the axis around.
+  const axisNames = subjectOnlyAxis ? [subjectName] : allNames;
   const allValues: number[] = [];
   data.forEach((row) => {
-    allNames.forEach((k) => {
+    axisNames.forEach((k) => {
       const v = row[k];
       if (typeof v === "number") allValues.push(v);
     });
   });
-  // Render the full 0-100% conceptual range but pad the actual
-  // domain to 105 so a series that hugs the ceiling (100%) sits a
-  // hair below the chart frame instead of fusing with it. Explicit
-  // ticks keep the visible axis labels at 0/25/50/75/100 so the
-  // chart still reads as a 0-100% scale. A truncated axis is still
-  // off-limits — that would exaggerate movement.
-  const yDomain: [number, number] = [0, 105];
-  const yTicks = [0, 25, 50, 75, 100];
+  const { yDomain, yTicks } = (() => {
+    if (allValues.length === 0) {
+      return { yDomain: [0, 100] as [number, number], yTicks: [0, 25, 50, 75, 100] };
+    }
+    const dataMin = Math.min(...allValues);
+    const dataMax = Math.max(...allValues);
+    const pad = 5;
+    // Pick a step that yields ~4 gridlines across the padded range.
+    // Small ranges (tight cluster) get a 5pt step; medium ranges get
+    // 10pt; very wide ranges get 20pt so we don't print 8+ tick
+    // labels on a short axis.
+    const paddedRange = dataMax - dataMin + 2 * pad;
+    const step = paddedRange <= 25 ? 5 : paddedRange <= 50 ? 10 : 20;
+    const rawMin = dataMin - pad;
+    const rawMax = dataMax + pad;
+    const min = Math.max(0, Math.floor(rawMin / step) * step);
+    // Domain can breathe up to 105 so a series at the 100% ceiling
+    // doesn't fuse with the chart frame, but tick labels stop at
+    // 100 because "105%" reads as nonsensical for a share metric.
+    const max = Math.min(105, Math.ceil(rawMax / step) * step);
+    const tickMax = Math.min(100, max);
+    const ticks: number[] = [];
+    for (let t = min; t <= tickMax; t += step) ticks.push(t);
+    return { yDomain: [min, max] as [number, number], yTicks: ticks };
+  })();
 
   return (
     <div>
-      {/* Chart canvas at 420px — bumped from 340 because with 4-5
-          series in the upper 50-100% band the old height still made
-          the lines weave on top of each other. The taller canvas
-          combined with the tighter Y-domain (above) lets the cluster
-          spread vertically instead of stacking. */}
-      <div className="h-[420px] w-full">
+      {/* Wrapper height tracks the `height` prop so Visibility (320,
+          default) and Competition (340, explicit) each render at
+          their own size. Wrapper used to be hardcoded h-[420px],
+          which left dead space below the chart whenever a caller
+          passed a smaller height. */}
+      <div className="w-full" style={{ height }}>
         <ResponsiveContainer width="100%" height={height} minWidth={1}>
           <ComposedChart
             data={data}

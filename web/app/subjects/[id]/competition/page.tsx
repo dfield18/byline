@@ -1,27 +1,26 @@
 /**
  * Competition spoke.
  *
- * Three stacked sections (Landscape / Co-Mentions / Platform
- * Ownership) with a floating SectionNav on the right at xl+. Same
- * narrative pattern as the Visibility hub — one continuous read,
- * no tabs hiding two-thirds of the content behind a click.
+ * Five stacked sections (Vitals / Trend / Landscape / Ranking /
+ * Co-Mentions) with a sticky horizontal sub-nav at the top, same
+ * pattern as the Visibility spoke — one continuous read, no tabs
+ * hiding two-thirds of the content behind a click.
  *
  * Backed by the same `SubjectOverview` payload as Visibility, so no
  * new endpoint. Topic-scope dropdown on the Prominence table is
  * URL-driven via ?prominence_topic=.
  */
-import Link from "next/link";
-import { ArrowLeft, Info } from "lucide-react";
+import { Info } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
-import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
+import { Card, SectionTitle, Pill, KpiGauge } from "@/components/dashboard/ui";
 import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
 import { CompetitiveScatter } from "./CompetitiveScatter";
 import { TopicProminenceFilter } from "./TopicProminenceFilter";
 import { LandscapePlatformFilter } from "./LandscapePlatformFilter";
-import { SectionNav } from "./SectionNav";
+import { OverviewSubNav } from "../OverviewSubNav";
 import { TrendOverTime } from "../visibility/TrendOverTime";
 import { TrendWindowToggle } from "../visibility/TrendWindowToggle";
 import {
@@ -96,12 +95,13 @@ function capitalizeFirst(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-// Already-in-pp formatter for the Change column.
+// Already-in-pp formatter for the Change column. Renders as "pts"
+// (points) for consistency with the Visibility spoke's wording.
 function formatSignedPpRaw(v: number | null | undefined): string {
   if (v === null || v === undefined) return "—";
   const pts = Math.round(v);
-  if (pts === 0) return "0 pp";
-  return `${pts > 0 ? "+" : ""}${pts} pp`;
+  if (pts === 0) return "0 pts";
+  return `${pts > 0 ? "+" : ""}${pts} pts`;
 }
 
 // KPI polarity + tone helper. Mirrors the Visibility spoke's
@@ -327,6 +327,125 @@ function composeCompetitionWhatChanged({
     latestDate,
     priorDate,
   };
+}
+
+// SoV-tuned heatmap tiers for the Current Platform Ownership grid.
+// Same 3-tier + null pattern as the Visibility spoke's `heatTier`,
+// but the breakpoints differ — mention-rate's 60%/30% bands don't
+// translate to SoV (in a 5-competitor field even a dominant subject
+// sits around 25-40% share). Thresholds match the spec's recommended
+// SoV-appropriate breakpoints: dominant ≥40%, contested 15-40%,
+// marginal <15%. Color treatment mirrors Visibility for cross-spoke
+// consistency (warning amber on the loss cell, calm primary tint on
+// dominance), so a reader who learned the heatmap palette on one
+// spoke reads the other identically.
+const SOV_DOMINANT = 0.4;
+const SOV_MARGINAL = 0.15;
+type SovTier = "dominant" | "contested" | "marginal" | "none";
+function sovTier(sov: number | null): SovTier {
+  if (sov === null || !Number.isFinite(sov)) return "none";
+  if (sov >= SOV_DOMINANT) return "dominant";
+  if (sov < SOV_MARGINAL) return "marginal";
+  return "contested";
+}
+function sovTierStyle(tier: SovTier): {
+  background: string;
+  border: string;
+  textClass: string;
+} {
+  switch (tier) {
+    case "dominant":
+      return {
+        background: "color-mix(in oklab, var(--primary) 18%, transparent)",
+        border: "1px solid transparent",
+        textClass: "text-foreground/85 font-semibold",
+      };
+    case "contested":
+      return {
+        background: "color-mix(in oklab, var(--muted) 65%, transparent)",
+        border: "1px solid transparent",
+        textClass: "text-foreground/75 font-medium",
+      };
+    case "marginal":
+      return {
+        background: "color-mix(in oklab, var(--warning) 22%, transparent)",
+        border: "1px solid color-mix(in oklab, var(--warning) 55%, transparent)",
+        textClass: "text-warning font-bold",
+      };
+    case "none":
+      return {
+        background: "color-mix(in oklab, var(--muted) 35%, transparent)",
+        border:
+          "1px dashed color-mix(in oklab, var(--muted-foreground) 30%, transparent)",
+        textClass: "text-muted-foreground",
+      };
+  }
+}
+
+// Bottom-line summary for the Competition spoke's Vitals card.
+// Mirrors the Visibility spoke's `composeBottomLine` pattern: a
+// short data-derived paragraph that opens the section with the
+// punchline before the KPI tiles + heatmap fill in detail. Two
+// sentences: ranking + gap clause, then topic-win clause. Returns
+// null when there aren't enough entities to say anything useful;
+// callers fall back to a static line in that case.
+function composeCompetitiveBottomLine({
+  subjectName,
+  subjectEntity,
+  sortedBySovDesc,
+  competitiveRank,
+  competitiveSetSize,
+  topicsLed,
+  topicsTracked,
+}: {
+  subjectName: string;
+  subjectEntity: { name: string; sov: number; is_subject: boolean } | null;
+  sortedBySovDesc: { name: string; sov: number; is_subject: boolean }[];
+  competitiveRank: number | null;
+  competitiveSetSize: number;
+  topicsLed: number;
+  topicsTracked: number;
+}): string | null {
+  if (
+    !subjectEntity ||
+    competitiveRank === null ||
+    competitiveSetSize < 2
+  ) {
+    return null;
+  }
+  const sovPct = Math.round(subjectEntity.sov * 100);
+  const isLeader = competitiveRank === 1;
+  // Gap reference: when leading, look DOWN to the runner-up; when
+  // trailing, look UP to the leader. Either way the gap clause
+  // contextualizes how secure / how distant the subject sits.
+  const referenceEntity = isLeader
+    ? sortedBySovDesc[1]
+    : sortedBySovDesc[0];
+  let gapClause = "";
+  if (referenceEntity) {
+    const gapPts = Math.round(
+      Math.abs(subjectEntity.sov - referenceEntity.sov) * 100,
+    );
+    if (gapPts === 0) {
+      gapClause = isLeader
+        ? `, tied with ${referenceEntity.name}`
+        : `, tied with ${referenceEntity.name}`;
+    } else if (isLeader) {
+      gapClause = `, ahead of ${referenceEntity.name} by ${gapPts} pts`;
+    } else {
+      gapClause = `, trailing ${referenceEntity.name} by ${gapPts} pts`;
+    }
+  }
+  const rankClause = isLeader
+    ? `${subjectName} leads its ${competitiveSetSize}-way comparison set`
+    : `${subjectName} ranks #${competitiveRank} of ${competitiveSetSize} in the comparison set`;
+  const sentence1 = `${rankClause} with ${sovPct}% Share of Voice${gapClause}.`;
+  // Sentence 2 is optional — only render when topics are tracked.
+  // Skips the "0 of 0 topics" awkwardness on subjects without a
+  // topic leaderboard.
+  if (topicsTracked === 0) return sentence1;
+  const sentence2 = `Wins ${topicsLed} of ${topicsTracked} tracked topic${topicsTracked === 1 ? "" : "s"}.`;
+  return `${sentence1} ${sentence2}`;
 }
 
 export default async function CompetitionPage({
@@ -837,14 +956,28 @@ export default async function CompetitionPage({
         )[0]
       : null;
 
+  // KPI tile shape mirrors the Visibility spoke's `KpiCard` so both
+  // briefings render with one tile template. `value` is the headline
+  // (rendered text-2xl tabular-nums); `valueSuffix` appends a smaller
+  // qualifier inline (text-base, used by name-anchored tiles to fold
+  // context into the headline); `gaugeValue` (0..1) drives the bar
+  // fill — null = no gauge for tiles whose value isn't a fraction
+  // (rank, name). `gaugeBenchmark` stays null on this spoke (no
+  // per-tile benchmark data is shipped today; gauges render as
+  // fill-only, no tick), matching the Visibility spoke's behavior on
+  // tiles where the benchmark is null.
   type CompetitionKpi = {
     label: string;
     value: string;
+    valueSuffix?: string | null;
     helper: string;
     tooltip?: string;
     subtitle?: string;
     valueColor: string;
     polarity: KpiPolarity;
+    gaugeValue: number | null;
+    gaugeBenchmark: number | null;
+    caption: string | null;
     anchor?: string;
   };
   const competitionKpis: CompetitionKpi[] = [
@@ -860,6 +993,15 @@ export default async function CompetitionPage({
         "Where the subject sits among the comparison-set entities when sorted by Share of Voice (1 = highest share). The same set powers the Landscape and Ranking sections below.",
       valueColor: toneByThreshold(competitiveRank, "lower_better", 2, 5),
       polarity: "lower_better",
+      // Gauge fills to the subject's SoV (a 0..1 fraction) — gives a
+      // visual sense of "how much of the comparison-set voice does
+      // the subject own" alongside the ordinal rank in the headline.
+      gaugeValue: subjectEntity?.sov ?? null,
+      gaugeBenchmark: null,
+      caption:
+        competitiveSetSize > 0
+          ? `${Math.round((subjectEntity?.sov ?? 0) * 100)}% Share of Voice`
+          : null,
       anchor: "ranking-table",
     },
     {
@@ -871,8 +1013,8 @@ export default async function CompetitionPage({
           : topCompetitorGapPp === 0
             ? "tied on SoV"
             : topCompetitorGapPp > 0
-              ? `${topCompetitorGapPp} pp behind subject`
-              : `${Math.abs(topCompetitorGapPp)} pp ahead of subject`,
+              ? `${topCompetitorGapPp} pts behind subject`
+              : `${Math.abs(topCompetitorGapPp)} pts ahead of subject`,
       helper: "Comparison entity closest to the subject in Share of Voice.",
       tooltip:
         "The single entity in the comparison set whose Share of Voice is nearest the subject's. Subtitle shows the gap in percentage points and which side of the subject they sit on. A larger gap = more breathing room from your nearest rival.",
@@ -883,6 +1025,18 @@ export default async function CompetitionPage({
         0,
       ),
       polarity: "higher_better",
+      // Name-anchored tile (value is a competitor name) — skip the
+      // gauge entirely; the subtitle carries the numeric context.
+      gaugeValue: null,
+      gaugeBenchmark: null,
+      caption:
+        topCompetitorName === null || topCompetitorGapPp === null
+          ? null
+          : topCompetitorGapPp === 0
+            ? "tied on SoV"
+            : topCompetitorGapPp > 0
+              ? `${topCompetitorGapPp} pts behind subject`
+              : `${Math.abs(topCompetitorGapPp)} pts ahead of subject`,
       anchor: "landscape",
     },
     {
@@ -902,20 +1056,30 @@ export default async function CompetitionPage({
         0.25,
       ),
       polarity: "higher_better",
+      // Gauge fills to the topic-win fraction — a true 0..1 scale.
+      gaugeValue: topicWinRateFrac,
+      gaugeBenchmark: null,
+      caption:
+        topicWinRateFrac !== null
+          ? `${Math.round(topicWinRateFrac * 100)}% of tracked topics`
+          : null,
       anchor: "landscape",
     },
     {
       label: "Strongest Topic",
       value: strongestTopic
-        ? capitalizeFirst(strongestTopic.topic_label)
+        ? `${Math.round(strongestTopic.subject_rate * 100)}%`
         : "—",
-      subtitle:
-        strongestTopic !== null
-          ? `${Math.round(strongestTopic.subject_rate * 100)}% mention rate`
-          : undefined,
+      // Topic name folds into the headline as a smaller suffix —
+      // same pattern as Visibility's Weakest Topic tile, so the
+      // two spokes' name-anchored tiles render identically.
+      valueSuffix: strongestTopic
+        ? capitalizeFirst(strongestTopic.topic_label)
+        : null,
+      subtitle: undefined,
       helper: "Topic where the subject's mention rate is highest.",
       tooltip:
-        "Tracked topic where the subject's mention rate is highest in this snapshot. The subtitle shows that mention rate. Useful as a positive anchor when the rest of the briefing skews negative.",
+        "Tracked topic where the subject's mention rate is highest in this snapshot. The headline shows the rate; the topic name follows as a smaller qualifier. Useful as a positive anchor when the rest of the briefing skews negative.",
       // Tone reflects the strongest topic's absolute mention rate
       // — even the "best" topic is worth flagging if it's still
       // below 40%. Mirrors the thresholds the Visibility spoke
@@ -927,9 +1091,29 @@ export default async function CompetitionPage({
         0.4,
       ),
       polarity: "higher_better",
+      // Name-anchored tile (the topic name carries the read) — skip
+      // the gauge, matching Visibility's Weakest Topic shape.
+      gaugeValue: null,
+      gaugeBenchmark: null,
+      caption: null,
       anchor: "landscape",
     },
   ];
+
+  // Vitals bottom-line text — composed once here so the briefing
+  // card renders a single data-derived sentence above the KPI tiles,
+  // matching the Visibility spoke's BOTTOM LINE eyebrow + paragraph
+  // pattern. Returns null on subjects with no comparison set; the
+  // render path falls back to a static line.
+  const competitiveBottomLine = composeCompetitiveBottomLine({
+    subjectName: data.subject_name,
+    subjectEntity,
+    sortedBySovDesc,
+    competitiveRank,
+    competitiveSetSize,
+    topicsLed,
+    topicsTracked,
+  });
 
   // Inline advisory used on sections that genuinely CAN'T scope on
   // the active filters (Trend chart's competitor lines, Co-Mentions
@@ -963,21 +1147,59 @@ export default async function CompetitionPage({
           }
         />
 
-        <main className="flex-1 px-4 md:px-12 xl:pr-44 py-6 space-y-12 max-w-[1280px] w-full mx-auto">
-          <Link
-            href={`/subjects/${subjectId}`}
-            className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground hover:text-foreground transition-colors -mb-10"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-            Back to {data.subject_name} Overview
-          </Link>
+        {/* Horizontal sticky sub-nav pinned directly under the
+            Header — same component the Visibility spoke uses. Hosts
+            both the section jump-links (left) and the page-level
+            filter dropdowns (right, via OverviewSubNav's optional
+            `right` slot) on a single sticky row, so navigation and
+            scope state ride together as the user scrolls. Replaces
+            the prior right-rail SectionNav so the page reads top-to-
+            bottom without a competing rail on the side. */}
+        {hasCompetitive && (
+          <OverviewSubNav
+            items={[
+              // "Vitals" leads the rail to mirror the Visibility +
+              // Overview spokes — the first item always points at
+              // the band that holds the executive summary + KPI
+              // tiles. Subsequent items follow the page's reading
+              // order; conditional sections (Trend needs ≥2 weeks,
+              // Co-Mentions needs subject-mention responses) are
+              // included unconditionally so the rail stays stable
+              // across snapshots, even though individual sections
+              // may render empty-state cards.
+              { id: "vitals", label: "Vitals", num: "01" },
+              { id: "trend", label: "Trend", num: "02" },
+              { id: "landscape", label: "Landscape", num: "03" },
+              { id: "ranking-table", label: "Ranking", num: "04" },
+              { id: "co-mentions", label: "Co-Mentions", num: "05" },
+            ]}
+            right={
+              <>
+                <TopicProminenceFilter
+                  inline
+                  topics={data.topic_leaderboard.map((t) => ({
+                    label: t.topic_label,
+                  }))}
+                />
+                <LandscapePlatformFilter
+                  inline
+                  platforms={landscapePlatforms.map((p) => ({
+                    slug: p.slug,
+                    name: p.name,
+                  }))}
+                />
+              </>
+            }
+          />
+        )}
 
+        <main className="flex-1 px-4 md:px-12 py-6 space-y-10 max-w-[1280px] w-full mx-auto">
           {/* Page H2 + subtitle removed at request. Sidebar's active
-              "Competitive Visibility" pill and the breadcrumb above
-              carry page identity; section eyebrows open content. */}
+              "Competitive Visibility" pill + the sub-nav above carry
+              page identity; section eyebrows open content. */}
 
           {!hasCompetitive ? (
-            <Card className="p-6 md:p-8 text-[13.5px] text-muted-foreground">
+            <Card className="p-6 border-border/60 text-[13.5px] text-muted-foreground">
               No competitive set data in this snapshot yet.
             </Card>
           ) : (
@@ -990,54 +1212,114 @@ export default async function CompetitionPage({
                   with four RELATIVE KPIs scoped to the comparison
                   set, so a reader switching between the two pages
                   sees the same hero layout but a different read. */}
-              <section>
-                <Card className="p-6 md:p-8">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* ── 01. VITALS (Competitive Briefing) ─────────────── */}
+              {/* id="vitals" matches the first sub-nav item ("01
+                  Vitals") so the rail scrolls to this band; same
+                  scroll-mt-28 the other sections use. Card chrome
+                  mirrors the Visibility spoke's Vitals card exactly:
+                  p-6 md:p-7 + border-border/60 + the subtle primary-
+                  tinted gradient overlay so the two heroes read as
+                  the same surface across spokes. */}
+              <section id="vitals" className="scroll-mt-28">
+                <Card className="relative overflow-hidden p-6 md:p-7 border-border/60">
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, color-mix(in oklab, var(--primary) 6%, transparent), transparent 55%)",
+                    }}
+                    aria-hidden
+                  />
+                  <div className="relative">
+                    <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-primary/80 mb-2">
+                      Bottom Line
+                    </div>
+                    <p className="text-[15.5px] leading-relaxed text-foreground/90 max-w-3xl">
+                      {competitiveBottomLine ??
+                        `${data.subject_name}'s competitive position across AI answers in this snapshot.`}
+                    </p>
+                    {data.meta.n_platforms > 0 && (
+                      <p className="mt-2 text-[12.5px] text-muted-foreground">
+                        Snapshot covers {data.meta.n_platforms} AI platform
+                        {data.meta.n_platforms === 1 ? "" : "s"}.
+                      </p>
+                    )}
+                  </div>
+                  <div className="relative mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
                     {competitionKpis.map((k) => {
+                      // Same fill-color derivation as Visibility — the
+                      // gauge color tracks the value tone so the bar
+                      // and the headline number agree visually.
+                      const gaugeFill =
+                        k.valueColor === "text-success"
+                          ? "var(--success)"
+                          : k.valueColor === "text-warning"
+                            ? "var(--warning)"
+                            : "var(--primary)";
                       const tileInner = (
                         <>
                           <div className="flex items-start justify-between gap-2">
-                            <span className="text-[12.5px] font-semibold uppercase tracking-[0.04em] text-foreground/65">
-                              {k.label}
-                            </span>
+                            <div className="min-w-0">
+                              <div className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
+                                {k.label}
+                              </div>
+                            </div>
                             <KpiTooltipIcon
                               text={k.tooltip ?? k.helper}
                               align="right"
                             />
                           </div>
-                          <div className="mt-3 flex items-baseline gap-2">
+                          <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
                             <span
-                              className={`text-[28px] font-semibold leading-none tracking-tight tabular-nums ${k.valueColor}`}
+                              className={`text-2xl font-semibold tracking-tight tabular-nums leading-tight ${k.valueColor}`}
                             >
                               {k.value}
                             </span>
+                            {k.valueSuffix && (
+                              <span
+                                className={`text-base font-medium leading-tight ${k.valueColor}`}
+                                title={k.valueSuffix}
+                              >
+                                {k.valueSuffix}
+                              </span>
+                            )}
                           </div>
-                          {k.subtitle && (
+                          {k.gaugeValue !== null &&
+                            Number.isFinite(k.gaugeValue) && (
+                              <div className="mt-3">
+                                <KpiGauge
+                                  value={k.gaugeValue}
+                                  benchmark={k.gaugeBenchmark}
+                                  fillColor={gaugeFill}
+                                  benchmarkLabel={k.caption ?? undefined}
+                                />
+                              </div>
+                            )}
+                          {/* Standalone caption only when the gauge
+                              isn't consuming it (no-gauge tiles like
+                              Top Competitor / Strongest Topic). */}
+                          {k.caption && k.gaugeValue === null && (
                             <div
-                              className="mt-2 line-clamp-2 text-[12.5px] leading-snug text-foreground/70"
-                              title={k.subtitle}
+                              className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug line-clamp-2"
+                              title={k.caption}
                             >
-                              {k.subtitle}
+                              {k.caption}
                             </div>
                           )}
-                          <div className="mt-auto pt-3 space-y-1 text-[11.5px] leading-snug text-muted-foreground">
-                            <div>{k.helper}</div>
-                            <div className="text-foreground/55">
-                              {k.polarity === "higher_better"
-                                ? "↑ higher is better"
-                                : "↓ lower is better"}
-                            </div>
-                          </div>
                         </>
                       );
+                      // Tile chrome matches Visibility's: bg-muted/40
+                      // rounded-md p-4. Anchored tiles wrap in an
+                      // anchor with focus-visible ring; static tiles
+                      // are plain divs.
                       const baseClasses =
-                        "flex h-full flex-col rounded-lg border border-border/80 bg-background/60 p-5";
+                        "flex h-full flex-col rounded-md bg-muted/40 p-4";
                       if (k.anchor) {
                         return (
                           <a
                             key={k.label}
                             href={`#${k.anchor}`}
-                            className={`${baseClasses} transition-colors hover:border-primary/40 hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}
+                            className={`${baseClasses} group transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm`}
                           >
                             {tileInner}
                           </a>
@@ -1058,100 +1340,163 @@ export default async function CompetitionPage({
                       KPI tiles above lead the read. The standalone
                       Platform Ownership section was retired in favor
                       of this in-briefing placement. */}
-                  {hasOwnershipData && (
-                    <div className="mt-8 border-t border-border/50 pt-6">
-                      <div className="mb-3">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 inline-flex items-center gap-1">
-                          Current Platform Ownership
-                          <KpiTooltipIcon
-                            text="Share of Voice for each comparison-set entity on each AI platform — share of that platform's monitored responses where the entity was mentioned. Darker cells mean stronger coverage."
-                            align="left"
-                          />
+                  {hasOwnershipData && (() => {
+                    // Tiered cells (dominant ≥40% · contested 15-40%
+                    // · marginal <15%) replace the prior continuous
+                    // alpha ramp — same visual logic as the Visibility
+                    // spoke's Current Platform Snapshot, just with
+                    // SoV-tuned thresholds since SoV distributions
+                    // sit lower than mention rates. Auto-summary line
+                    // below restates the read in words so color
+                    // isn't the sole carrier (accessibility + faster
+                    // scan).
+                    const subjectRow = ownershipRows.find(
+                      (e) => e.is_subject,
+                    );
+                    const subjectName = subjectRow?.name ?? null;
+                    const subjectMarginalCells = subjectName
+                      ? ownershipCells
+                          .filter(
+                            (c) =>
+                              c.entity_name === subjectName &&
+                              sovTier(c.sov) === "marginal",
+                          )
+                          .map((c) => ({
+                            platformName:
+                              ownershipPlatforms.find(
+                                (p) => p.slug === c.platform_slug,
+                              )?.name ?? c.platform_slug,
+                            sov: c.sov,
+                          }))
+                          .sort((a, b) => a.sov - b.sov)
+                      : [];
+                    const summary = (() => {
+                      if (!subjectName) {
+                        return "Subject not in the platform-ownership matrix.";
+                      }
+                      if (subjectMarginalCells.length === 0) {
+                        return `${subjectName} holds at least contested share on every covered platform.`;
+                      }
+                      if (subjectMarginalCells.length === 1) {
+                        const g = subjectMarginalCells[0];
+                        return `One marginal platform: ${subjectName} holds only ${Math.round(
+                          g.sov * 100,
+                        )}% SoV on ${g.platformName}.`;
+                      }
+                      const lowest = subjectMarginalCells[0];
+                      return `${subjectMarginalCells.length} marginal platforms — weakest: ${lowest.platformName} (${Math.round(
+                        lowest.sov * 100,
+                      )}% SoV).`;
+                    })();
+                    return (
+                      <div className="relative mt-8 border-t border-border/50 pt-6">
+                        <div className="mb-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 inline-flex items-center gap-1">
+                            Current Platform Ownership
+                            <KpiTooltipIcon
+                              text="Share of Voice for each comparison-set entity on each AI platform. Amber cells flag marginal share (<15%); calm cells are at dominant share (≥40%)."
+                              align="left"
+                            />
+                          </div>
+                          <p className="mt-1 text-[12.5px] text-muted-foreground">
+                            Current Share of Voice by entity and AI platform.
+                          </p>
                         </div>
-                        <p className="mt-1 text-[12.5px] text-muted-foreground">
-                          Current Share of Voice by entity and AI platform.
+                        <div className="overflow-x-auto">
+                          <div
+                            className="grid gap-1 min-w-fit"
+                            style={{
+                              gridTemplateColumns: `minmax(140px, auto) repeat(${ownershipPlatforms.length}, minmax(56px, 1fr))`,
+                            }}
+                          >
+                            <div />
+                            {ownershipPlatforms.map((p) => (
+                              // Two-element nesting: outer flex owns
+                              // the reserved height + alignment, inner
+                              // span owns the line-clamp. Combining
+                              // flex + line-clamp-* on one element
+                              // collides (line-clamp forces
+                              // display:-webkit-box).
+                              <div
+                                key={p.slug}
+                                className="flex items-end justify-center px-1 min-h-[26px]"
+                                title={p.name}
+                              >
+                                <span className="line-clamp-2 text-center text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground/60">
+                                  {p.name}
+                                </span>
+                              </div>
+                            ))}
+                            {ownershipRows.map((e) => (
+                              <div
+                                key={e.name}
+                                style={{ display: "contents" }}
+                              >
+                                <div
+                                  className={`self-center pr-2 text-[12px] ${
+                                    e.is_subject
+                                      ? "font-semibold text-foreground"
+                                      : "text-foreground/80"
+                                  }`}
+                                >
+                                  {e.name}
+                                </div>
+                                {ownershipPlatforms.map((p) => {
+                                  const cell = ownershipCells.find(
+                                    (c) =>
+                                      c.platform_slug === p.slug &&
+                                      c.entity_name === e.name,
+                                  );
+                                  const sov = cell?.sov ?? null;
+                                  const tier = sovTier(sov);
+                                  const ts = sovTierStyle(tier);
+                                  const titleLabel = `${p.name} × ${e.name}: ${
+                                    sov === null
+                                      ? "no data"
+                                      : `${Math.round(sov * 100)}% (${cell?.n_appearances ?? 0}/${p.n_responses})`
+                                  }`;
+                                  return (
+                                    <div
+                                      key={p.slug}
+                                      className={`relative flex h-7 items-center justify-center rounded-sm ${
+                                        e.is_subject
+                                          ? "ring-1 ring-primary/30"
+                                          : ""
+                                      }`}
+                                      style={{
+                                        background: ts.background,
+                                        border: ts.border,
+                                      }}
+                                      title={titleLabel}
+                                    >
+                                      <span
+                                        className={`text-[10.5px] tabular-nums ${ts.textClass}`}
+                                      >
+                                        {sov === null
+                                          ? "—"
+                                          : `${Math.round(sov * 100)}%`}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <p className="mt-3 text-[12.5px] leading-relaxed text-foreground/80">
+                          {summary}
                         </p>
                       </div>
-                      <div className="overflow-x-auto">
-                        <div
-                          className="grid gap-1.5 min-w-fit"
-                          style={{
-                            gridTemplateColumns: `minmax(140px, auto) repeat(${ownershipPlatforms.length}, minmax(56px, 1fr))`,
-                          }}
-                        >
-                          <div />
-                          {ownershipPlatforms.map((p) => (
-                            <div
-                              key={p.slug}
-                              className="px-1 text-center text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground/60"
-                            >
-                              {p.name}
-                            </div>
-                          ))}
-                          {ownershipRows.map((e) => (
-                            <div
-                              key={e.name}
-                              style={{ display: "contents" }}
-                            >
-                              <div
-                                className={`self-center pr-2 text-[12px] ${
-                                  e.is_subject
-                                    ? "font-semibold text-foreground"
-                                    : "text-foreground/80"
-                                }`}
-                              >
-                                {e.name}
-                              </div>
-                              {ownershipPlatforms.map((p) => {
-                                const cell = ownershipCells.find(
-                                  (c) =>
-                                    c.platform_slug === p.slug &&
-                                    c.entity_name === e.name,
-                                );
-                                const sov = cell?.sov ?? 0;
-                                const bgAlphaPct = Math.round(
-                                  (0.3 + sov * 0.45) * 100,
-                                );
-                                const titleLabel = `${p.name} × ${e.name}: ${Math.round(sov * 100)}% (${cell?.n_appearances ?? 0}/${p.n_responses})`;
-                                return (
-                                  <div
-                                    key={p.slug}
-                                    className={`relative flex h-8 items-center justify-center rounded-sm ${
-                                      e.is_subject
-                                        ? "ring-1 ring-primary/30"
-                                        : ""
-                                    }`}
-                                    style={{
-                                      background: `color-mix(in oklab, var(--primary) ${bgAlphaPct}%, transparent)`,
-                                    }}
-                                    title={titleLabel}
-                                  >
-                                    <span
-                                      className={`text-[10.5px] font-semibold tabular-nums ${
-                                        sov > 0.55
-                                          ? "text-background"
-                                          : "text-foreground"
-                                      }`}
-                                    >
-                                      {Math.round(sov * 100)}%
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </Card>
               </section>
 
               {/* ── 01. TREND ─────────────────────────────────────── */}
               {hasTrend && (
-                <section id="trend" className="scroll-mt-20">
+                <section id="trend" className="scroll-mt-28">
                   <SectionTitle
-                    eyebrow="01 · Trend"
+                    eyebrow="Trend"
                     title="Competitive Visibility Over Time"
                     description={`How often ${data.subject_name} and comparison entities appear in AI answers over time.`}
                     className="mb-5"
@@ -1186,7 +1531,7 @@ export default async function CompetitionPage({
                       card. Two stacked bordered surfaces felt heavy;
                       one card with an internal divider feels more
                       cohesive. */}
-                  <Card className="p-6 md:p-8">
+                  <Card className="p-6 border-border/60">
                     <TrendOverTime
                       subjectName={data.subject_name}
                       trajectoryWeeks={trendWeeks}
@@ -1195,6 +1540,13 @@ export default async function CompetitionPage({
                       helperText="Mention rate shows the share of AI answers that mentioned each entity in the tracked prompt set."
                       overlayOpacity={0.5}
                       height={340}
+                      // Axis fits the subject's range only so
+                      // Newsom's movement reads cleanly even with
+                      // 6 competitor overlays spanning the lower
+                      // half of the chart. Competitor lines still
+                      // render — they just don't stretch the axis
+                      // to a flat-looking 0-100%.
+                      subjectOnlyAxis
                     />
                     {(() => {
                       const result = composeCompetitionWhatChanged({
@@ -1228,19 +1580,25 @@ export default async function CompetitionPage({
                             ? `What changed · since ${latestStr}`
                             : "What changed";
                       return (
-                        <div className="mt-6 border-t border-border/60 pt-5">
-                          <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+                        // What-changed reads as the chart's own
+                        // footer rather than a sibling section: no
+                        // top border, no generous gap. Text dropped
+                        // to 11.5px (same size as the legend chips)
+                        // so the strip reads as chart chrome. Same
+                        // shape as the Visibility spoke's footer.
+                        <div className="mt-3">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
                             {eyebrow}
                           </div>
                           {result.deltas.length > 0 ? (
-                            <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2.5">
+                            <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5">
                               {result.deltas.map((d) => (
                                 <li
                                   key={`${d.kind}:${d.label}`}
-                                  className="inline-flex max-w-full items-baseline gap-2"
+                                  className="inline-flex max-w-full items-baseline gap-1.5"
                                 >
                                   <span
-                                    className={`max-w-[260px] truncate text-[13px] ${
+                                    className={`max-w-[220px] truncate text-[11.5px] ${
                                       d.kind === "overall"
                                         ? "font-medium text-foreground"
                                         : "text-foreground/80"
@@ -1250,7 +1608,7 @@ export default async function CompetitionPage({
                                     {d.label}
                                   </span>
                                   <span
-                                    className={`shrink-0 text-[13px] font-semibold tabular-nums ${deltaToneClass(
+                                    className={`shrink-0 text-[11.5px] font-semibold tabular-nums ${deltaToneClass(
                                       d.deltaPp,
                                     )}`}
                                   >
@@ -1260,7 +1618,7 @@ export default async function CompetitionPage({
                               ))}
                             </ul>
                           ) : (
-                            <p className="mt-3 text-[13.5px] leading-relaxed text-foreground/85">
+                            <p className="mt-2 text-[11.5px] leading-relaxed text-foreground/80">
                               {result.fallbackCopy}
                             </p>
                           )}
@@ -1271,9 +1629,9 @@ export default async function CompetitionPage({
                 </section>
               )}
               {/* ── 02. LANDSCAPE ─────────────────────────────────── */}
-              <section id="landscape" className="scroll-mt-20">
+              <section id="landscape" className="scroll-mt-28">
                 <SectionTitle
-                  eyebrow="02 · Landscape"
+                  eyebrow="Landscape"
                   title="Competitive Visibility Landscape"
                   description={(() => {
                     const parts: string[] = [];
@@ -1302,7 +1660,7 @@ export default async function CompetitionPage({
                   </div>
                 )}
                 <div className="grid gap-5 lg:grid-cols-2">
-                  <Card className="p-5 md:p-6">
+                  <Card className="p-6 border-border/60">
                     <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
                       Competitive Share of Voice
                     </div>
@@ -1321,7 +1679,7 @@ export default async function CompetitionPage({
                     />
                   </Card>
 
-                  <Card className="p-5 md:p-6">
+                  <Card className="p-6 border-border/60">
                     <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
                       Visibility vs. Prominence
                     </div>
@@ -1339,14 +1697,14 @@ export default async function CompetitionPage({
               </section>
 
               {/* ── 03. RANKING TABLE ───────────────────────────── */}
-              <section id="ranking-table" className="scroll-mt-20">
+              <section id="ranking-table" className="scroll-mt-28">
                 <SectionTitle
-                  eyebrow="03 · Ranking"
+                  eyebrow="Ranking"
                   title="Competitive Ranking Table"
                   description="Competitive prominence combines visibility, average answer position, and first-mention rate into a single comparison score."
                   className="mb-5"
                 />
-                <Card className="p-5 md:p-6">
+                <Card className="p-6 border-border/60">
                   {/* No `overflow-x-auto` wrapper — the table already
                       fits at common card widths after the column
                       headers were tightened to short labels (Avg.
@@ -1380,7 +1738,7 @@ export default async function CompetitionPage({
                       return (
                         <table className="w-full text-left">
                           <thead>
-                            <tr className="border-b border-border/60 text-[10px] uppercase tracking-[0.06em] text-foreground/65">
+                            <tr className="border-b border-border/60 text-[10.5px] uppercase tracking-[0.06em] text-foreground/65">
                               <th className="py-3 pr-4 font-semibold">
                                 <span className="inline-flex items-center gap-1">
                                   Entity
@@ -1447,7 +1805,7 @@ export default async function CompetitionPage({
                                 <span className="inline-flex items-center justify-end gap-1">
                                   Trend
                                   <KpiTooltipIcon
-                                    text="Direction across the tracked window: Rising = +10 pp or more, Declining = -10 pp or worse, Stable = within ±10 pp, Insufficient data = fewer than two measured snapshots."
+                                    text="Direction across the tracked window: Rising = +10 pts or more, Declining = -10 pts or worse, Stable = within ±10 pts, Insufficient data = fewer than two measured snapshots."
                                     align="right"
                                     direction="below"
                                   />
@@ -1489,7 +1847,7 @@ export default async function CompetitionPage({
                               return (
                                 <tr
                                   key={c.name}
-                                  className={`border-b border-border/30 last:border-0 text-[13.5px] ${c.is_subject ? "bg-primary/[0.04]" : ""}`}
+                                  className={`border-b border-border/30 last:border-0 text-[14px] ${c.is_subject ? "bg-primary/[0.04]" : ""}`}
                                 >
                                   <td className="py-3.5 pr-4 font-medium text-foreground">
                                     <span className="inline-flex items-center gap-2">
@@ -1561,9 +1919,9 @@ export default async function CompetitionPage({
                   set `hasWinsLossesData` from that source and the
                   section (and its jump link) will surface. */}
               {hasWinsLossesData && (
-                <section id="wins-losses" className="scroll-mt-20">
+                <section id="wins-losses" className="scroll-mt-28">
                   <SectionTitle
-                    eyebrow="04 · Wins & Losses"
+                    eyebrow="Wins & Losses"
                     title="Competitive Wins & Losses"
                     description={`Head-to-head comparisons showing where ${data.subject_name} appears more often or more prominently than each competitor.`}
                     className="mb-5"
@@ -1573,9 +1931,9 @@ export default async function CompetitionPage({
               )}
 
               {/* ── 05. CO-MENTIONS ──────────────────────────────── */}
-              <section id="co-mentions" className="scroll-mt-20">
+              <section id="co-mentions" className="scroll-mt-28">
                 <SectionTitle
-                  eyebrow="05 · Co-Mentions"
+                  eyebrow="Co-Mentions"
                   title={`Entities Mentioned Alongside ${data.subject_name}`}
                   description={`Figures that appear in the same AI answers as ${data.subject_name}.`}
                 />
@@ -1593,7 +1951,7 @@ export default async function CompetitionPage({
                   </div>
                 )}
                 {hasCoMentions ? (
-                  <Card className="p-5 md:p-6">
+                  <Card className="p-6 border-border/60">
                     <p className="mb-4 max-w-3xl text-[13px] leading-relaxed text-foreground/75">
                       Co-mentions show which figures appear in the
                       same AI answers as {data.subject_name}. They do
@@ -1645,7 +2003,7 @@ export default async function CompetitionPage({
                     </div>
                   </Card>
                 ) : (
-                  <Card className="p-5 md:p-6 text-[13px] text-muted-foreground">
+                  <Card className="p-6 border-border/60 text-[13px] text-muted-foreground">
                     Not enough subject-mention responses in this snapshot
                     to compute co-mentions.
                   </Card>
@@ -1653,164 +2011,30 @@ export default async function CompetitionPage({
               </section>
             </>
           )}
+
+          {/* Methodology footer — matches the Visibility + Overview
+              spokes' terminal footer so every spoke ends with the
+              same data-provenance line + product tagline. */}
+          <footer className="mt-12 pt-6 pb-8 border-t border-border/40">
+            <p className="text-center text-[11.5px] text-foreground/70 leading-relaxed">
+              Based on{" "}
+              <span className="font-semibold text-foreground/80 tabular-nums">
+                {data.meta.n_responses}
+              </span>{" "}
+              AI responses across{" "}
+              <span className="font-semibold text-foreground/80">
+                {data.meta.n_platforms} platforms
+              </span>
+              .{" "}
+              <a href="#" className="text-primary hover:underline">
+                Methodology →
+              </a>
+            </p>
+            <p className="mt-2 text-center text-[11px] text-muted-foreground">
+              Brand Visibility · AI Narrative Intelligence for Public Affairs
+            </p>
+          </footer>
         </main>
-
-        {hasCompetitive && (
-          <SectionNav
-            hasWinsLossesData={hasWinsLossesData}
-            summary={(() => {
-              // Competitive Summary card — four executive-read
-              // takeaways computed from the same filtered data the
-              // page below shows. Each row falls back gracefully
-              // when the underlying metric can't be computed.
-              type SummaryRow = { label: string; value: string };
-
-              // Visibility leader: highest current SoV in the
-              // active scope.
-              const sortedBySov = [...landscapeEntities].sort(
-                (a, b) => b.sov - a.sov,
-              );
-              const visibilityLeader = sortedBySov[0]?.name ?? "—";
-
-              // Biggest gainer: largest positive change in mention
-              // rate across the trend window.
-              const deltaForName = (name: string): number | null => {
-                if (name === data.subject_name) {
-                  return changeFromTrajectory(trendSubjectValues);
-                }
-                const t = trendCompetitorTrajectories.find(
-                  (c) => c.name === name,
-                );
-                return t ? changeFromTrajectory(t.mention_rate) : null;
-              };
-              const movers = landscapeEntities
-                .map((c) => ({
-                  name: c.name,
-                  delta: deltaForName(c.name),
-                }))
-                .filter(
-                  (m): m is { name: string; delta: number } =>
-                    m.delta !== null && Number.isFinite(m.delta),
-                );
-              const biggestGainer = [...movers]
-                .filter((m) => m.delta > 0)
-                .sort((a, b) => b.delta - a.delta)[0];
-              const gainerValue = biggestGainer
-                ? `${biggestGainer.name} +${Math.round(biggestGainer.delta)} pp`
-                : "Not enough history";
-
-              // Closest competitor: prominence-score nearest to
-              // subject's. Use the indexFor formula from the table.
-              const indexFor = (e: {
-                sov: number;
-                avg_rank: number | null;
-                first_mention_rate: number;
-              }): number => {
-                const sov = e.sov;
-                const fm = e.first_mention_rate;
-                const rankScore =
-                  e.avg_rank === null || !Number.isFinite(e.avg_rank)
-                    ? 0
-                    : Math.max(
-                        0,
-                        1 - (Math.max(1, e.avg_rank) - 1) / 9,
-                      );
-                return Math.round(((sov + fm + rankScore) / 3) * 100);
-              };
-              const subjectEntity = landscapeEntities.find(
-                (e) => e.is_subject,
-              );
-              const subjectScore = subjectEntity
-                ? indexFor(subjectEntity)
-                : null;
-              let closestCompetitorName = "—";
-              if (subjectScore !== null) {
-                const competitors = landscapeEntities
-                  .filter((e) => !e.is_subject)
-                  .map((e) => ({ name: e.name, score: indexFor(e) }))
-                  .sort(
-                    (a, b) =>
-                      Math.abs(a.score - subjectScore) -
-                      Math.abs(b.score - subjectScore),
-                  );
-                if (competitors[0]) {
-                  closestCompetitorName = competitors[0].name;
-                }
-              }
-
-              const rows: SummaryRow[] = [
-                {
-                  label: "Visibility leader",
-                  value: visibilityLeader,
-                },
-                { label: "Biggest gainer", value: gainerValue },
-                {
-                  label: "Closest competitor",
-                  value:
-                    closestCompetitorName === "—"
-                      ? "Not enough data"
-                      : closestCompetitorName,
-                },
-              ];
-
-              // SummaryRow pattern — muted 11px label above a
-              // semibold 14px value, spaced for at-a-glance scan in
-              // the narrow right rail. Truncates long entity names
-              // gracefully and surfaces the full string via `title`.
-              const SummaryRow = ({
-                label,
-                value,
-              }: {
-                label: string;
-                value: string;
-              }) => (
-                <div className="space-y-1">
-                  <div className="text-[11px] leading-none text-muted-foreground">
-                    {label}
-                  </div>
-                  <div
-                    className="truncate text-sm font-semibold leading-snug text-foreground"
-                    title={value}
-                  >
-                    {value}
-                  </div>
-                </div>
-              );
-
-              return (
-                <div>
-                  <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Competitive Summary
-                  </div>
-                  <div className="space-y-4">
-                    {rows.map((r) => (
-                      <SummaryRow
-                        key={r.label}
-                        label={r.label}
-                        value={r.value}
-                      />
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-            filters={
-              <>
-                <TopicProminenceFilter
-                  topics={data.topic_leaderboard.map((t) => ({
-                    label: t.topic_label,
-                  }))}
-                />
-                <LandscapePlatformFilter
-                  platforms={landscapePlatforms.map((p) => ({
-                    slug: p.slug,
-                    name: p.name,
-                  }))}
-                />
-              </>
-            }
-          />
-        )}
       </div>
     </div>
   );

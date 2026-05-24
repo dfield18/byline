@@ -354,7 +354,7 @@ function buildGapBottomLine(
     // a real (sub-rounding) gap exists. Server bottom_line takes
     // over via the gapBottomLine ?? data.bottom_line fallback.
     if (otherPct === weakestPct) return null;
-    return `AI mentions ${subjectName} in ${otherPct}% of answers about ${other.label} — but only ${weakestPct}% on ${weakest.label}.`;
+    return `AI mentions ${subjectName} ${formatStrongClause(otherPct, other.label)} — but ${formatWeakestClause(weakestPct, weakest.label)}.`;
   }
 
   // Filter empty/whitespace labels out of the comparator before
@@ -386,7 +386,22 @@ function buildGapBottomLine(
   // other tracked topics" is grammatical but stilted).
   const isPureCount = /^\d+ other tracked topics/.test(comparator);
   const aboutPhrase = isPureCount ? "every other tracked topic" : comparator;
-  return `AI mentions ${subjectName} in ${meanOthersPct}% of answers about ${aboutPhrase} — but only ${weakestPct}% on ${weakest.label}.`;
+  return `AI mentions ${subjectName} ${formatStrongClause(meanOthersPct, aboutPhrase)} — but ${formatWeakestClause(weakestPct, weakest.label)}.`;
+}
+
+// Phrasing helpers for the bottom-line verdict. Replace the rounded
+// percent with a natural-English equivalent when one exists, so a
+// "100%/50%" pair reads as "every answer / only half" instead of
+// the more clinical numeric form. Other percentages keep the numeric
+// shape so the data still leads the sentence; the swaps only fire
+// on values where the English equivalent is exact and unambiguous.
+function formatStrongClause(pct: number, comparator: string): string {
+  if (pct === 100) return `in every answer about ${comparator}`;
+  return `in ${pct}% of answers about ${comparator}`;
+}
+function formatWeakestClause(pct: number, label: string): string {
+  if (pct === 50) return `only half on ${label}`;
+  return `only ${pct}% on ${label}`;
 }
 
 // Plain-English list joiner: "A", "A and B", "A, B, and C", etc.
@@ -1193,7 +1208,7 @@ function TrajectoryStrip({
               latestValue !== null &&
               Number.isFinite(latestValue) &&
               m.benchmark !== null && (
-                <div className="mt-3 space-y-1.5">
+                <div className="mt-3">
                   <KpiGauge
                     value={latestValue}
                     benchmark={m.benchmark}
@@ -1204,12 +1219,8 @@ function TrajectoryStrip({
                           ? "var(--warning)"
                           : "var(--primary)"
                     }
+                    benchmarkLabel={m.benchmarkCaption ?? undefined}
                   />
-                  {m.benchmarkCaption && (
-                    <div className="text-[11px] text-muted-foreground leading-snug">
-                      {m.benchmarkCaption}
-                    </div>
-                  )}
                 </div>
               )}
             <div className="mt-auto pt-3">

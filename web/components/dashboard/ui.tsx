@@ -71,6 +71,7 @@ export function KpiGauge({
   value,
   benchmark,
   fillColor,
+  benchmarkLabel,
 }: {
   // 0..1 fraction. Out-of-range values are clamped defensively.
   value: number;
@@ -81,6 +82,11 @@ export function KpiGauge({
   // --primary). Derived by the caller from the KPI's tone so the
   // gauge and the headline value color agree.
   fillColor: string;
+  // When provided alongside a benchmark, an inline legend is rendered
+  // beneath the bar: a tick glyph that mirrors the bar's tick + the
+  // label text. Makes the tick's meaning explicit instead of requiring
+  // a separate hover or external caption to decode it.
+  benchmarkLabel?: string;
 }) {
   const safeValue = Math.max(0, Math.min(1, value));
   const safeBenchmark =
@@ -88,22 +94,33 @@ export function KpiGauge({
       ? Math.max(0, Math.min(1, benchmark))
       : null;
   return (
-    <div className="relative h-1.5 w-full rounded-full bg-muted">
-      <div
-        className="h-full rounded-full"
-        style={{
-          width: `${safeValue * 100}%`,
-          background: fillColor,
-          opacity: 0.85,
-        }}
-      />
-      {safeBenchmark !== null && (
+    <div>
+      <div className="relative h-1.5 w-full rounded-full bg-muted">
         <div
-          aria-hidden
-          className="absolute top-1/2 -translate-y-1/2 h-3 w-[2px] rounded-sm bg-foreground/55"
-          style={{ left: `calc(${safeBenchmark * 100}% - 1px)` }}
-          title={`Subject-set average: ${Math.round(safeBenchmark * 100)}%`}
+          className="h-full rounded-full"
+          style={{
+            width: `${safeValue * 100}%`,
+            background: fillColor,
+            opacity: 0.85,
+          }}
         />
+        {safeBenchmark !== null && (
+          <div
+            aria-hidden
+            className="absolute top-1/2 -translate-y-1/2 h-3 w-[2px] rounded-sm bg-foreground/55"
+            style={{ left: `calc(${safeBenchmark * 100}% - 1px)` }}
+            title={`Subject-set average: ${Math.round(safeBenchmark * 100)}%`}
+          />
+        )}
+      </div>
+      {safeBenchmark !== null && benchmarkLabel && (
+        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground leading-snug">
+          <span
+            aria-hidden
+            className="inline-block h-3 w-[2px] rounded-sm bg-foreground/55 shrink-0"
+          />
+          <span>{benchmarkLabel}</span>
+        </div>
       )}
     </div>
   );

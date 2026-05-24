@@ -18,8 +18,7 @@
  * Prompt-Level Evidence table and triggers an inline Compare card
  * when a competitor is selected.
  */
-import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Info } from "lucide-react";
+import { AlertTriangle, Info } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/dashboard/Sidebar";
@@ -184,6 +183,56 @@ function deltaToneClass(v: number | null | undefined): string {
 const STATUS_STRONG_MENTION_RATE = 0.6;
 const STATUS_STRONG_AVG_RANK_MAX = 3;
 const STATUS_WEAK_MENTION_RATE = 0.3;
+
+// Per-cell tier for the Current Platform Snapshot heatmap. The
+// thresholds are the SAME constants that drive the Platforms /
+// Topics row pills (above) so a "gap" cell in the heatmap means
+// the same thing as a "Weak" status pill in the tables — readers
+// don't have to re-learn the tier system per section. Color
+// treatment encodes the tier: warning amber for gaps so the
+// exception cell carries the visual weight, calm low-alpha primary
+// tint for healthy cells so the uniform 100% blocks recede into
+// the background instead of dominating the section.
+type HeatTier = "gap" | "mid" | "healthy" | "none";
+function heatTier(rate: number | null): HeatTier {
+  if (rate === null || !Number.isFinite(rate)) return "none";
+  if (rate < STATUS_WEAK_MENTION_RATE) return "gap";
+  if (rate >= STATUS_STRONG_MENTION_RATE) return "healthy";
+  return "mid";
+}
+function heatTierStyle(tier: HeatTier): {
+  background: string;
+  border: string;
+  textClass: string;
+} {
+  switch (tier) {
+    case "gap":
+      return {
+        background: "color-mix(in oklab, var(--warning) 22%, transparent)",
+        border: "1px solid color-mix(in oklab, var(--warning) 55%, transparent)",
+        textClass: "text-warning font-bold",
+      };
+    case "mid":
+      return {
+        background: "color-mix(in oklab, var(--muted) 65%, transparent)",
+        border: "1px solid transparent",
+        textClass: "text-foreground/85 font-semibold",
+      };
+    case "healthy":
+      return {
+        background: "color-mix(in oklab, var(--primary) 10%, transparent)",
+        border: "1px solid transparent",
+        textClass: "text-foreground/55 font-medium",
+      };
+    case "none":
+      return {
+        background: "color-mix(in oklab, var(--muted) 35%, transparent)",
+        border:
+          "1px dashed color-mix(in oklab, var(--muted-foreground) 30%, transparent)",
+        textClass: "text-muted-foreground",
+      };
+  }
+}
 function platformStatus(row: {
   mention_rate: number | null;
   avg_rank: number | null;
@@ -776,6 +825,12 @@ export default async function VisibilityPage({
   type KpiCard = {
     label: string;
     value: string;
+    // Optional smaller text appended inline after the primary value
+    // (e.g. the Weakest Topic name following its rate). Renders at
+    // a middle size — smaller than the value, larger than caption —
+    // so the suffix reads as a qualifier on the number, not as a
+    // sibling line of headline content.
+    valueSuffix?: string | null;
     helper: string;
     // Optional longer-form tooltip text. Falls back to `helper`
     // when omitted. Lets the visible caption stay short while
@@ -901,11 +956,22 @@ export default async function VisibilityPage({
         return gapPp >= MIN_GAP_PP;
       })();
       const weakestRecall = weakestTopic?.ai_recall ?? null;
+      // When a meaningful gap exists, append the topic name as a
+      // smaller suffix on the headline ("50% Progressive state
+      // governance"). The percent stays at the value font size; the
+      // topic renders at an intermediate size — smaller than the
+      // value (so the number leads), larger than the caption (so
+      // the topic still reads as headline content, not chrome).
+      const weakestSuffix =
+        weakestTopic && hasMeaningfulGap
+          ? capitalizeFirst(weakestTopic.label)
+          : null;
       return {
         label: "Weakest Topic Visibility",
         value: formatPct(weakestRecall),
+        valueSuffix: weakestSuffix,
         helper:
-          "Lowest topic-level mention rate in this snapshot. The caption names the topic only when its rate is at least 15 pp below the average of the other tracked topics.",
+          "Lowest topic-level mention rate in this snapshot. The topic name is appended to the rate only when its rate is at least 15 pp below the average of the other tracked topics.",
         valueColor: toneByThreshold(
           weakestRecall,
           "higher_better",
@@ -915,11 +981,14 @@ export default async function VisibilityPage({
         polarity: "higher_better" as const,
         gaugeValue: null,
         gaugeBenchmark: null,
-        caption: weakestTopic
-          ? hasMeaningfulGap
-            ? `Weakest: ${capitalizeFirst(weakestTopic.label)}`
-            : "No material gap across tracked topics"
-          : "No tracked topics",
+        // Caption suppressed when the topic is already in the value
+        // line. Retained only for the no-gap / no-topics shell states.
+        caption:
+          weakestTopic && hasMeaningfulGap
+            ? null
+            : weakestTopic
+              ? "No material gap across tracked topics"
+              : "No tracked topics",
         anchor: "topics",
       };
     })(),
@@ -958,10 +1027,19 @@ export default async function VisibilityPage({
             scope state ride together as the user scrolls. */}
         <OverviewSubNav
           items={[
-            { id: "trend", label: "Trend", num: "01" },
-            { id: "platforms", label: "Platforms", num: "02" },
-            { id: "topics", label: "Topics", num: "03" },
-            { id: "position", label: "Prominence", num: "04" },
+            // "Vitals" leads the rail to mirror the Overview spoke,
+            // where the first sub-nav item also points at the band
+            // that holds the executive summary + KPI tiles. The
+            // Visibility briefing IS this tab's Vitals analog (same
+            // KpiGauge tiles, same headline phrasing pattern); the
+            // missing nav entry left the band visible but unreachable
+            // from the sticky rail. Anchors to the existing first
+            // <section>, now id="vitals".
+            { id: "vitals", label: "Vitals", num: "01" },
+            { id: "trend", label: "Trend", num: "02" },
+            { id: "platforms", label: "Platforms", num: "03" },
+            { id: "topics", label: "Topics", num: "04" },
+            { id: "position", label: "Prominence", num: "05" },
           ]}
           right={
             <>
@@ -982,22 +1060,17 @@ export default async function VisibilityPage({
         />
 
         <main className="flex-1 px-4 md:px-12 py-6 space-y-10 max-w-[1280px] w-full mx-auto">
-          <Link
-            href={`/subjects/${subjectId}`}
-            className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground hover:text-foreground transition-colors -mb-6"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-            Back to {data.subject_name} Overview
-          </Link>
-
-          {/* ── 1. VISIBILITY BRIEFING ──────────────────────────── */}
+          {/* ── 1. VITALS (Visibility Briefing) ──────────────────── */}
           {/* The H2 "Visibility Performance" title and its boilerplate
               subtitle were removed at request — the sidebar's active
               "Visibility" pill plus the breadcrumb above already
               establish the page identity, and the data-driven
               briefing line below opens the section with real signal
-              instead of a static description. */}
-          <section>
+              instead of a static description. id="vitals" matches the
+              first sub-nav item ("01 Vitals") so the rail scrolls to
+              this band; scroll-mt-28 mirrors the other sections so
+              the sticky header doesn't crop the eyebrow. */}
+          <section id="vitals" className="scroll-mt-28">
             {/* Briefing Card matches the Overview Vitals card
                 styling exactly: tighter padding (md:p-7 not md:p-8),
                 explicit border-border/60, plus the same subtle
@@ -1072,12 +1145,20 @@ export default async function VisibilityPage({
                           align="right"
                         />
                       </div>
-                      <div className="mt-1">
+                      <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
                         <span
-                          className={`text-2xl font-semibold tracking-tight tabular-nums ${k.valueColor}`}
+                          className={`text-2xl font-semibold tracking-tight tabular-nums leading-tight ${k.valueColor}`}
                         >
                           {k.value}
                         </span>
+                        {k.valueSuffix && (
+                          <span
+                            className={`text-base font-medium leading-tight ${k.valueColor}`}
+                            title={k.valueSuffix}
+                          >
+                            {k.valueSuffix}
+                          </span>
+                        )}
                       </div>
                       {k.gaugeValue !== null &&
                         Number.isFinite(k.gaugeValue) && (
@@ -1086,10 +1167,16 @@ export default async function VisibilityPage({
                               value={k.gaugeValue}
                               benchmark={k.gaugeBenchmark}
                               fillColor={gaugeFill}
+                              benchmarkLabel={k.caption ?? undefined}
                             />
                           </div>
                         )}
-                      {k.caption && (
+                      {/* Standalone caption only when the gauge isn't
+                          consuming it (no-benchmark tiles like Weakest
+                          Topic). Otherwise the caption renders inside
+                          the gauge as the tick legend so the tick's
+                          meaning is unambiguous. */}
+                      {k.caption && k.gaugeBenchmark === null && (
                         <div
                           className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug line-clamp-2"
                           title={k.caption}
@@ -1170,13 +1257,59 @@ export default async function VisibilityPage({
                       </div>
                     );
                   }
+                  // Tiered cells + auto-summary. The old per-cell
+                  // alpha gradient made 100% cells the strongest
+                  // visual element; new treatment inverts that so
+                  // healthy cells (≥60%) recede into a calm light
+                  // tint and any gap (<30%) pops in warning amber.
+                  // Summary line below the grid spells out the
+                  // exception in words so the read isn't carried
+                  // by color alone (accessibility + faster scan).
+                  const platformBySlug = new Map(
+                    data.platform_topic_matrix.platforms.map((p) => [p.slug, p]),
+                  );
+                  const gapCells = data.platform_topic_matrix.cells
+                    .filter(
+                      (c) =>
+                        c.mention_rate !== null &&
+                        Number.isFinite(c.mention_rate) &&
+                        (c.mention_rate as number) < STATUS_WEAK_MENTION_RATE,
+                    )
+                    .map((c) => ({
+                      platformName:
+                        platformBySlug.get(c.platform_slug)?.name ??
+                        c.platform_slug,
+                      topicLabel: capitalizeFirst(c.topic_label),
+                      rate: c.mention_rate as number,
+                    }))
+                    // Lowest rate first — "largest gap".
+                    .sort((a, b) => a.rate - b.rate);
+                  const summary = (() => {
+                    if (gapCells.length === 0) {
+                      return "Full coverage across all platforms and topics.";
+                    }
+                    if (gapCells.length === 1) {
+                      const g = gapCells[0];
+                      const topicLc = g.topicLabel.toLowerCase();
+                      if (g.rate === 0) {
+                        return `One gap: ${g.platformName} doesn't mention ${data.subject_name} on ${topicLc}.`;
+                      }
+                      return `One weak cell: ${g.platformName} on ${topicLc} (${Math.round(
+                        g.rate * 100,
+                      )}%).`;
+                    }
+                    const largest = gapCells[0];
+                    return `${gapCells.length} gaps — largest: ${largest.platformName} on ${largest.topicLabel.toLowerCase()} (${Math.round(
+                      largest.rate * 100,
+                    )}%).`;
+                  })();
                   return (
                   <div className="mt-8 border-t border-border/50 pt-6">
                     <div className="mb-3">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 inline-flex items-center gap-1">
                         Current Platform Snapshot
                         <KpiTooltipIcon
-                          text="Mention rate for each AI platform on each tracked topic — share of that platform's monitored prompts in this topic area where the subject was mentioned. Darker cells mean stronger coverage."
+                          text="Mention rate for each AI platform on each tracked topic — share of that platform's monitored prompts in this topic area where the subject was mentioned. Amber cells flag gaps (<30%); calm cells are at strong coverage (≥60%)."
                           align="left"
                         />
                       </div>
@@ -1186,19 +1319,31 @@ export default async function VisibilityPage({
                     </div>
                     <div className="overflow-x-auto">
                       <div
-                        className="grid gap-1.5 min-w-fit"
+                        className="grid gap-1 min-w-fit"
                         style={{
                           gridTemplateColumns: `minmax(72px, auto) repeat(${data.platform_topic_matrix.topics.length}, minmax(56px, 1fr))`,
                         }}
                       >
                         <div />
                         {data.platform_topic_matrix.topics.map((t) => (
+                          // Two-element nesting: outer flex owns the
+                          // reserved min-height + bottom alignment;
+                          // inner span owns the line-clamp. Can't
+                          // combine `flex` and `line-clamp-2` on the
+                          // same element — line-clamp forces
+                          // `display:-webkit-box` which collides with
+                          // `display:flex` and one of them silently
+                          // wins, breaking either the clamping or the
+                          // alignment depending on which class is
+                          // later in the cascade.
                           <div
                             key={t.label}
-                            className="line-clamp-2 px-1 text-center text-[10.5px] leading-tight text-foreground/60"
+                            className="flex items-end justify-center px-1 min-h-[26px]"
                             title={capitalizeFirst(t.label)}
                           >
-                            {capitalizeFirst(t.label)}
+                            <span className="line-clamp-2 text-center text-[10.5px] leading-tight text-foreground/60">
+                              {capitalizeFirst(t.label)}
+                            </span>
                           </div>
                         ))}
                         {data.platform_topic_matrix.platforms.map((p) => {
@@ -1225,51 +1370,31 @@ export default async function VisibilityPage({
                                     c.topic_label === t.label,
                                 );
                               const rate = cell?.mention_rate ?? null;
+                              const tier = heatTier(rate);
+                              const ts = heatTierStyle(tier);
                               const titleLabel = `${p.name} × ${capitalizeFirst(t.label)}: ${
                                 rate === null || !cell
                                   ? "no data"
                                   : `${Math.round(rate * 100)}% (${cell.n_mentioned}/${cell.n_responses})`
                               }`;
-                              // Apply the rate-based fade to the
-                              // background via color-mix alpha, NOT
-                              // to the whole element via `opacity`.
-                              // Otherwise low-rate cells (like 0%)
-                              // also fade their text into the
-                              // background and the value reads as
-                              // empty. Floor at 25% mix so the 0%
-                              // cell still has a visible background
-                              // tint and the "0%" text reads cleanly.
-                              const bgAlphaPct =
-                                rate === null
-                                  ? 35
-                                  : Math.round(
-                                      (0.25 + rate * 0.6) * 100,
-                                    );
-                              const bgColor =
-                                rate === null
-                                  ? `color-mix(in oklab, var(--muted) ${bgAlphaPct}%, transparent)`
-                                  : `color-mix(in oklab, var(--primary) ${bgAlphaPct}%, transparent)`;
                               return (
                                 // Clickable: scrolls to (and
                                 // briefly highlights via :target)
                                 // the matching row in Platform
-                                // Breakdown below. Turns the
-                                // heatmap into a navigation
-                                // primitive instead of just a
-                                // visual.
+                                // Breakdown below. Heatmap doubles
+                                // as a navigation primitive.
                                 <a
                                   key={t.label}
                                   href={`#platform-${p.slug}`}
-                                  className="relative flex h-8 items-center justify-center rounded-sm transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary/40"
-                                  style={{ background: bgColor }}
+                                  className="relative flex h-7 items-center justify-center rounded-sm transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary/40"
+                                  style={{
+                                    background: ts.background,
+                                    border: ts.border,
+                                  }}
                                   title={titleLabel}
                                 >
                                   <span
-                                    className={`text-[10.5px] font-semibold tabular-nums ${
-                                      rate !== null && rate > 0.55
-                                        ? "text-background"
-                                        : "text-foreground"
-                                    }`}
+                                    className={`text-[10.5px] tabular-nums ${ts.textClass}`}
                                   >
                                     {rate === null
                                       ? "—"
@@ -1283,6 +1408,14 @@ export default async function VisibilityPage({
                         })}
                       </div>
                     </div>
+                    {/* Auto-summary: gap count or positive line.
+                        Always rendered (never empty) so the read
+                        isn't carried by color alone — color +
+                        text together so a colorblind reader gets
+                        the same answer as a sighted one. */}
+                    <p className="mt-3 text-[12.5px] leading-relaxed text-foreground/80">
+                      {summary}
+                    </p>
                   </div>
                   );
                 })()}
@@ -1348,25 +1481,26 @@ export default async function VisibilityPage({
                       ? `What changed · since ${latestStr}`
                       : "What changed";
                 return (
-                  <div className="mt-8 border-t border-border/60 pt-5">
-                    <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+                  // What-changed reads as the chart's own footer
+                  // rather than a sibling section: no top border, no
+                  // generous gap. Sits directly under the helper
+                  // caption so the chips feel like an annotation of
+                  // the lines above. Text dropped to 11.5px (same
+                  // size as the legend chips) so the strip reads as
+                  // chart chrome, not its own block of content.
+                  <div className="mt-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
                       {eyebrow}
                     </div>
                     {result.deltas.length > 0 ? (
-                      // Horizontal flow of delta chips. Each chip
-                      // pairs a label (truncated when long, with
-                      // a `title` for hover-reveal) with its signed
-                      // pp value colored by direction. flex-wrap
-                      // lets the row break on narrow viewports
-                      // instead of overflowing.
-                      <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2.5">
+                      <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5">
                         {result.deltas.map((d) => (
                           <li
                             key={`${d.kind}:${d.label}`}
-                            className="inline-flex max-w-full items-baseline gap-2"
+                            className="inline-flex max-w-full items-baseline gap-1.5"
                           >
                             <span
-                              className={`max-w-[260px] truncate text-[13px] ${
+                              className={`max-w-[220px] truncate text-[11.5px] ${
                                 d.kind === "overall"
                                   ? "font-medium text-foreground"
                                   : "text-foreground/80"
@@ -1376,7 +1510,7 @@ export default async function VisibilityPage({
                               {d.label}
                             </span>
                             <span
-                              className={`shrink-0 text-[13px] font-semibold tabular-nums ${deltaToneClass(
+                              className={`shrink-0 text-[11.5px] font-semibold tabular-nums ${deltaToneClass(
                                 d.deltaPp,
                               )}`}
                             >
@@ -1386,7 +1520,7 @@ export default async function VisibilityPage({
                         ))}
                       </ul>
                     ) : (
-                      <p className="mt-3 text-[13px] leading-relaxed text-foreground/80">
+                      <p className="mt-2 text-[11.5px] leading-relaxed text-foreground/80">
                         {result.fallbackCopy}
                       </p>
                     )}
