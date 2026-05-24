@@ -24,6 +24,25 @@ import {
   YAxis,
 } from "recharts";
 import type { SubjectOverview } from "@/lib/api";
+import type { IconType } from "react-icons";
+import {
+  SiOpenai,
+  SiAnthropic,
+  SiGooglegemini,
+  SiPerplexity,
+} from "react-icons/si";
+
+// Brand-mark icons via react-icons/si — same map the
+// visibility/page.tsx uses for the heatmap row labels and the
+// per-platform KPIs table. Kept duplicated here rather than
+// extracted to a shared util so this component stays self-
+// contained; both maps are short and slug-stable.
+const PLATFORM_ICON: Record<string, IconType> = {
+  chatgpt: SiOpenai,
+  gemini: SiGooglegemini,
+  claude: SiAnthropic,
+  perplexity: SiPerplexity,
+};
 
 const PRIMARY = "var(--primary)";
 
@@ -41,6 +60,13 @@ type Overlay = {
   name: string;             // legend label
   color: string;            // line stroke color
   values: (number | null)[]; // aligned to trajectoryWeeks
+  // Optional platform slug used to render a brand-mark icon
+  // (react-icons/si) next to the legend chip — same pattern the
+  // Per-Platform Snapshot heatmap and the per-platform KPIs
+  // table on this page use. Caller (visibility/page.tsx) passes
+  // `iconSlug: p.slug` for platform overlays; topic overlays
+  // omit it and the chip falls back to just a colored bar + name.
+  iconSlug?: string;
 };
 
 type TooltipPayloadEntry = {
@@ -95,6 +121,14 @@ function ChartTooltip({
       </div>
       <div className="space-y-1">
         {sorted.map((entry) => {
+          // Pick a brand icon when the entry's name lowercases to
+          // one of our known platform slugs ("ChatGPT" → "chatgpt",
+          // "Gemini" → "gemini", etc.). Topic-name entries (which
+          // never match a slug) fall through to the colored dot.
+          // Same icon set used by the chip legend below + the
+          // heatmap + the per-platform KPIs table.
+          const TooltipIcon =
+            PLATFORM_ICON[(entry.name ?? "").toLowerCase()];
           const isSubject = entry.name === subjectName;
           return (
             <div
@@ -106,6 +140,12 @@ function ChartTooltip({
                 style={{ background: entry.color }}
                 aria-hidden
               />
+              {TooltipIcon && (
+                <TooltipIcon
+                  className="h-3 w-3 shrink-0 text-foreground/65"
+                  aria-hidden
+                />
+              )}
               <span
                 className={
                   isSubject
@@ -359,7 +399,9 @@ export function TrendOverTime({
             match "first chip" → "most-mentioned series" without
             re-mapping between alphabetical chips and volume-ranked
             lines. */}
-        {overlays.map((o) => (
+        {overlays.map((o) => {
+          const Icon = o.iconSlug ? PLATFORM_ICON[o.iconSlug] : undefined;
+          return (
             <button
               key={o.name}
               type="button"
@@ -377,6 +419,13 @@ export function TrendOverTime({
                 }}
                 aria-hidden
               />
+              {Icon && (
+                <Icon
+                  className="h-3 w-3 text-foreground/65 shrink-0 transition-opacity"
+                  style={{ opacity: opacityFor(o.name, 1) }}
+                  aria-hidden
+                />
+              )}
               <span
                 className="max-w-[220px] truncate text-foreground/70 transition-opacity"
                 title={o.name}
@@ -385,7 +434,8 @@ export function TrendOverTime({
                 {o.name}
               </span>
             </button>
-          ))}
+          );
+        })}
       </div>
       {helperText && (
         <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">

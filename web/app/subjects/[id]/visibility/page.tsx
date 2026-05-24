@@ -705,6 +705,12 @@ export default async function VisibilityPage({
     name: p.name,
     color: PLATFORM_COLOR_BY_SLUG[p.slug] ?? PLATFORM_FALLBACK_COLOR,
     values: sliceTrendWindow(p.mention_rate),
+    // iconSlug threads the platform slug through to the
+    // TrendOverTime legend so each chip renders the brand mark
+    // next to the platform name — same brand-icon treatment the
+    // Per-Platform Snapshot heatmap and the per-platform KPIs
+    // table on this page use.
+    iconSlug: p.slug,
   }));
   // Sliced topic trajectories feed `composeWhatChanged` so the
   // footer's deltas describe the visible window, not just the
@@ -949,7 +955,20 @@ export default async function VisibilityPage({
               briefing line below opens the section with real signal
               instead of a static description. */}
           <section>
-            <Card className="p-6 md:p-8">
+            {/* Briefing Card matches the Overview Vitals card
+                styling exactly: tighter padding (md:p-7 not md:p-8),
+                explicit border-border/60, plus the same subtle
+                primary-tinted gradient overlay so the two heroes
+                read as the same surface across spokes. */}
+            <Card className="relative overflow-hidden p-6 md:p-7 border-border/60">
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  background:
+                    "linear-gradient(135deg, color-mix(in oklab, var(--primary) 5%, transparent) 0%, color-mix(in oklab, var(--primary) 1.5%, transparent) 35%, transparent 70%)",
+                }}
+              />
+              <div className="relative">
               {/* Executive summary line — composed from real data. */}
               <p className="text-[15.5px] leading-relaxed text-foreground/90">
                 {briefingSummary}
@@ -1173,6 +1192,7 @@ export default async function VisibilityPage({
                     </div>
                   </div>
                 )}
+              </div>
             </Card>
           </section>
 
@@ -1184,9 +1204,9 @@ export default async function VisibilityPage({
           {/* ── 2. VISIBILITY TREND ─────────────────────────────── */}
           <section id="trend" className="scroll-mt-28">
             <SectionTitle
-              eyebrow="01 · Trend"
+              eyebrow="Trend"
               title="Mention Rate Over Time"
-              description="Overall mention rate across tracked prompts, with each platform's mention rate as a lighter line for context."
+              description="Mention rate over time, with each platform as a lighter overlay line."
               className="mb-5"
               right={<TrendWindowToggle />}
             />
@@ -1283,12 +1303,12 @@ export default async function VisibilityPage({
           {/* ── 3. PLATFORM BREAKDOWN ───────────────────────────── */}
           <section id="platforms" className="scroll-mt-28">
             <SectionTitle
-              eyebrow="02 · Platforms"
+              eyebrow="Platforms"
               title="Platform Change Detail"
               description={
                 topic
-                  ? `How each AI platform surfaces ${data.subject_name} on this topic.`
-                  : "How each AI platform surfaces this entity and what changed in the latest snapshot."
+                  ? `How each AI platform covers ${data.subject_name} on this topic.`
+                  : `How each AI platform covers ${data.subject_name}.`
               }
               className="mb-5"
             />
@@ -1476,12 +1496,12 @@ export default async function VisibilityPage({
           {/* ── 4. TOPIC VISIBILITY ─────────────────────────────── */}
           <section id="topics" className="scroll-mt-28">
             <SectionTitle
-              eyebrow="03 · Topics"
+              eyebrow="Topics"
               title="Topic Visibility"
               description={
                 platform && scopedPlatformLabel
-                  ? `How each tracked topic ranks for ${data.subject_name} on ${scopedPlatformLabel} and what changed across the tracked window.`
-                  : `How each tracked topic ranks for ${data.subject_name} and what changed across the tracked window.`
+                  ? `How each tracked topic ranks for ${data.subject_name} on ${scopedPlatformLabel}.`
+                  : `How each tracked topic ranks for ${data.subject_name}.`
               }
               className="mb-5"
             />
@@ -1623,9 +1643,9 @@ export default async function VisibilityPage({
           {/* ── 5. ANSWER POSITION ──────────────────────────────── */}
           <section id="position" className="scroll-mt-28">
             <SectionTitle
-              eyebrow="04 · Prominence"
+              eyebrow="Prominence"
               title="Answer Prominence"
-              description="When this entity is mentioned, how early it appears in the AI answer."
+              description="When mentioned, where this subject appears in the AI answer."
               className="mb-5"
             />
               {(() => {
@@ -1826,8 +1846,28 @@ export default async function VisibilityPage({
               })()}
           </section>
 
-
-
+          {/* Methodology footer — matches the Overview spoke's
+              terminal footer so every spoke ends with the same
+              data-provenance line + product tagline. */}
+          <footer className="mt-12 pt-6 pb-8 border-t border-border/40">
+            <p className="text-center text-[11.5px] text-foreground/70 leading-relaxed">
+              Based on{" "}
+              <span className="font-semibold text-foreground/80 tabular-nums">
+                {data.meta.n_responses}
+              </span>{" "}
+              AI responses across{" "}
+              <span className="font-semibold text-foreground/80">
+                {data.meta.n_platforms} platforms
+              </span>
+              .{" "}
+              <a href="#" className="text-primary hover:underline">
+                Methodology →
+              </a>
+            </p>
+            <p className="mt-2 text-center text-[11px] text-muted-foreground">
+              Brand Visibility · AI Narrative Intelligence for Public Affairs
+            </p>
+          </footer>
         </main>
       </div>
     </div>
