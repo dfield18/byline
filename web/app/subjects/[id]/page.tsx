@@ -1635,11 +1635,50 @@ export default async function SubjectOverviewPage({
                       const labelTone = allHigh
                         ? "text-success"
                         : "text-foreground/55";
+                      // Lead-line takeaway: surface the weakest topic
+                      // (or, in the all-≥70% case, the floor) above
+                      // the bar list so the headline reads before the
+                      // bars themselves. Earlier the bar list was the
+                      // only signal; a reader had to scan all four
+                      // rows to find the lowest. Tone tracks the
+                      // diagnosis — warning when there's a real gap,
+                      // success when even the weakest is strong,
+                      // suppressed when only one topic is measured
+                      // (no comparative read possible).
+                      const sortedByRecall = withRecall
+                        .slice()
+                        .sort(
+                          (a, b) => (a.ai_recall ?? 0) - (b.ai_recall ?? 0),
+                        );
+                      const weakest = sortedByRecall[0] ?? null;
+                      const weakestPct =
+                        weakest && weakest.ai_recall !== null
+                          ? Math.round(weakest.ai_recall * 100)
+                          : null;
+                      const summary =
+                        weakest === null || weakestPct === null
+                          ? null
+                          : gapExists
+                            ? {
+                                text: `Weakest: ${weakest.label} ${weakestPct}%`,
+                                tone: "text-warning",
+                              }
+                            : allHigh
+                              ? {
+                                  text: `Strong on every topic — floor ${weakestPct}%`,
+                                  tone: "text-success",
+                                }
+                              : null;
                       return (
                         <Card className="flex h-full flex-col p-6 border-border/60">
                           <div className={`text-[10.5px] font-semibold uppercase tracking-[0.08em] ${labelTone} mb-3`}>
                             {label}
                           </div>
+                          {summary && (
+                            <p className={`mb-3 text-[13px] font-medium ${summary.tone}`}>
+                              {summary.text}
+                            </p>
+                          )}
                           <TopicRecallInline topics={data.topic_coverage} />
                           {/* Footer pad — methodology line + color
                               legend balance this card's vertical
