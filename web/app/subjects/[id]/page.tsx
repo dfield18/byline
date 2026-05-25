@@ -531,7 +531,7 @@ function BottomLineBlock({ text }: { text: string }) {
         // it, the contrast that's usually the actionable beat
         // ("…but only 25% on Current events") has a visual signal
         // pulling the eye there.
-        <p className="mt-2 max-w-[90%] border-l-2 border-warning/60 pl-3 text-[14px] text-foreground/85 leading-relaxed [text-wrap:balance]">
+        <p className="mt-2 max-w-[90%] border-l-2 border-warning/60 pl-3 text-[16px] md:text-[17px] text-foreground/85 leading-[1.4] tracking-tight [text-wrap:balance]">
           {body}
         </p>
       )}
