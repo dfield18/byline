@@ -187,6 +187,18 @@ const KPI_WEAK_MENTION_RATE = 0.3;
 const KPI_STRONG_TOP_RESULT_RATE = 0.5;
 const KPI_WEAK_TOP_RESULT_RATE = 0.2;
 
+// Per-platform spread above which the AI Mention Rate tile's
+// "by platform" subline appends a warning-toned "{N} pt spread"
+// flag. Below this threshold the platforms are close enough that
+// the breakdown is informational; at or above it, the subject's
+// visibility is single-platform-dependent (e.g. Gemini 80% /
+// ChatGPT 20% = 60 pts → load-bearing on one provider). The
+// 40 pt cut is intentionally higher than the prior strip's 30 pt
+// "notable" tier because we're surfacing this inline as a warning,
+// not a passive eyebrow — the bar should clear "huh that's a lot"
+// not just "modestly uneven."
+const KPI_PLATFORM_SPREAD_LOPSIDED = 40;
+
 // Average sentiment / favorability — −1..+1, treat SYMMETRICALLY
 // around zero (this metric is NOT a 0..1 rate; positive can be
 // "strong" in either direction relative to zero). ±10% neutral
@@ -1134,9 +1146,17 @@ function deriveCompetitivePosition(
 function TrajectoryStrip({
   trajectory,
   benchmarks,
+  platformRecall,
 }: {
   trajectory: SubjectOverview["trajectory"];
   benchmarks: SubjectOverview["subject_set_benchmarks"];
+  // Per-platform mention-rate breakdown. Only the AI Mention Rate
+  // tile renders this as a compact subline ("By platform · Gemini
+  // 80% · ChatGPT 20%") because mention rate is the only KPI in
+  // the strip with a per-platform decomposition shipped on the
+  // payload. Other metrics (favorability / top-result) don't have
+  // analogous platform breakdowns yet.
+  platformRecall: SubjectOverview["platform_recall"];
 }) {
   // Cross-subject benchmark caption — null when there's only one
   // subject in the set (no peer to compare against) or when the
@@ -1163,6 +1183,10 @@ function TrajectoryStrip({
     // a single set-wide number meaningfully).
     benchmark: number | null;
     benchmarkCaption: string | null;
+    // Per-platform mention-rate breakdown. Populated only for the
+    // AI Mention Rate tile; other tiles leave this undefined and
+    // the subline-render path no-ops.
+    platformBreakdown?: SubjectOverview["platform_recall"];
   }[] = [
     {
       title: "AI Mention Rate",
@@ -1180,6 +1204,13 @@ function TrajectoryStrip({
       colorKind: "mention_rate",
       benchmark: benchmarks?.ai_mention_rate_avg ?? null,
       benchmarkCaption: bmCaption(benchmarks?.ai_mention_rate_avg ?? null),
+      // Per-platform decomposition of THIS metric's value — folded
+      // in from the standalone "Mention rate by platform" strip
+      // that used to sit below the KPI row. Reader can answer "is
+      // a 50% mention rate driven equally by both AI platforms,
+      // or by one carrying the other?" without scanning to a
+      // separate component.
+      platformBreakdown: platformRecall,
     },
     {
       title: "Net Favorability",
@@ -1328,6 +1359,78 @@ function TrajectoryStrip({
                   />
                 </div>
               )}
+            {/* Per-platform subline — folded in from the standalone
+                "Mention rate by platform" strip that used to sit
+                below the KPI row, taking ~80px of vertical real
+                estate for a two-line note. Surfaced inline here
+                only on tiles that ship a platformBreakdown (today
+                just AI Mention Rate). Shape: top-3 platforms
+                rendered as "{Name} {pct}%" segments separated by
+                "·"; sorted desc by mention rate. When the spread
+                between the top and bottom platform is ≥
+                KPI_PLATFORM_SPREAD_LOPSIDED (40 pts), a warning-
+                toned "· {N} pt spread" flag appends so a reader
+                catches the "this metric is single-platform-
+                dependent" signal at-a-glance. Renders nothing
+                when platforms ≤ 1 (no spread to talk about). */}
+            {!notMeasured &&
+              m.platformBreakdown &&
+              (() => {
+                const sorted = m.platformBreakdown
+                  .filter(
+                    (p) => p.value !== null && Number.isFinite(p.value),
+                  )
+                  .slice()
+                  .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+                if (sorted.length < 2) return null;
+                const PLATFORM_BREAKDOWN_TOP_N = 3;
+                const shown = sorted.slice(0, PLATFORM_BREAKDOWN_TOP_N);
+                const remaining = sorted.length - PLATFORM_BREAKDOWN_TOP_N;
+                const pcts = sorted.map((p) =>
+                  Math.min(
+                    100,
+                    Math.max(0, Math.round((p.value as number) * 100)),
+                  ),
+                );
+                const spread = pcts[0] - pcts[pcts.length - 1];
+                const isLopsided = spread >= KPI_PLATFORM_SPREAD_LOPSIDED;
+                return (
+                  <div className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
+                    <span className="font-medium text-foreground/55">
+                      By platform
+                    </span>
+                    {shown.map((p, i) => {
+                      const pct = Math.min(
+                        100,
+                        Math.max(
+                          0,
+                          Math.round((p.value as number) * 100),
+                        ),
+                      );
+                      return (
+                        <span key={`${p.name}-${i}`}>
+                          {" · "}
+                          {p.name}{" "}
+                          <span className="tabular-nums font-medium text-foreground/80">
+                            {pct}%
+                          </span>
+                        </span>
+                      );
+                    })}
+                    {remaining > 0 && (
+                      <span>{" · "}+{remaining} more</span>
+                    )}
+                    {isLopsided && (
+                      <span
+                        className="text-warning tabular-nums"
+                        title="Spread between the highest and lowest platform mention rates. A wide spread means visibility is concentrated on one provider — worth understanding per-platform tactics."
+                      >
+                        {" · "}{spread} pt spread
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             <div className="mt-auto pt-3">
               <MiniSpark
                 values={m.values}
@@ -1352,113 +1455,15 @@ function TrajectoryStrip({
   );
 }
 
-// Per-platform mention-rate chip strip rendered under the Vitals
-// KPI sparklines. Each chip = one LLM platform with its mention
-// rate, color-toned by the same getKpiValueColor(mention_rate)
-// thresholds the cross-platform KPI value uses (≥50% success,
-// <20% warning, else neutral). Surfaces whether the headline
-// mention rate is universal or driven by a single platform —
-// otherwise indistinguishable to a reader of the Vitals KPI.
-// Hidden when only one platform is tracked (the per-platform
-// breakdown carries no extra signal vs the cross-platform
-// average) or when no platforms are returned.
-function PlatformBreakdownStrip({
-  platforms,
-}: {
-  platforms: SubjectOverview["platform_recall"];
-}) {
-  if (!platforms || platforms.length <= 1) return null;
-  // Pre-compute spread (max - min in pts) so we can call it out
-  // explicitly when the disparity is large. The earlier inline-chip
-  // treatment ("Gemini 80% · ChatGPT 20%") buried a 60pp gap in
-  // small text — a reader scanning the Vitals card missed the most
-  // actionable insight on the page ("AI surfaces this subject 4×
-  // more often on one platform than the other"). The bars below
-  // make the disparity visible; the spread eyebrow names it.
-  const pcts = platforms
-    .map((p) =>
-      p.value === null || !Number.isFinite(p.value)
-        ? null
-        : Math.min(100, Math.max(0, Math.round(p.value * 100))),
-    )
-    .filter((v): v is number => v !== null);
-  const spread =
-    pcts.length >= 2 ? Math.max(...pcts) - Math.min(...pcts) : 0;
-  // 30pp threshold matches "Dominant ≥40% / Marginal <15%" tier
-  // spacing on the Competition spoke's Platform Ownership heatmap
-  // — a spread that wide is a meaningful platform-specific gap;
-  // narrower spreads are just normal cross-platform variance.
-  const spreadIsNotable = spread >= 30;
-  return (
-    <div className="mt-4">
-      <div className="flex items-baseline justify-between gap-3 mb-2">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
-          Mention rate by platform
-        </span>
-        {spreadIsNotable && (
-          <span
-            className="text-[10.5px] text-warning tabular-nums"
-            title="Difference between the highest and lowest platform mention rates. A wide spread means AI surfaces this subject far more often on one platform than another — worth investigating per-platform tactics."
-          >
-            {spread} pts spread
-          </span>
-        )}
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-        {platforms.map((p, idx) => {
-          const pct =
-            p.value === null || !Number.isFinite(p.value)
-              ? null
-              : Math.min(100, Math.max(0, Math.round(p.value * 100)));
-          const valueColor =
-            pct === null ? "text-muted-foreground" : getKpiValueColor("mention_rate", p.value);
-          // Bar fill matches the value's tone class so a warning-
-          // toned percent (low) gets a warning-toned bar and a
-          // success-toned percent (high) gets a success-toned bar
-          // — same convention KpiGauge uses on the Vitals tiles
-          // above. Reader scans color + bar length together
-          // without translating between them.
-          const fillVar =
-            valueColor === "text-success"
-              ? "var(--success)"
-              : valueColor === "text-warning"
-                ? "var(--warning)"
-                : "var(--primary)";
-          return (
-            <div
-              key={`${p.name}-${idx}`}
-              className="flex items-center gap-3"
-              title={
-                p.n_responses
-                  ? `${p.n_responses} response${p.n_responses === 1 ? "" : "s"} scored on ${p.name}`
-                  : undefined
-              }
-            >
-              <span className="w-20 shrink-0 text-[12px] text-foreground/70 truncate">
-                {p.name}
-              </span>
-              <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted/70">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full"
-                  style={{
-                    width: pct === null ? 0 : `${pct}%`,
-                    background: fillVar,
-                    opacity: 0.85,
-                  }}
-                />
-              </div>
-              <span
-                className={`shrink-0 min-w-[2.75rem] text-right text-[12.5px] font-semibold tabular-nums ${valueColor}`}
-              >
-                {pct === null ? "—" : `${pct}%`}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+// PlatformBreakdownStrip was a standalone full-width platform-rate
+// bar that used to sit below the Vitals KPI strip. Folded into the
+// AI Mention Rate tile as a compact subline ("By platform · Gemini
+// 80% · ChatGPT 20% · 60 pt spread") since the bar was just a
+// per-platform decomposition of that one metric and didn't need
+// its own surface. The full per-platform breakdown still lives in
+// the Visibility spoke's Platform Change Detail table. Removing
+// the strip clawed back ~80px of vertical real estate and stopped
+// duplicating signal already in the deep-dive.
 
 // Monotone cubic interpolation (Fritsch-Carlson) → cubic-Bezier SVG
 // path. Used by MiniSpark to draw smooth-but-monotone curves between
@@ -2313,26 +2318,23 @@ export default async function SubjectOverviewPage({
                     page doesn't repeat them twice. */}
                 {data.trajectory.weeks.length >= 1 && (
                   <div className="mt-6 pt-5 border-t border-border/40">
+                    {/* Per-platform mention-rate breakdown was a
+                        standalone full-width strip below this
+                        TrajectoryStrip; it's now folded into the
+                        AI Mention Rate tile as a compact subline
+                        (since the split is just a decomposition of
+                        that one metric). The full per-platform
+                        breakdown still lives in the Visibility
+                        deep-dive's Platform Change Detail table —
+                        see the "Open Visibility deep-dive →" link
+                        below. */}
                     <TrajectoryStrip
                       trajectory={data.trajectory}
                       benchmarks={data.subject_set_benchmarks}
-                    />
-                    {/* Per-platform mention-rate strip — answers
-                        "is the verdict above driven by one platform
-                        or universal?" The Vitals KPIs are
-                        cross-platform averages; without this row a
-                        reader can't tell if a 90% Mention Rate is
-                        90% on ChatGPT + 90% on Gemini, or 100% on
-                        ChatGPT + 80% on Gemini. Reads from
-                        data.platform_recall (already on
-                        SubjectOverview). Each chip color-tones the
-                        rate by the same mention_rate thresholds the
-                        KPI value uses so the semantics match. */}
-                    <PlatformBreakdownStrip
-                      platforms={data.platform_recall}
+                      platformRecall={data.platform_recall}
                     />
                     {data.trajectory.weeks.length >= 2 && (
-                      <div className="mt-3 flex justify-end">
+                      <div className="mt-4 flex justify-end">
                         <Link
                           href={`/subjects/${subjectId}/visibility`}
                           className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
