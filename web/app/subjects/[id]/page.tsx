@@ -862,18 +862,15 @@ function TrajectoryStrip({
         value: p.mention_rate,
       })),
     },
-    // Order: AI Mention Rate → Top Narrative → Net Favorability.
-    // Mention Rate (do we appear?) on the left; Top Narrative
-    // (what's the most-common AI framing of us?) in the middle as
-    // the qualitative-but-discrete companion to the rate;
-    // Favorability (how do those mentions read?) on the right as
-    // the quantitative sentiment summary. Top Narrative replaces
-    // the prior "First Result Mentioned" tile because the latter's
-    // story (pole-position rate) already lives on the Visibility
-    // deep-dive's KPI strip + Platform Change Detail table, and
-    // the narrative middle-tile pulls the top cluster's signal
-    // into the Overview at-a-glance (was previously buried in the
-    // Band 2 Top Narratives card, since removed).
+    // Order: AI Mention Rate → Net Favorability → Top Narrative.
+    // Mention Rate (do we appear?) on the left; Net Favorability
+    // (how do mentions read in aggregate?) in the middle as the
+    // quantitative sentiment summary; Top Narrative (what's the
+    // single most-common AI framing?) on the right as the
+    // qualitative discrete companion. The middle slot stays a
+    // trajectory-based KPI so the row's two snapshot+trajectory
+    // tiles flank the snapshot-only Top Narrative tile, rather
+    // than splitting them across the row.
     {
       title: "Net Favorability",
       values: trajectory.avg_sentiment,
@@ -971,6 +968,8 @@ function TrajectoryStrip({
     <div className="grid md:grid-cols-3 gap-8 items-stretch">
       {/* AI Mention Rate (trajectory + per-platform breakdown) */}
       {renderTrajectoryTile(metrics[0])}
+      {/* Net Favorability (trajectory) */}
+      {renderTrajectoryTile(metrics[1])}
       {/* Top Narrative — snapshot-only, no spark / benchmark / delta.
           Value = top cluster's share; suffix = cluster name; color
           comes from the cluster's mean sentiment so a green "44%
@@ -985,8 +984,6 @@ function TrajectoryStrip({
         valueSuffix={topCluster?.name ?? null}
         valueColor={topCluster ? topClusterColor : "text-muted-foreground"}
       />
-      {/* Net Favorability (trajectory) */}
-      {renderTrajectoryTile(metrics[1])}
     </div>
   );
 }
