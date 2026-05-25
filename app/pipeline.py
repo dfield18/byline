@@ -51,11 +51,51 @@ from app.cross_analyzer import (
     TopQuotesAnalyzer,
     run_cross_analysis,
 )
+from app.db import get_cursor
 from app.query_engine import run_refresh
 from app.refresh import _ensure_recent_news_fresh
 from dashboard.lib.queries import get_subject_overview
 
 logger = logging.getLogger("app.pipeline")
+
+
+def _set_refresh_failed_sync(refresh_run_id: int, reason: str) -> None:
+    """Flip a refresh_run row to 'failed' with a human-readable error
+    string, used by `run_full_refresh_pipeline` when steps 3 or 4
+    raise after step 2 already committed status='completed'/'partial'.
+
+    The `WHERE status IN ('completed','partial','in_progress')` guard
+    means a row already in 'failed' (e.g. the reaper got there first)
+    isn't re-written, so a late pipeline-side mark won't overwrite a
+    reaper kill. Truncates the reason to 2000 chars to match the
+    jobs.error treatment in app/worker.py.
+    """
+    truncated = reason[:2000]
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE refresh_runs
+            SET status = 'failed',
+                completed_at = COALESCE(completed_at, clock_timestamp())
+            WHERE id = %s
+              AND status IN ('completed', 'partial', 'in_progress')
+            """,
+            (refresh_run_id,),
+        )
+        if cur.rowcount > 0:
+            logger.warning(
+                "[refresh %s] flipped to status='failed' (analyzer chain "
+                "exception): %s",
+                refresh_run_id,
+                truncated,
+            )
+        else:
+            logger.info(
+                "[refresh %s] status flip skipped (already non-running, "
+                "likely reaped or manually fixed); analyzer reason: %s",
+                refresh_run_id,
+                truncated,
+            )
 
 
 def default_extractors() -> list[Extractor]:
@@ -124,12 +164,41 @@ async def run_full_refresh_pipeline(
     )
     logger.info("[subject %s] refresh_run_id=%s", subject_id, refresh_run_id)
 
+    # Status reconciliation: from this point on, run_refresh has
+    # committed `refresh_runs.status='completed' | 'partial'` based
+    # on per-query success ratio. If steps 3 or 4 below raise, the
+    # refresh_run row stays in that "completed/partial" state but
+    # the analyzer outputs are absent — the dashboard then renders
+    # a "completed" refresh with empty Narrative / Sources tabs,
+    # which looks like a deployment regression.
+    #
+    # We flip the row's status to 'failed' on post-step-2 exception
+    # so a later operator (or the worker's stuck-job reaper) can
+    # tell "analyzer chain crashed; rerun via app.analyzer +
+    # app.cross_analyzer" from "all five steps succeeded." The
+    # refresh_run row itself (and its model_responses children)
+    # are preserved — only the status flag flips.
+    async def _mark_refresh_failed(reason: str) -> None:
+        try:
+            await asyncio.to_thread(_set_refresh_failed_sync, refresh_run_id, reason)
+        except Exception as mark_exc:
+            logger.exception(
+                "[refresh %s] failed to flip status to 'failed' after "
+                "post-step-2 exception (%s); manual SQL recovery needed.",
+                refresh_run_id,
+                mark_exc,
+            )
+
     # 3. Per-response analysis.
     extractors = default_extractors()
     logger.info(
         "[refresh %s] running %d extractor(s)", refresh_run_id, len(extractors)
     )
-    analysis_run_id = await run_analysis(refresh_run_id, extractors)
+    try:
+        analysis_run_id = await run_analysis(refresh_run_id, extractors)
+    except Exception as exc:
+        await _mark_refresh_failed(f"run_analysis failed: {type(exc).__name__}: {exc}")
+        raise
     logger.info("[refresh %s] analysis_run_id=%s", refresh_run_id, analysis_run_id)
 
     # 4. Cross-response analysis. `run_cross_analysis` is sync and may
@@ -141,9 +210,15 @@ async def run_full_refresh_pipeline(
         refresh_run_id,
         len(cross_analyzers),
     )
-    cross_analysis_run_id = await asyncio.to_thread(
-        run_cross_analysis, refresh_run_id, cross_analyzers
-    )
+    try:
+        cross_analysis_run_id = await asyncio.to_thread(
+            run_cross_analysis, refresh_run_id, cross_analyzers
+        )
+    except Exception as exc:
+        await _mark_refresh_failed(
+            f"run_cross_analysis failed: {type(exc).__name__}: {exc}"
+        )
+        raise
     logger.info(
         "[refresh %s] cross_analysis_run_id=%s",
         refresh_run_id,

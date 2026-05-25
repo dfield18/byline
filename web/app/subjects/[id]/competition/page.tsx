@@ -1184,7 +1184,7 @@ export default async function CompetitionPage({
         competitiveSetSize > 0
           ? `${Math.round((subjectEntity?.sov ?? 0) * 100)}% Share of Voice`
           : null,
-      anchor: "ranking-table",
+      anchor: "standing",
       // SoV-based read for the rank tile: rising SoV is success,
       // falling is warning — matches the polarity ("lower rank
       // better" is the headline, but the spark visualizes SoV).
@@ -1242,7 +1242,7 @@ export default async function CompetitionPage({
           ? `${data.subject_name} leads by ${topCompetitorGapPp} SoV pts`
           : `${data.subject_name} trails by ${Math.abs(topCompetitorGapPp)} SoV pts`;
       })(),
-      anchor: "landscape",
+      anchor: "positioning",
       // Gap trajectory: positive delta = subject pulling away from
       // the rival (success); negative = rival closing in (warning).
       deltaPp: topCompetitorGapDelta,
@@ -1272,7 +1272,7 @@ export default async function CompetitionPage({
         topicWinRateFrac !== null
           ? `${Math.round(topicWinRateFrac * 100)}% of tracked topics`
           : null,
-      anchor: "landscape",
+      anchor: "positioning",
     },
     {
       label: "Strongest Topic",
@@ -1312,7 +1312,7 @@ export default async function CompetitionPage({
       gaugeValue: null,
       gaugeBenchmark: null,
       caption: null,
-      anchor: "landscape",
+      anchor: "positioning",
       // Trajectory pinned to the CURRENT strongest topic's label
       // (so the spark answers "how has this topic been trending?").
       deltaPp: strongestTopicDelta,
@@ -1564,6 +1564,24 @@ export default async function CompetitionPage({
                         rendering an empty "What changed" eyebrow would
                         read as a UI bug, not a "nothing changed"
                         signal. */}
+                    {/* Stable-state fallback — when there ARE ≥2
+                        snapshots but no entity cleared the ≥5pp
+                        mover threshold AND the overall subject
+                        delta didn't clear 1pp, the composer returns
+                        `deltas: []` plus a `fallbackCopy` ("mostly
+                        stable…"). Earlier we silently hid the whole
+                        strip in that case, which read as a UI bug
+                        on the next visit. Render the fallback as a
+                        small muted line so the operator can tell
+                        "the data was checked but nothing notable
+                        moved" apart from "the strip is broken." */}
+                    {snapshotDiffDeltas.length === 0 &&
+                      snapshotDiff.fallbackCopy &&
+                      data.trajectory.weeks.length >= 2 && (
+                        <p className="mt-4 text-[11px] text-muted-foreground/75 italic leading-relaxed">
+                          {snapshotDiff.fallbackCopy}
+                        </p>
+                      )}
                     {snapshotDiffDeltas.length > 0 && (() => {
                       const fmt = (iso: string | null): string | null => {
                         if (!iso) return null;

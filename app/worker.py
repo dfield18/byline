@@ -133,6 +133,13 @@ def _mark_succeeded(
     refresh_run_id: int | None,
     result: dict[str, Any],
 ) -> None:
+    # `WHERE id = %s AND status = 'running'` guards against a race
+    # with `reap_stale_jobs`: if the reaper flipped this row to
+    # 'failed' while the pipeline was still finishing, the late
+    # `_mark_succeeded` would otherwise silently resurrect the row
+    # to 'succeeded' and the reaper's "kill" would be undone. With
+    # the guard, the UPDATE matches zero rows and the late finish
+    # is logged as a no-op.
     with psycopg.connect(get_database_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -142,16 +149,29 @@ def _mark_succeeded(
                     completed_at = clock_timestamp(),
                     refresh_run_id = %s,
                     result = %s
-                WHERE id = %s
+                WHERE id = %s AND status = 'running'
                 """,
                 (refresh_run_id, Json(result), job_id),
             )
+            updated = cur.rowcount
         conn.commit()
+    if updated == 0:
+        logger.warning(
+            "Job %s late-succeeded but row was no longer in 'running' "
+            "state (likely reaped). Leaving the reaper's status as-is; "
+            "pipeline output (refresh_run_id=%s) is still in DB but the "
+            "jobs row reflects the kill.",
+            job_id,
+            refresh_run_id,
+        )
 
 
 def _mark_failed(job_id: int, err: str) -> None:
     # Truncate error text; psycopg handles long text fine, but the UI
-    # doesn't need 10KB stack traces.
+    # doesn't need 10KB stack traces. Same `status='running'` guard
+    # as _mark_succeeded — once the reaper has flipped this row to
+    # 'failed', a late pipeline-side _mark_failed shouldn't overwrite
+    # the reaper's error string with a less-informative one.
     err = err[:2000]
     try:
         with psycopg.connect(get_database_url()) as conn:
@@ -160,7 +180,7 @@ def _mark_failed(job_id: int, err: str) -> None:
                     """
                     UPDATE jobs
                     SET status = 'failed', completed_at = clock_timestamp(), error = %s
-                    WHERE id = %s
+                    WHERE id = %s AND status = 'running'
                     """,
                     (err, job_id),
                 )

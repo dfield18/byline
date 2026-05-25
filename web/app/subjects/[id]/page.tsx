@@ -506,7 +506,19 @@ function splitBottomLine(text: string): { title: string; body: string | null } {
   return { title: trimmed, body: null };
 }
 
-function BottomLineBlock({ text }: { text: string }) {
+function BottomLineBlock({
+  text,
+  bodyTone,
+}: {
+  text: string;
+  // "warning" → render the body with a warning-toned left rule for
+  // gap/contrast verdicts ("…but only 25% on Y"). "neutral" → plain
+  // body text. Caller decides based on whether the verdict came
+  // from `buildGapBottomLine` (always a gap) vs `data.bottom_line`
+  // (server-polished, could be praise or strong-asset — painting
+  // those amber would be a tone mismatch).
+  bodyTone?: "warning" | "neutral";
+}) {
   const { title, body } = splitBottomLine(text);
   return (
     // Vitals-tier treatment — verdict is now the FIRST thing inside
@@ -524,14 +536,18 @@ function BottomLineBlock({ text }: { text: string }) {
       </div>
       {body && (
         // Punchline pad: a thin warning-toned left rule + tighter
-        // top spacing make the contrast clause read as a deliberate
-        // "but…" callout instead of a faded continuation paragraph.
-        // Without the rule, the body sat as its own block of
-        // muted-foreground text and a reader's eye skipped it; with
-        // it, the contrast that's usually the actionable beat
-        // ("…but only 25% on Current events") has a visual signal
-        // pulling the eye there.
-        <p className="mt-2 max-w-[90%] border-l-2 border-warning/60 pl-3 text-[16px] md:text-[17px] text-foreground/85 leading-[1.4] tracking-tight [text-wrap:balance]">
+        // top spacing makes the contrast clause read as a deliberate
+        // "but…" callout. Only applied when the caller signals the
+        // body IS a gap/contrast (bodyTone="warning"). For server-
+        // polished strong-asset verdicts (e.g. praise-tone bottom
+        // lines on healthy subjects), the rule would mislabel the
+        // verdict's mood — so we render the body plain in those
+        // cases.
+        <p
+          className={`mt-2 max-w-[90%] text-[16px] md:text-[17px] text-foreground/85 leading-[1.4] tracking-tight [text-wrap:balance] ${
+            bodyTone === "warning" ? "border-l-2 border-warning/60 pl-3" : ""
+          }`}
+        >
           {body}
         </p>
       )}
@@ -944,9 +960,11 @@ function StatCard({
 
 // Tiny inline sparkline for use inside a compact StatCard. Hand-
 // rolled SVG (no recharts) so it stays at ~22px tall without the
-// axis-label overhead MiniSpark carries. Skips null segments and
-// connects only adjacent finite points; renders nothing if there
-// aren't at least two finite values.
+// axis-label overhead MiniSpark carries. Uses the same monotone-
+// cubic smoothing as MiniSpark via `buildMonoCubicPath` so the
+// two sparkline sizes have consistent visual character — a reader
+// scanning the same page shouldn't see one sparkline curve and
+// another zigzag. Renders nothing if fewer than two finite values.
 function TinySpark({
   values,
   color = "var(--primary)",
@@ -957,12 +975,7 @@ function TinySpark({
   const numeric = values.filter((v): v is number => v !== null && Number.isFinite(v));
   if (numeric.length < 2) return null;
   // Asymmetric padding to match MiniSpark (40% below, 15% above)
-  // so the line never grazes the chart floor. TinySpark has no
-  // axis labels so the misread is less load-bearing than on the
-  // KPI sparklines, but the visual treatment should be consistent
-  // across the page — a flat line at the bottom edge of one
-  // sparkline reads differently than the same flat line floating
-  // mid-chart elsewhere.
+  // so the line never grazes the chart floor.
   const dataMin = Math.min(...numeric);
   const dataMax = Math.max(...numeric);
   const rawRange = dataMax - dataMin || 1;
@@ -972,19 +985,28 @@ function TinySpark({
   const w = 120;
   const h = 22;
   const pad = 2;
-  const step = (w - pad * 2) / (values.length - 1);
-  const path: string[] = [];
-  let lastWasNull = false;
+  const step = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
+  // Group into runs of contiguous measured points so nulls break
+  // the curve (same null-handling as MiniSpark). Each run gets
+  // smoothed independently via buildMonoCubicPath; runs are joined
+  // with SVG M moves so a null between two measured spans reads
+  // as discontinuity, not as a curve through the gap.
+  const runs: { x: number; y: number }[][] = [];
+  let cur: { x: number; y: number }[] = [];
   values.forEach((v, i) => {
     if (v === null || !Number.isFinite(v)) {
-      lastWasNull = true;
+      if (cur.length > 0) {
+        runs.push(cur);
+        cur = [];
+      }
       return;
     }
     const x = pad + i * step;
     const y = h - pad - ((v - plotMin) / range) * (h - pad * 2);
-    path.push(path.length === 0 || lastWasNull ? `M${x},${y}` : `L${x},${y}`);
-    lastWasNull = false;
+    cur.push({ x, y });
   });
+  if (cur.length > 0) runs.push(cur);
+  const path = runs.map(buildMonoCubicPath);
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}
@@ -2083,7 +2105,7 @@ export default async function SubjectOverviewPage({
   // snapshot date + response count so the band stays uncluttered.
   const headerMeta =
     updatedShort !== null
-      ? `Updated ${updatedShort} · ${data.meta.n_responses} responses`
+      ? `Updated ${updatedShort} · ${data.meta.n_responses} response${data.meta.n_responses === 1 ? "" : "s"}`
       : "";
 
   // Jump-to items for the right-rail nav. Some sections render only
@@ -2259,7 +2281,17 @@ export default async function SubjectOverviewPage({
                     leads the card, the verdict sentence is the
                     focal point. */}
                 {effectiveBottomLine && (
-                  <BottomLineBlock text={effectiveBottomLine} />
+                  <BottomLineBlock
+                    text={effectiveBottomLine}
+                    // Only paint the body warning when the verdict
+                    // came from the templated gap composer — that's
+                    // the path that produces the "…but only N% on Y"
+                    // punchline structure. Server-polished verdicts
+                    // (the data.bottom_line fallback) can be praise
+                    // or strong-asset framing where amber would
+                    // misread the mood.
+                    bodyTone={gapBottomLine ? "warning" : "neutral"}
+                  />
                 )}
 
                 {!effectiveBottomLine && (

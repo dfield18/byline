@@ -48,8 +48,14 @@ def _resolve_org_id(cli_org: str | None) -> str:
     explicit `--org-id` flag, then `BYLINE_DEFAULT_ORG` env var. Fails
     loudly if neither is set — the CLI must never operate org-blind
     (see module docstring for the why).
+
+    Both inputs are .strip()'d so a whitespace-only value (e.g.
+    `BYLINE_DEFAULT_ORG="   "`) is treated as missing rather than as
+    a truthy org id that would silently miss every real subject row.
     """
-    org = cli_org or os.environ.get("BYLINE_DEFAULT_ORG")
+    cli_clean = cli_org.strip() if cli_org else ""
+    env_clean = os.environ.get("BYLINE_DEFAULT_ORG", "").strip()
+    org = cli_clean or env_clean
     if not org:
         typer.echo(
             "error: no org_id provided. Pass --org-id <id> or set "
@@ -381,6 +387,11 @@ def main(
     subject_id = _find_subject_by_name(name, resolved_org_id)
     if subject_id is None:
         if historical_date is not None:
+            # Can't create a new subject AND backfill its history in
+            # one shot — the date-validation block below needs the
+            # subject's created_at to even decide whether the dates
+            # are sane. Refuse and ask the operator to create the
+            # subject via a live refresh first.
             typer.echo(
                 f"error: subject '{name}' not found in org "
                 f"'{resolved_org_id}'. Historical refreshes require an "
@@ -389,24 +400,50 @@ def main(
                 err=True,
             )
             raise typer.Exit(code=1)
-    # Historical date sanity. With a known subject_id and date in
-    # hand, refuse three pathological inputs that the bare ISO-format
-    # check above doesn't catch:
+        # Interactive new-subject creation. Earlier this block was
+        # accidentally nested under the historical-date guard, making
+        # CLI-driven subject creation unreachable — `python -m
+        # app.refresh "New Name"` would fall through with
+        # subject_id=None and crash inside `run_refresh`. Restructured
+        # so the create path only fires when historical_date is None
+        # (the actually-reachable branch).
+        typer.echo(
+            f"\nNo subject named '{name}' found in org "
+            f"'{resolved_org_id}'. Let's create one."
+        )
+        category_id, slug = _pick_category()
+        setup_inputs_def = _load_setup_inputs_def(slug)
+        setup_inputs = _prompt_for_setup_inputs(setup_inputs_def, name)
+        subject_id = _create_subject(
+            category_id, name, setup_inputs, resolved_org_id
+        )
+        typer.echo(
+            f"\nCreated subject id={subject_id} in org "
+            f"'{resolved_org_id}': {name}"
+        )
+    else:
+        typer.echo(f"\nFound existing subject id={subject_id}: {name}")
+        if historical_date is None:
+            _ensure_setup_inputs_complete(subject_id, name)
+
+    # Historical date sanity. With subject_id guaranteed non-None
+    # (either looked up or just created), refuse three pathological
+    # inputs that the bare ISO-format parse above doesn't catch:
     #
-    #   (a) future dates  — the `before:` search filter would constrain
-    #       results to a date that hasn't happened, producing a refresh
-    #       indistinguishable from "live" but stamped at a future
-    #       point in the trajectory.
+    #   (a) future dates — the `before:{date}` search filter would
+    #       constrain results to a date that hasn't happened, producing
+    #       a refresh indistinguishable from "live" but stamped at a
+    #       future point on the trajectory.
     #   (b) dates before the subject was created — semantically OK
     #       (the LLM can reason about a person before their subject
-    #       row existed), but accidentally common when running a 52-week
-    #       backfill against a recently-created subject. Warn rather
-    #       than refuse since some operators legitimately want the
-    #       deep historical estimate.
-    #   (c) duplicate (subject_id, historical_as_of) — two completed
-    #       historical runs at the same date double-count in the
-    #       trajectory and produce visible spikes. Refuse outright.
-    if historical_date is not None and subject_id is not None:
+    #       row existed), but accidentally common when running a 52-
+    #       week backfill against a recently-created subject. Soft
+    #       warning, not an exit.
+    #   (c) duplicate (subject_id, historical_as_of) pairs — two
+    #       completed historical runs at the same date double-count
+    #       in the trajectory and produce visible spikes. Refuse
+    #       outright.
+    if historical_date is not None:
         from datetime import date as _date2
         today = _date2.today()
         if historical_date > today:
@@ -452,24 +489,6 @@ def main(
                 f"The LLM will still respond, but the estimate predates "
                 f"any prompt-text tuning you've done. Continuing.",
             )
-        typer.echo(
-            f"\nNo subject named '{name}' found in org "
-            f"'{resolved_org_id}'. Let's create one."
-        )
-        category_id, slug = _pick_category()
-        setup_inputs_def = _load_setup_inputs_def(slug)
-        setup_inputs = _prompt_for_setup_inputs(setup_inputs_def, name)
-        subject_id = _create_subject(
-            category_id, name, setup_inputs, resolved_org_id
-        )
-        typer.echo(
-            f"\nCreated subject id={subject_id} in org "
-            f"'{resolved_org_id}': {name}"
-        )
-    else:
-        typer.echo(f"\nFound existing subject id={subject_id}: {name}")
-        if historical_date is None:
-            _ensure_setup_inputs_complete(subject_id, name)
 
     if historical_date is not None:
         typer.echo(
