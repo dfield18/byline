@@ -168,7 +168,15 @@ export function SourcesTypeMix({
   const hoveredSeg = hovered !== null ? segments[hovered] : null;
 
   return (
-    <div className="lg:border-l lg:border-border/60 lg:pl-8 pt-1">
+    // pt-14 (≈56px) pushes the "By category" eyebrow down so it sits
+    // at the same vertical position as the SectionTitle's description
+    // line on the left ("The publications and pages most often cited
+    // …"). The SectionTitle stacks eyebrow (~24px tall with mb-1.5) +
+    // h2 title (~28px with mt-1), so the description text starts
+    // ~52px from the top of its column. Without this pad the donut
+    // eyebrow sat ~50px above the description and the two columns
+    // read as visually misaligned despite the grid's `items-start`.
+    <div className="lg:border-l lg:border-border/60 lg:pl-8 lg:pt-14 pt-1">
       <div className="text-[11px] uppercase tracking-wider text-foreground/65 mb-3">
         By category
       </div>
