@@ -828,12 +828,21 @@ function StatCard({
   valueTone,
   sub,
   spark,
+  progress,
 }: {
   label: string;
   value: string;
   valueTone?: "success" | "warning" | "neutral";
   sub?: React.ReactNode;
   spark?: React.ReactNode;
+  // 0..1 — when set, renders a thin horizontal bar BELOW the value
+  // (above any sub line / sparkline) so the stat has a visual peer
+  // to the SoV bars on the chart to the card's left. Fill convention:
+  // 1.0 = leader / no gap; 0 = bottom of the field / max gap. Tone
+  // is inherited from valueTone so a warning-toned value gets a
+  // warning-toned bar — matches the platform breakdown bars on the
+  // Vitals card.
+  progress?: number;
 }) {
   const valueColor =
     valueTone === "success"
@@ -841,6 +850,12 @@ function StatCard({
       : valueTone === "warning"
         ? "text-warning"
         : "text-foreground";
+  const fillVar =
+    valueTone === "success"
+      ? "var(--success)"
+      : valueTone === "warning"
+        ? "var(--warning)"
+        : "var(--primary)";
   return (
     <div className="rounded-md bg-muted/40 px-3.5 py-3">
       <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
@@ -849,6 +864,21 @@ function StatCard({
       <div className={`mt-1 text-[22px] font-medium tracking-tight tabular-nums ${valueColor}`}>
         {value}
       </div>
+      {progress !== undefined && Number.isFinite(progress) && (
+        <div
+          className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted/70"
+          aria-hidden
+        >
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${Math.max(0, Math.min(1, progress)) * 100}%`,
+              background: fillVar,
+              opacity: 0.85,
+            }}
+          />
+        </div>
+      )}
       {spark && <div className="mt-1.5">{spark}</div>}
       {sub && (
         <div className="mt-0.5 text-[11.5px] text-foreground/60 leading-snug">
@@ -1263,41 +1293,94 @@ function PlatformBreakdownStrip({
   platforms: SubjectOverview["platform_recall"];
 }) {
   if (!platforms || platforms.length <= 1) return null;
+  // Pre-compute spread (max - min in pp) so we can call it out
+  // explicitly when the disparity is large. The earlier inline-chip
+  // treatment ("Gemini 80% · ChatGPT 20%") buried a 60pp gap in
+  // small text — a reader scanning the Vitals card missed the most
+  // actionable insight on the page ("AI surfaces this subject 4×
+  // more often on one platform than the other"). The bars below
+  // make the disparity visible; the spread eyebrow names it.
+  const pcts = platforms
+    .map((p) =>
+      p.value === null || !Number.isFinite(p.value)
+        ? null
+        : Math.min(100, Math.max(0, Math.round(p.value * 100))),
+    )
+    .filter((v): v is number => v !== null);
+  const spread =
+    pcts.length >= 2 ? Math.max(...pcts) - Math.min(...pcts) : 0;
+  // 30pp threshold matches "Dominant ≥40% / Marginal <15%" tier
+  // spacing on the Competition spoke's Platform Ownership heatmap
+  // — a spread that wide is a meaningful platform-specific gap;
+  // narrower spreads are just normal cross-platform variance.
+  const spreadIsNotable = spread >= 30;
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
-        Mention rate by platform
-      </span>
-      {platforms.map((p, idx) => {
-        const pct =
-          p.value === null || !Number.isFinite(p.value)
-            ? null
-            // Clamp to [0, 100] for parity with formatPct on the
-            // KPI strip — defends against a backend regression
-            // returning a per-platform mention rate above 1.0.
-            : Math.min(100, Math.max(0, Math.round(p.value * 100)));
-        const valueColor =
-          pct === null ? "text-muted-foreground" : getKpiValueColor("mention_rate", p.value);
-        return (
+    <div className="mt-4">
+      <div className="flex items-baseline justify-between gap-3 mb-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+          Mention rate by platform
+        </span>
+        {spreadIsNotable && (
           <span
-            // `${name}-${idx}` rather than `name` alone so a future
-            // backend regression returning two same-named platforms
-            // doesn't trigger a React key collision.
-            key={`${p.name}-${idx}`}
-            className="inline-flex items-baseline gap-1.5 text-[12px] text-foreground/75 tabular-nums"
-            title={
-              p.n_responses
-                ? `${p.n_responses} response${p.n_responses === 1 ? "" : "s"} scored on ${p.name}`
-                : undefined
-            }
+            className="text-[10.5px] text-warning tabular-nums"
+            title="Difference between the highest and lowest platform mention rates. A wide spread means AI surfaces this subject far more often on one platform than another — worth investigating per-platform tactics."
           >
-            <span className="text-foreground/65">{p.name}</span>
-            <span className={`font-semibold ${valueColor}`}>
-              {pct === null ? "—" : `${pct}%`}
-            </span>
+            {spread}pp spread
           </span>
-        );
-      })}
+        )}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+        {platforms.map((p, idx) => {
+          const pct =
+            p.value === null || !Number.isFinite(p.value)
+              ? null
+              : Math.min(100, Math.max(0, Math.round(p.value * 100)));
+          const valueColor =
+            pct === null ? "text-muted-foreground" : getKpiValueColor("mention_rate", p.value);
+          // Bar fill matches the value's tone class so a warning-
+          // toned percent (low) gets a warning-toned bar and a
+          // success-toned percent (high) gets a success-toned bar
+          // — same convention KpiGauge uses on the Vitals tiles
+          // above. Reader scans color + bar length together
+          // without translating between them.
+          const fillVar =
+            valueColor === "text-success"
+              ? "var(--success)"
+              : valueColor === "text-warning"
+                ? "var(--warning)"
+                : "var(--primary)";
+          return (
+            <div
+              key={`${p.name}-${idx}`}
+              className="flex items-center gap-3"
+              title={
+                p.n_responses
+                  ? `${p.n_responses} response${p.n_responses === 1 ? "" : "s"} scored on ${p.name}`
+                  : undefined
+              }
+            >
+              <span className="w-20 shrink-0 text-[12px] text-foreground/70 truncate">
+                {p.name}
+              </span>
+              <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted/70">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{
+                    width: pct === null ? 0 : `${pct}%`,
+                    background: fillVar,
+                    opacity: 0.85,
+                  }}
+                />
+              </div>
+              <span
+                className={`shrink-0 min-w-[2.75rem] text-right text-[12.5px] font-semibold tabular-nums ${valueColor}`}
+              >
+                {pct === null ? "—" : `${pct}%`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -2263,7 +2346,13 @@ export default async function SubjectOverviewPage({
                     )}
 
                     {/* The fix. Primary-tinted card so it reads
-                        as the actionable callout. */}
+                        as the actionable callout. Secondaries
+                        surfaced inline below the primary so the card
+                        fills out and matches the vertical weight of
+                        Visibility Gap + Top Narratives to its left
+                        (without the secondaries the card had ~3
+                        lines of text and a block of whitespace
+                        before the bottom-pinned link). */}
                     {data.recommended_actions?.primary && (
                       <Card className="flex h-full flex-col p-6 border border-primary/30 bg-primary/[0.04]">
                         <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-primary mb-3">
@@ -2272,6 +2361,33 @@ export default async function SubjectOverviewPage({
                         <div className="text-[14px] font-medium text-foreground leading-snug">
                           {data.recommended_actions.primary.action}
                         </div>
+                        {/* Top 2 secondaries inline. Cap at 2 to keep
+                            the card from outgrowing its siblings on
+                            subjects with many tracked actions —
+                            "View all N" link below still surfaces
+                            anything beyond the cap. */}
+                        {data.recommended_actions.secondary.length > 0 && (
+                          <div className="mt-4 pt-3 border-t border-primary/15 space-y-2">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-primary/70">
+                              Also worth doing
+                            </div>
+                            {data.recommended_actions.secondary
+                              .slice(0, 2)
+                              .map((s) => (
+                                <div
+                                  key={s.label}
+                                  className="text-[12.5px] text-foreground/80 leading-snug"
+                                >
+                                  <span className="font-medium text-foreground/90">
+                                    {s.label}.
+                                  </span>{" "}
+                                  <span className="text-foreground/70">
+                                    {s.action}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        )}
                         {data.recommended_actions.secondary.length > 0 && (
                           <Link
                             href={`/subjects/${subjectId}/recommendations`}
@@ -2408,6 +2524,32 @@ export default async function SubjectOverviewPage({
                                 ? `Tied #${stats.rank}`
                                 : `#${stats.rank}`
                             }
+                            // Position-from-leader bar: rank 1 of N
+                            // → full bar (1.0); rank N of N → empty
+                            // (1/N). Inverts the displayed rank into
+                            // a "more filled = more leader-adjacent"
+                            // visual so it reads the same way as the
+                            // platform bars on the Vitals card.
+                            progress={
+                              stats.peerCount > 0
+                                ? (stats.peerCount - stats.rank + 1) /
+                                  stats.peerCount
+                                : undefined
+                            }
+                            // Tone the bar by rank tier — top third
+                            // green, bottom third amber, middle
+                            // neutral. Matches the convention used
+                            // by Visibility KPI tiles for "X% recall"
+                            // grading.
+                            valueTone={
+                              stats.peerCount > 0
+                                ? stats.rank <= Math.max(1, stats.peerCount / 3)
+                                  ? "success"
+                                  : stats.rank > (stats.peerCount * 2) / 3
+                                    ? "warning"
+                                    : "neutral"
+                                : undefined
+                            }
                             sub={
                               <span>
                                 of{" "}
@@ -2452,6 +2594,17 @@ export default async function SubjectOverviewPage({
                                     ? "warning"
                                     : "neutral"
                               }
+                              // Gap-closeness bar: 1.0 = no gap
+                              // (tied or leader), 0 = max 100pp
+                              // separation. Visualizes "how close
+                              // is the subject to its comparator"
+                              // independent of the sign, then the
+                              // tone (success/warning) carries the
+                              // direction.
+                              progress={Math.max(
+                                0,
+                                1 - Math.min(100, Math.abs(stats.gapPp)) / 100,
+                              )}
                               sub={
                                 stats.gapPp === 0
                                   ? null
