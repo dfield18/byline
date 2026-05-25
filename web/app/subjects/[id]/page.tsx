@@ -1283,7 +1283,14 @@ function SourcesList({ sources }: { sources: SubjectOverview["sources"] }) {
           // trigger a React key collision (same defensive pattern
           // PlatformBreakdownStrip uses).
           key={`${s.name}-${idx}`}
-          className="grid grid-cols-12 items-center gap-2 px-3 py-2.5 rounded-md hover:bg-accent/60 transition-colors text-sm"
+          // Zebra striping (even rows tinted) — subtle muted/40
+          // band on rows 2 + 4 + … makes a 5-row list easier to
+          // scan horizontally without needing borders between
+          // rows. Hover still wins via the more-saturated accent
+          // background.
+          className={`grid grid-cols-12 items-center gap-2 px-3 py-2.5 rounded-md hover:bg-accent/60 transition-colors text-sm ${
+            idx % 2 === 1 ? "bg-muted/40" : ""
+          }`}
         >
           <div className="col-span-6 flex items-center gap-2 min-w-0">
             <span className="text-[10px] text-muted-foreground tabular-nums w-4">
