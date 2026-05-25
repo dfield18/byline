@@ -15,7 +15,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
-import { Card, SectionTitle, KpiGauge } from "@/components/dashboard/ui";
+import { Card, SectionTitle, Pill, KpiGauge } from "@/components/dashboard/ui";
 import { CompetitiveScatter } from "./CompetitiveScatter";
 import { TopicProminenceFilter } from "./TopicProminenceFilter";
 import { LandscapePlatformFilter } from "./LandscapePlatformFilter";
@@ -135,6 +135,39 @@ function deltaToneClass(v: number | null | undefined): string {
 }
 
 type StatusTone = "success" | "warning" | "primary" | "neutral";
+
+// Tier verdict for a single entity based on its share of voice
+// relative to the comparison-set leader. Mirrors the original
+// Status-column semantics so the subject row's pill reads with the
+// same Leader / Challenger / Mid-tier / Low-visibility language the
+// Bottom Line sentence uses. Peer rows intentionally don't render a
+// pill today (user chose to keep the peer table slim); this helper
+// is kept symmetric in case peer pills come back.
+function currentPosition(row: {
+  mention_rate: number | null;
+  is_subject?: boolean;
+  is_leader: boolean;
+  leader_mention_rate: number | null;
+}): { label: string; tone: StatusTone } {
+  if (row.mention_rate === null) {
+    return { label: "Insufficient data", tone: "neutral" };
+  }
+  if (row.is_leader) {
+    return { label: "Leader", tone: "success" };
+  }
+  const leader = row.leader_mention_rate;
+  if (leader === null || leader <= 0) {
+    return { label: "Mid-tier", tone: "primary" };
+  }
+  const ratio = row.mention_rate / leader;
+  if (ratio >= 0.6) {
+    return { label: "Challenger", tone: "primary" };
+  }
+  if (ratio >= 0.25) {
+    return { label: "Mid-tier", tone: "primary" };
+  }
+  return { label: "Low visibility", tone: "warning" };
+}
 
 function trendVerdict(deltaPp: number | null | undefined): {
   label: string;
@@ -1744,6 +1777,19 @@ export default async function CompetitionPage({
                               data.trajectory.ai_recall,
                             )
                           : null;
+                      // Tier verdict for the subject row's Status cell.
+                      // Computed against the leader's SoV so the pill
+                      // reads consistently with the Bottom Line's
+                      // ranks-trails-by phrasing. Null only when the
+                      // subject row itself is absent (no data).
+                      const subjectPosition = subjectRow
+                        ? currentPosition({
+                            mention_rate: subjectRow.sov,
+                            is_subject: true,
+                            is_leader: subjectRow.name === leaderName,
+                            leader_mention_rate: leaderSov,
+                          })
+                        : null;
                       const peerRows = sortedAll.filter(
                         (r) => !r.is_subject,
                       );
@@ -1793,10 +1839,11 @@ export default async function CompetitionPage({
                                 lets the col widths govern instead
                                 of auto-layout. */}
                             <colgroup>
-                              <col style={{ width: "30%" }} />
-                              <col style={{ width: "36%" }} />
+                              <col style={{ width: "26%" }} />
+                              <col style={{ width: "32%" }} />
+                              <col style={{ width: "12%" }} />
+                              <col style={{ width: "16%" }} />
                               <col style={{ width: "14%" }} />
-                              <col style={{ width: "20%" }} />
                             </colgroup>
                             <thead>
                               <tr className="border-b border-border/60 text-[10.5px] uppercase tracking-[0.06em] text-foreground/65">
@@ -1830,11 +1877,30 @@ export default async function CompetitionPage({
                                     />
                                   </span>
                                 </th>
-                                <th className="py-3 pl-3 text-right font-semibold whitespace-nowrap">
+                                <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
                                   <span className="inline-flex items-center justify-end gap-1">
                                     First Mention Rate
                                     <KpiTooltipIcon
                                       text="Share of responses where this entity was AI's first-named entity (rank #1). Pole-position visibility — different from Share, which counts any mention regardless of rank."
+                                      align="right"
+                                      direction="below"
+                                    />
+                                  </span>
+                                </th>
+                                {/* Status column renders the tier pill
+                                    on the subject row only — peer rows
+                                    keep an empty cell so the column
+                                    grid stays aligned (the user opted
+                                    to keep peer rows slim while
+                                    surfacing the subject's tier where
+                                    it matters most: at-a-glance
+                                    answer to "where do I stand in the
+                                    field?"). */}
+                                <th className="py-3 pl-3 text-right font-semibold whitespace-nowrap">
+                                  <span className="inline-flex items-center justify-end gap-1">
+                                    Status
+                                    <KpiTooltipIcon
+                                      text="Where the subject sits in the comparison set today, by share of voice. Leader = highest share. Challenger ≥60% of the leader's share. Mid-tier ≥25%. Low visibility below that."
                                       align="right"
                                       direction="below"
                                     />
@@ -1895,8 +1961,15 @@ export default async function CompetitionPage({
                                       ? "—"
                                       : subjectRow.avg_rank.toFixed(1)}
                                   </td>
-                                  <td className="py-3.5 pl-3 text-right tabular-nums font-medium">
+                                  <td className="py-3.5 px-3 text-right tabular-nums font-medium">
                                     {Math.round(subjectRow.first_mention_rate * 100)}%
+                                  </td>
+                                  <td className="py-3.5 pl-3 text-right whitespace-nowrap">
+                                    {subjectPosition && (
+                                      <Pill tone={subjectPosition.tone}>
+                                        {subjectPosition.label}
+                                      </Pill>
+                                    )}
                                   </td>
                                 </tr>
                               )}
@@ -1966,9 +2039,16 @@ export default async function CompetitionPage({
                                         ? "—"
                                         : c.avg_rank.toFixed(1)}
                                     </td>
-                                    <td className="py-3.5 pl-3 text-right tabular-nums">
+                                    <td className="py-3.5 px-3 text-right tabular-nums">
                                       {Math.round(c.first_mention_rate * 100)}%
                                     </td>
+                                    {/* Empty Status cell — peer rows
+                                        intentionally don't render a
+                                        tier pill (kept slim). The cell
+                                        exists so the 5-column grid
+                                        stays aligned with the header
+                                        and subject row above. */}
+                                    <td className="py-3.5 pl-3" aria-hidden />
                                   </tr>
                                 );
                               })}
@@ -2187,7 +2267,7 @@ export default async function CompetitionPage({
                                       "1px solid color-mix(in oklab, var(--primary) 75%, transparent)",
                                   }}
                                 />
-                                Dominant ≥40%
+                                Dominant ≥40% SoV
                               </span>
                               <span className="inline-flex items-center gap-1.5">
                                 <span
@@ -2198,7 +2278,7 @@ export default async function CompetitionPage({
                                       "color-mix(in oklab, var(--muted) 75%, transparent)",
                                   }}
                                 />
-                                Contested 15-40%
+                                Contested 15-40% SoV
                               </span>
                               <span className="inline-flex items-center gap-1.5">
                                 <span
@@ -2211,7 +2291,7 @@ export default async function CompetitionPage({
                                       "1px solid color-mix(in oklab, var(--warning) 55%, transparent)",
                                   }}
                                 />
-                                Marginal &lt;15%
+                                Marginal &lt;15% SoV
                               </span>
                               <span className="inline-flex items-center gap-1.5">
                                 <span
@@ -2418,10 +2498,26 @@ export default async function CompetitionPage({
                 {hasCoMentions ? (
                   <Card className="p-6 border-border/60">
                     <p className="mb-4 max-w-3xl text-[13px] leading-relaxed text-foreground/75">
-                      Co-mentions show which figures appear in the
-                      same AI answers as {data.subject_name}. They do
-                      not imply favorability, endorsement, or ranking.
+                      Co-mention rate ={" "}
+                      <span className="font-medium text-foreground/85">
+                        % of {data.subject_name}&apos;s answers that also
+                        mention this figure
+                      </span>
+                      . Distinct from the Share of Voice column in the
+                      Standing table — this measures co-appearance, not
+                      visibility. Does not imply favorability,
+                      endorsement, or ranking.
                     </p>
+                    {/* Column header row — labels each value column
+                        explicitly so a reader sees "Co-mention rate"
+                        as a column title, not just buried in the
+                        intro paragraph. Same grid as the rows below
+                        so the labels sit over the right cells. */}
+                    <div className="grid grid-cols-[180px_1fr_72px] items-center gap-4 mb-2 pb-2 border-b border-border/40 text-[10.5px] font-medium uppercase tracking-[0.06em] text-muted-foreground/80">
+                      <span>Figure</span>
+                      <span>Co-mention rate</span>
+                      <span className="text-right">%</span>
+                    </div>
                     <ul className="space-y-3">
                       {data.co_mention_frequency.co_mentions.map((row) => {
                         const sharePct = Math.round(row.share * 100);
