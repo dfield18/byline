@@ -1373,86 +1373,15 @@ function TrajectoryStrip({
                   {m.benchmarkCaption}
                 </div>
               )}
-            {/* Per-platform subline — folded in from the standalone
-                "Mention rate by platform" strip that used to sit
-                below the KPI row, taking ~80px of vertical real
-                estate for a two-line note. Surfaced inline here
-                only on tiles that ship a platformBreakdown (today
-                just AI Mention Rate). Shape: top-3 platforms
-                rendered as "{Name} {pct}%" segments separated by
-                "·"; sorted desc by mention rate. When the spread
-                between the top and bottom platform is ≥
-                KPI_PLATFORM_SPREAD_LOPSIDED (40 pts), a warning-
-                toned "· {N} pt spread" flag appends so a reader
-                catches the "this metric is single-platform-
-                dependent" signal at-a-glance. Renders nothing
-                when platforms ≤ 1 (no spread to talk about). */}
-            {!notMeasured &&
-              m.platformBreakdown &&
-              (() => {
-                const sorted = m.platformBreakdown
-                  .filter(
-                    (p) => p.value !== null && Number.isFinite(p.value),
-                  )
-                  .slice()
-                  .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
-                if (sorted.length < 2) return null;
-                const PLATFORM_BREAKDOWN_TOP_N = 3;
-                const shown = sorted.slice(0, PLATFORM_BREAKDOWN_TOP_N);
-                const remaining = sorted.length - PLATFORM_BREAKDOWN_TOP_N;
-                // Sentiment is the only metric where values can be
-                // negative (range −1..+1). For unsigned rate metrics
-                // (mention_rate, top_result_rate) we clamp to 0..100
-                // and render "{N}%". For signed sentiment we keep
-                // the sign and render "+12%" / "−7%" / "0%" so the
-                // subline shows direction without the user inferring
-                // from absence of "+".
-                const isSigned = m.colorKind === "avg_tone";
-                const toPct = (v: number) => {
-                  const raw = Math.round(v * 100);
-                  return isSigned ? raw : Math.min(100, Math.max(0, raw));
-                };
-                const fmt = (v: number) => {
-                  const n = toPct(v);
-                  if (!isSigned) return `${n}%`;
-                  if (n === 0) return "0%";
-                  return n > 0 ? `+${n}%` : `${n}%`;
-                };
-                const pcts = sorted.map((p) => toPct(p.value as number));
-                // Spread = max − min on whichever scale this metric
-                // uses. For unsigned rates that's pp on 0..100; for
-                // signed sentiment it's pp on −100..+100 so a swing
-                // from −20% to +30% reads as a 50 pt spread.
-                const spread = pcts[0] - pcts[pcts.length - 1];
-                const isLopsided = spread >= KPI_PLATFORM_SPREAD_LOPSIDED;
-                return (
-                  <div className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
-                    <span className="font-medium text-foreground/55">
-                      By platform
-                    </span>
-                    {shown.map((p, i) => (
-                      <span key={`${p.name}-${i}`}>
-                        {" · "}
-                        {p.name}{" "}
-                        <span className="tabular-nums font-medium text-foreground/80">
-                          {fmt(p.value as number)}
-                        </span>
-                      </span>
-                    ))}
-                    {remaining > 0 && (
-                      <span>{" · "}+{remaining} more</span>
-                    )}
-                    {isLopsided && (
-                      <span
-                        className="text-warning tabular-nums"
-                        title="Spread between the highest and lowest platform values. A wide spread means this metric is concentrated on one provider — worth understanding per-platform tactics."
-                      >
-                        {" · "}{spread} pt spread
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
+            {/* Spark + per-platform subline pinned to the tile floor.
+                Subline order changed to sit BELOW the sparkline so
+                the chart leads visually and the textual breakdown
+                supports it; previously the subline sat between the
+                benchmark caption and the spark, which made the
+                eye stop reading mid-tile. Both elements share the
+                mt-auto wrapper so the {spark, subline} block hugs
+                the floor as one unit — sparkline baselines still
+                align across the three tiles. */}
             <div className="mt-auto pt-3">
               <MiniSpark
                 values={m.values}
@@ -1460,6 +1389,75 @@ function TrajectoryStrip({
                 labels={trajectory.weeks}
                 format={m.format}
               />
+              {/* Per-platform subline — top-3 platforms rendered as
+                  "{Name} {pct}%" segments separated by "·", sorted
+                  desc by metric value. When the spread between top
+                  and bottom platforms is ≥ KPI_PLATFORM_SPREAD_LOPSIDED
+                  (40 pts), a warning-toned "· {N} pt spread" flag
+                  appends. Renders nothing when platforms ≤ 1 (no
+                  spread to talk about). */}
+              {!notMeasured &&
+                m.platformBreakdown &&
+                (() => {
+                  const sorted = m.platformBreakdown
+                    .filter(
+                      (p) => p.value !== null && Number.isFinite(p.value),
+                    )
+                    .slice()
+                    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+                  if (sorted.length < 2) return null;
+                  const PLATFORM_BREAKDOWN_TOP_N = 3;
+                  const shown = sorted.slice(0, PLATFORM_BREAKDOWN_TOP_N);
+                  const remaining = sorted.length - PLATFORM_BREAKDOWN_TOP_N;
+                  // Sentiment is the only metric where values can
+                  // be negative (range −1..+1). For unsigned rate
+                  // metrics we clamp to 0..100 and render "{N}%".
+                  // For signed sentiment we keep the sign and
+                  // render "+12%" / "−7%" / "0%" so the subline
+                  // shows direction without the user inferring from
+                  // absence of "+".
+                  const isSigned = m.colorKind === "avg_tone";
+                  const toPct = (v: number) => {
+                    const raw = Math.round(v * 100);
+                    return isSigned ? raw : Math.min(100, Math.max(0, raw));
+                  };
+                  const fmt = (v: number) => {
+                    const n = toPct(v);
+                    if (!isSigned) return `${n}%`;
+                    if (n === 0) return "0%";
+                    return n > 0 ? `+${n}%` : `${n}%`;
+                  };
+                  const pcts = sorted.map((p) => toPct(p.value as number));
+                  const spread = pcts[0] - pcts[pcts.length - 1];
+                  const isLopsided = spread >= KPI_PLATFORM_SPREAD_LOPSIDED;
+                  return (
+                    <div className="mt-2 text-[10.5px] text-muted-foreground leading-relaxed">
+                      <span className="font-medium text-foreground/55">
+                        By platform
+                      </span>
+                      {shown.map((p, i) => (
+                        <span key={`${p.name}-${i}`}>
+                          {" · "}
+                          {p.name}{" "}
+                          <span className="tabular-nums font-medium text-foreground/80">
+                            {fmt(p.value as number)}
+                          </span>
+                        </span>
+                      ))}
+                      {remaining > 0 && (
+                        <span>{" · "}+{remaining} more</span>
+                      )}
+                      {isLopsided && (
+                        <span
+                          className="text-warning tabular-nums"
+                          title="Spread between the highest and lowest platform values. A wide spread means this metric is concentrated on one provider — worth understanding per-platform tactics."
+                        >
+                          {" · "}{spread} pt spread
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
             </div>
             {/* Per-tile footer reserved for the "not measured" case
                 only — the section-level description already carries
