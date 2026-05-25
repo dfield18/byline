@@ -28,7 +28,7 @@ import {
   SiPerplexity,
 } from "react-icons/si";
 import { Header } from "@/components/dashboard/Header";
-import { Card, SectionTitle, Pill, KpiGauge } from "@/components/dashboard/ui";
+import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
 import {
   getSubject,
@@ -1356,31 +1356,21 @@ function TrajectoryStrip({
                 </span>
               )}
             </div>
-            {/* Gauge bar — fill = current value, tick mark = subject-set
-                benchmark. Same visual language as the Visibility
-                briefing tiles' designed gauge. Only renders when a
-                benchmark exists for this metric (Net Favorability
-                doesn't have one, so its tile shows just value +
-                delta + sparkline). Color derived from the same
-                valueColor class the headline number uses so the
-                gauge and the value tone agree. */}
+            {/* Subject-set benchmark caption — was the small text
+                label embedded inside the KpiGauge bar that used to
+                sit here ("vs 70% subject-set avg"). The bar itself
+                is removed at the user's request; the caption stays
+                as a small muted line so the cross-subject comparison
+                signal isn't lost. Renders only when a benchmark
+                exists for this metric (Net Favorability doesn't ship
+                one). */}
             {!notMeasured &&
               latestValue !== null &&
               Number.isFinite(latestValue) &&
-              m.benchmark !== null && (
-                <div className="mt-3">
-                  <KpiGauge
-                    value={latestValue}
-                    benchmark={m.benchmark}
-                    fillColor={
-                      valueColor === "text-success"
-                        ? "var(--success)"
-                        : valueColor === "text-warning"
-                          ? "var(--warning)"
-                          : "var(--primary)"
-                    }
-                    benchmarkLabel={m.benchmarkCaption ?? undefined}
-                  />
+              m.benchmark !== null &&
+              m.benchmarkCaption && (
+                <div className="mt-1.5 text-[11px] text-muted-foreground/75 leading-snug">
+                  {m.benchmarkCaption}
                 </div>
               )}
             {/* Per-platform subline — folded in from the standalone
