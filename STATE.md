@@ -1001,6 +1001,73 @@ Three known inconsistencies between the Platforms and Topics table tooltips, sur
 
 ---
 
+## Follow-up session #5 (2026-05-25) — Competition Standing rework + operator-tooling hardening + multi-tenant cleanup
+
+Ten commits on `main`. The session began as a UI polish pass on the Competitive Visibility spoke, surfaced a metric-coherence bug I shipped halfway through, then expanded into a structural cleanup of the operator tooling and tenant model after a three-agent QA audit caught a class of bugs around CLI tenancy and the worker/CLI pipeline divergence.
+
+- **`cec712a`** — Competition Standing: slim ranking table + KPI sparklines + snapshot-diff strip + strip-plot positioning. Drops the Status column (later restored on subject row only), drops the recharts scatter for a sorted strip plot, adds `TinySpark` + `↑/↓ N pts` deltas to three of four Standing KPI tiles, surfaces `composeCompetitionWhatChanged` as a chip strip under Bottom Line. 2 files, 416 ins / 489 del.
+- **`5543504`** — Subject row tier pill restored + Co-Mentions / Platform-Ownership metric unit labels. After the slim-table commit, the QA pass found a non-leader subject (Vance #3, trailing) had no rank/tier indicator. Restored the Status column with the `Pill` rendered only on the subject row; peers keep an empty cell for grid alignment. Co-Mentions section gained an explicit "Co-mention rate = % of {subject}'s answers that also mention this figure" intro and a column header above the bar list; Platform Ownership legend tier labels suffixed with `SoV` so percentages can't be confused with Standing-table SoV or Co-Mentions co-mention rate. 1 file, 109 ins / 13 del.
+- **`d7427b2`** — `app/refresh.py`: CLI requires org_id (via `--org-id` or `BYLINE_DEFAULT_ORG`). Hit today: a name lookup for "J.D. Vance" silently matched a legacy NULL-org row (id=5) instead of the real `org_internal` row (id=15), routing two historical refreshes into the wrong tenant before being caught. `_find_subject_by_name` now filters by org; `_create_subject` writes `org_id`; `_resolve_org_id` exits with a clear error if neither source provides one. 1 file, 74 ins / 14 del.
+- **`eecf28d`** — `migrations/012_drop_null_org_subjects.sql`: drops the 11 legacy NULL-org subjects (Bernie Sanders, Mitch McConnell, etc.) + all their downstream rows (1868 extractions, 186 refresh_analyses, 132 analysis_runs, 652 model_responses, 29 refresh_runs, 8 jobs via CASCADE), then `ALTER TABLE subjects ALTER COLUMN org_id SET NOT NULL`. With NOT NULL in place, migration 006's partial unique index (`WHERE org_id IS NOT NULL`) covers the whole table by construction. 1 file, 70 ins.
+- **`07abf4a`** — Competition Standing metric coherence: unify all deltas/sparklines on mention rate. The headline cluster bug of the session — the QA agent caught that I had three different "Share of Voice" metrics on one band (`competitive[].sov` mention-rate in the table column, `trajectory.ai_recall` mention-rate in row deltas, `trajectory.share_of_voice` pie-share in the snapshot-diff strip and KPI sparklines I added in `cec712a`). Chip values disagreed numerically with the column they sat under. Switched `competitiveRankSpark`, `topCompetitorGapSpark`, and the snapshot-diff strip's competitor trajectories to `ai_recall` / `mention_rate` so everything reads on one scale. 1 file, 35 ins / 32 del.
+- **`709d9bb`** — `app/pipeline.py`: extract the canonical 5-step refresh chain into a shared module so worker + CLI run the exact same pipeline. Discovered today: `app/refresh.py main()` was only running step 2 (`run_refresh`), skipping steps 3 (`run_analysis`), 4 (`run_cross_analysis`), and 5 (`get_subject_overview` precompute). Every CLI-triggered refresh — including historical backfills, since `--historical-as-of` is CLI-only — shipped with empty per-response extractions, cross-analyzer outputs, and recommended-actions cache, breaking the Narrative / Sources / Recommendations tabs for that subject. The 12 Vance historical backfills earlier in the session had to be manually stitched by running `run_analysis` + `run_cross_analysis` against each `refresh_run_id` after the fact (output: 12 analyses + 12 cross-analyses + 144 extractions landed on refresh_runs 48-59). Worker `_execute_refresh_job` is now a 1-line delegate; CLI `main()` calls `run_full_refresh_pipeline` with `historical_as_of=` when applicable. Historical mode auto-skips steps 1 + 5 (both "latest snapshot" operations a backfill doesn't change). 3 files, 210 ins / 131 del.
+- **`98206dc`** — `app/worker.py`: stuck-job reaper. Hit earlier in the session — TaskStop-ing the in-flight wrong-Vance backfill left `refresh_runs.id=47` orphaned at `status='in_progress'`, which I had to clean up by hand via psql. The per-subject cooldown query in `subjects.py:204` counts `running` jobs against the limit, so one orphan permanently blocks all future refreshes for that subject until manual cleanup. New `reap_stale_jobs(threshold_minutes=10)` (default configurable via `BYLINE_REAP_THRESHOLD_MINUTES`) sweeps both `jobs.status='running'` AND `refresh_runs.status='in_progress'` rows older than the threshold, flips to `failed` with an attributable error string. Called once at worker startup + on every poll iteration before `_claim_next_job`. Public (no leading underscore) so an operator can invoke ad-hoc: `python -c 'from app.worker import reap_stale_jobs; print(reap_stale_jobs())'`. Verified via a synthetic 30-min-old `refresh_runs` orphan — reaped correctly. 1 file, 140 ins / 1 del.
+- **`faecf30`** — Competition Standing: "Filters not applied" advisory above KPI strip + snapshot-diff strip. Matches the same advisory pattern the Trend chart (`~L2337`) and Co-Mentions section (`~L2491`) already use. Standing band was silently rendering all-snapshot trajectory deltas + sparklines under a filtered Bottom Line, which is the most confusable kind of UI dishonesty. 1 file, 25 ins.
+- **`ed35bb7`** — `dashboard/lib/queries.py`: drop dead NULL-org operator-bypass branches. After migration 012 there are zero NULL-org rows and the schema forbids new ones, so `WHERE (s.org_id = %s OR s.org_id IS NULL)` clauses across `list_subjects` / `get_subject` / `get_subject_overview` / `get_prompt_responses` are dead. Collapsed three-case scoping (None / operator-bypass / strict) → two-case (None / strict); removed `_is_operator_org()` helper and `BYLINE_OPERATOR_ORG_ID` from `.env.example`. Verified: `list_subjects(None)` returns 6 subjects across orgs; strict `list_subjects("org_internal")` returns 5 (correctly excludes the Barack Obama subject in another Clerk org). 2 files, 15 ins / 53 del.
+- **`e19cf20`** — QA tail bundle: org defenses + CLI date validation + pre-render visibility + seed env override. Five small defense-in-depth fixes from the audit:
+  - **#7** worker tenancy assertion at claim time (`_claim_next_job` joins to `subjects.org_id`; `_assert_job_tenancy` fails the job if `jobs.org_id ≠ subjects.org_id` — backstop against future enqueue bugs);
+  - **#9** historical-date validation in `refresh.py` (refuses future dates and duplicate `(subject_id, historical_as_of)` pairs, soft-warns on dates pre-`subjects.created_at`);
+  - **#10** `--expect-org` guard on `app.analyzer` and `app.cross_analyzer` CLIs (verifies refresh_run's subject org before running);
+  - **#11** `scripts/seed_2028_gop.py` `--org-id` + `BYLINE_SEED_ORG_ID` override (was hardcoded `org_internal`);
+  - **#12** `run_refresh` pre-render-failure visibility (`run_one` now returns `(success, cost, pre_render_failed)`; aggregator partitions failures into provider-vs-pre-render and emits a loud warning when prompts skipped before reaching a provider — distinguishes "10 successes + 2 setup_inputs typos" from "10 successes + 2 real provider errors"). 6 files, 269 ins / 14 del.
+
+Plus a non-commit operational arc the session also produced:
+
+- **12 historical Vance backfills** at weekly intervals (`2026-05-18` → `2026-03-02`), landing on `subject_id=15` as `refresh_runs 48-59`. First two refreshes (45, 46) landed on the wrong subject (id=5) before the CLI org-gate fix and were cleaned up manually along with a stuck in-progress run 47. Vance's `trajectory.weeks` is now length 13 (1 live + 12 historical), so the Trend section, inline change deltas, and snapshot-diff strip all populate on reload.
+- **Manual analyzer stitch-up** for runs 48-59 — `run_analysis` + `run_cross_analysis` invoked per refresh after `709d9bb`'s pipeline refactor went in, which is what the new structure will avoid having to do for future backfills.
+
+### Metric-naming landmine documented
+
+The `cec712a` → `07abf4a` regression-then-fix turned on a real backend naming inconsistency that's now codified in auto-memory (`memory/byline_metric_naming.md`):
+
+- `competitive[].sov` is **mention rate** (`subject_mentions / total_responses`), despite the field name. The ranking-table column literally reads "Share of Voice" but renders mention rate.
+- `trajectory.share_of_voice` / `competitor_trajectories[].share_of_voice` are **pie-share** (`subject_mentions / sum_all_entity_mentions`). Used by Visibility's Trend chart.
+
+These read as wildly different scales — a subject mentioned in 50% of responses but only 5.4% of total entity mentions shows "50%" in the SoV column but `trajectory.share_of_voice` is 0.054. Anywhere a user reads a delta alongside the SoV column, the trajectory feed has to be `ai_recall` (subject) / `mention_rate` (peers), NOT `share_of_voice`. A proper fix is a backend rename (`competitive[].sov` → `competitive[].mention_rate`) plus column-header relabel, but that's a coordinated change touching many places.
+
+### New shared module: `app/pipeline.py`
+
+Two callers, one chain — adding a new extractor or cross-analyzer to `default_extractors()` / `default_cross_analyzers()` picks it up in both worker + CLI by construction. Adding it to one entry point but not the other is structurally impossible now (the modules don't have their own copies).
+
+```
+run_full_refresh_pipeline(subject_id, name, *, max_concurrency, historical_as_of)
+  ├─ if not historical: _ensure_recent_news_fresh   (step 1)
+  ├─ run_refresh                                    (step 2)
+  ├─ run_analysis(default_extractors)               (step 3)
+  ├─ run_cross_analysis(default_cross_analyzers)    (step 4)
+  └─ if not historical: get_subject_overview        (step 5)
+```
+
+### Tenancy posture after this session
+
+- `subjects.org_id` is `NOT NULL`; legacy NULL-org rows physically deleted.
+- API routes already required org via `_require_org` (pre-existing); no change.
+- Worker now asserts `jobs.org_id == subjects.org_id` at claim time (defense in depth — a future enqueue bug can't leak across tenants).
+- CLI (`refresh.py`) refuses to operate without `--org-id` / `BYLINE_DEFAULT_ORG`.
+- Analyzer + cross_analyzer CLIs accept any `refresh_run_id` by default but support `--expect-org` for ad-hoc safety.
+- Seed script (`scripts/seed_2028_gop.py`) defaults to `org_internal` but takes `--org-id` / `BYLINE_SEED_ORG_ID`.
+- `dashboard/lib/queries.py` operator-bypass branches gone; scoping is now two-case (unscoped operator path / strict by-org).
+
+### Known clean-up still owed
+
+- **Metric rename across backend + UI**: pick `mention_rate` (or `share_of_voice` if intent shifts) and propagate so the field name, column header, and chip labels all describe the same metric. Today's fix unified the deltas/sparklines but the column-header mislabel still exists.
+- **Schema integrity FK delete behavior**: most subjects→child FKs are `NO ACTION`; migration 012 needed a hand-ordered DELETE chain. A future "delete this subject" path will need to re-implement that chain or add `ON DELETE CASCADE` from `subjects` to the analysis layer.
+- **Migration runner**: no `schema_migrations` tracking table; migrations applied by hand. The 008/009 gap (renumber accident) is hidden by manual application.
+- **Heartbeat-based reaper**: a `last_heartbeat_at` column on `jobs` / `refresh_runs` would let the reaper kick faster (e.g. 90s after last beat) without false positives on legitimately-long jobs. Today's threshold is a generous 10 min; fine for v1.
+- **Multi-snapshot data for non-Vance subjects**: Vance now has 13 snapshots; Rubio / DeSantis / Ramaswamy / Youngkin still single-snapshot, so their Trend sections still hide (`hasTrend = weeks.length > 1`). If the trend story matters for them, run historical backfills via the (now full-pipeline-capable) CLI.
+
+---
+
 ## When you come back — quick resume
 
 The active branch is **`main`**. The `fastapi-scaffold` branch was merged
