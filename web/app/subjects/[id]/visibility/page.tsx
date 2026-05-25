@@ -23,7 +23,8 @@ import { notFound, redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
-import { Card, SectionTitle, Pill, KpiGauge } from "@/components/dashboard/ui";
+import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
+import { BottomLineBlock } from "@/components/dashboard/BottomLineBlock";
 import { TrendOverTime } from "./TrendOverTime";
 import { OverviewSubNav } from "../OverviewSubNav";
 import { VisibilityTopicFilter } from "./VisibilityTopicFilter";
@@ -143,12 +144,12 @@ function capitalizeFirst(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-// For values that are ALREADY in pp units (e.g. backend KpiValue.delta
+// For values that are ALREADY in pts units (e.g. backend KpiValue.delta
 // where _kpi_with_trend has already multiplied by 100). Just round
 // and append "pp" — no scale change. The earlier 0..1-share variant
 // (`formatSignedPp`) was removed when the Largest Movement card was
 // folded into the Topic Visibility table; every remaining caller
-// hands deltas in pp units already.
+// hands deltas in pts units already.
 // Returns a signed "±N pts" string (or "0 pts"). Unit changed from
 // "pp" → "pts" to match Overview's delta formatter and the
 // Competitive Position stat stack, so every delta on every spoke
@@ -318,9 +319,9 @@ type WhatChangedDelta = {
   // Plain-language label rendered in the sidebar row, e.g.
   // "Overall mention rate" or a capitalized topic label.
   label: string;
-  // Signed change in percentage points (pp). Positive = up, negative
+  // Signed change in percentage points (pts). Positive = up, negative
   // = down. Caller formats the value via formatSignedPp's *Raw*
-  // variant since we hand back pp units, not a 0..1 share.
+  // variant since we hand back pts units, not a 0..1 share.
   deltaPp: number;
   // Drives the colored arrow + sign coloring in the row.
   kind: "overall" | "topic";
@@ -379,9 +380,9 @@ function composeWhatChanged({
   const latestDate = trajectoryWeeks[latestIdx];
   const priorDate = trajectoryWeeks[priorIdx];
 
-  // Match the backend snapshot_diff's 5-pp filter on topic movers
-  // so micro-jitter doesn't surface (e.g., 1-pp swings on small N).
-  // The overall recall delta uses a lower 1-pp floor — the headline
+  // Match the backend snapshot_diff's 5-pts filter on topic movers
+  // so micro-jitter doesn't surface (e.g., 1-pts swings on small N).
+  // The overall recall delta uses a lower 1-pts floor — the headline
   // line earns a place on the card even for smaller swings.
   const TOPIC_MIN_DELTA = 0.05;
   const OVERALL_MIN_DELTA = 0.01;
@@ -407,7 +408,7 @@ function composeWhatChanged({
     }
   }
 
-  // Top topic movers — collect all that clear the 5-pp floor, sort
+  // Top topic movers — collect all that clear the 5-pts floor, sort
   // by absolute magnitude desc, take the top 3. Each topic uses its
   // OWN first/last measured indices within the window so a topic
   // with sparse data still surfaces if it has any two measured
@@ -598,7 +599,7 @@ export default async function VisibilityPage({
     : null;
   const headerMeta =
     updated !== null
-      ? `Updated ${updated} · ${data.meta.n_responses} responses`
+      ? `Updated ${updated} · ${data.meta.n_responses} response${data.meta.n_responses === 1 ? "" : "s"}`
       : "";
 
   // ── Derived data shared across sections ─────────────────────────
@@ -658,7 +659,7 @@ export default async function VisibilityPage({
     mention_rate: number | null;
     avg_rank: number | null;
     first_mention_rate: number | null;
-    delta: number | null; // signed pp (already × 100)
+    delta: number | null; // signed pts (already × 100)
     n_responses: number;
   };
 
@@ -888,7 +889,20 @@ export default async function VisibilityPage({
       label: "AI Mention Rate",
       value: formatPct(mentionRate),
       helper: "Share of monitored prompts where the subject appeared.",
-      valueColor: toneByThreshold(mentionRate, "higher_better", 0.7, 0.4),
+      // Aligned with STATUS_STRONG_MENTION_RATE / STATUS_WEAK_MENTION_RATE
+      // (this file's own platform-status thresholds) and with Overview's
+      // KPI_STRONG_MENTION_RATE constant — same metric, same tier
+      // semantics across both spokes and across this spoke's own
+      // platform pills. Was inline (0.7 / 0.4), which colored a 65%
+      // mention rate neutral here but would color it success on
+      // Overview's tile next to it; readers cross-checking the two
+      // spokes saw the same number painted two different colors.
+      valueColor: toneByThreshold(
+        mentionRate,
+        "higher_better",
+        STATUS_STRONG_MENTION_RATE,
+        STATUS_WEAK_MENTION_RATE,
+      ),
       polarity: "higher_better",
       gaugeValue: mentionRate,
       gaugeBenchmark: bm.ai_mention_rate_avg,
@@ -971,7 +985,7 @@ export default async function VisibilityPage({
         value: formatPct(weakestRecall),
         valueSuffix: weakestSuffix,
         helper:
-          "Lowest topic-level mention rate in this snapshot. The topic name is appended to the rate only when its rate is at least 15 pp below the average of the other tracked topics.",
+          "Lowest topic-level mention rate in this snapshot. The topic name is appended to the rate only when its rate is at least 15 pts below the average of the other tracked topics.",
         valueColor: toneByThreshold(
           weakestRecall,
           "higher_better",
@@ -1085,15 +1099,13 @@ export default async function VisibilityPage({
                 }}
               />
               <div className="relative">
-              {/* BOTTOM LINE eyebrow + verdict prose — same pattern
-                  Overview's Vitals card uses (BottomLineBlock), so
-                  the two heroes lead with identical chrome. */}
-              <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-primary">
-                Bottom line
-              </div>
-              <p className="mt-1.5 text-[15.5px] leading-relaxed text-foreground/90">
-                {briefingSummary}
-              </p>
+              {/* Shared BottomLineBlock — same component the Overview
+                  Vitals card uses, so the two heroes have identical
+                  type + spacing + title/body split treatment. The
+                  briefingSummary is a server-polished summary line
+                  (not a templated gap verdict), so bodyTone="neutral"
+                  — no warning-tone left rule on the body clause. */}
+              <BottomLineBlock text={briefingSummary} bodyTone="neutral" />
 
               {/* Coverage note — surfaces missing platforms inline
                   with the briefing so every percentage below is read
@@ -1110,28 +1122,18 @@ export default async function VisibilityPage({
               )}
 
               {/* 4 KPI cards. Each has label + tooltip + value +
-                  optional subtitle (e.g. the gap topic name) +
-                  plain-English helper underneath. Tiles with an
-                  `anchor` are wrapped in an in-page link so the
+                  optional subtitle + plain-English helper. Tiles with
+                  an `anchor` are wrapped in an in-page link so the
                   briefing tile becomes an entry point into the
-                  deeper section (e.g. clicking AI Mention Rate
-                  scrolls down to the Trend section). */}
-              {/* KPI tile strip — matches the Overview Vitals strip.
-                  Each tile: label → value → optional comparison-bar
-                  gauge → caption. Caption sits BELOW the value
-                  (the prior version put Weakest Topic's caption
-                  ABOVE the value, which read as misordered). Gauge
-                  uses the shared KpiGauge component from ui.tsx
-                  so the bar treatment is pixel-identical across
-                  spokes. */}
+                  deeper section below. KpiGauge bars were dropped
+                  in 2026-05-25's Overview consistency pass so this
+                  spoke matches Overview's bar-free tile treatment;
+                  the benchmark caption ("vs N% subject-set avg")
+                  stays as a small muted line where the gauge used
+                  to render, so the cross-subject comparison signal
+                  isn't lost. */}
               <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 items-stretch">
                 {kpis.map((k) => {
-                  const gaugeFill =
-                    k.valueColor === "text-success"
-                      ? "var(--success)"
-                      : k.valueColor === "text-warning"
-                        ? "var(--warning)"
-                        : "var(--primary)";
                   const tileInner = (
                     <>
                       <div className="flex items-start justify-between gap-2">
@@ -1160,22 +1162,22 @@ export default async function VisibilityPage({
                           </span>
                         )}
                       </div>
-                      {k.gaugeValue !== null &&
-                        Number.isFinite(k.gaugeValue) && (
-                          <div className="mt-3">
-                            <KpiGauge
-                              value={k.gaugeValue}
-                              benchmark={k.gaugeBenchmark}
-                              fillColor={gaugeFill}
-                              benchmarkLabel={k.caption ?? undefined}
-                            />
-                          </div>
-                        )}
-                      {/* Standalone caption only when the gauge isn't
-                          consuming it (no-benchmark tiles like Weakest
-                          Topic). Otherwise the caption renders inside
-                          the gauge as the tick legend so the tick's
-                          meaning is unambiguous. */}
+                      {/* Benchmark caption ("vs N% subject-set avg")
+                          — was embedded inside the KpiGauge bar that
+                          used to render here; now a small muted line
+                          in the same slot. Renders for tiles that
+                          ship a benchmark (the gauge gated on
+                          gaugeBenchmark, so use the same gate). */}
+                      {k.caption && k.gaugeBenchmark !== null && (
+                        <div className="mt-1.5 text-[11px] text-muted-foreground/75 leading-snug">
+                          {k.caption}
+                        </div>
+                      )}
+                      {/* Tiles without a benchmark (e.g. Weakest Topic
+                          — no cross-subject comparison) keep their
+                          caption at the floor via mt-auto so all
+                          tiles' captions baseline-align across the
+                          row. */}
                       {k.caption && k.gaugeBenchmark === null && (
                         <div
                           className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug line-clamp-2"
@@ -1703,9 +1705,9 @@ export default async function VisibilityPage({
                         <tbody>
                           {platforms.map((p) => {
                             // When scoped to a topic, the row carries
-                            // its own per-topic delta (in pp); when
+                            // its own per-topic delta (in pts); when
                             // unscoped, fall back to the all-topics
-                            // platform_recall delta. Both come in pp
+                            // platform_recall delta. Both come in pts
                             // units so the formatter is the same.
                             const change = scopedTopic
                               ? ((p as { delta: number | null }).delta ?? null)
