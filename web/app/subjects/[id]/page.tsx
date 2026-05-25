@@ -1146,17 +1146,16 @@ function deriveCompetitivePosition(
 function TrajectoryStrip({
   trajectory,
   benchmarks,
-  platformRecall,
+  perPlatformKpis,
 }: {
   trajectory: SubjectOverview["trajectory"];
   benchmarks: SubjectOverview["subject_set_benchmarks"];
-  // Per-platform mention-rate breakdown. Only the AI Mention Rate
-  // tile renders this as a compact subline ("By platform · Gemini
-  // 80% · ChatGPT 20%") because mention rate is the only KPI in
-  // the strip with a per-platform decomposition shipped on the
-  // payload. Other metrics (favorability / top-result) don't have
-  // analogous platform breakdowns yet.
-  platformRecall: SubjectOverview["platform_recall"];
+  // Per-platform breakdown for ALL three KPI tiles. The payload
+  // ships mention_rate, avg_sentiment, and first_mention_rate per
+  // platform on a single per_platform_kpis array; each metric
+  // pulls the field it needs. Earlier this was a narrower
+  // `platformRecall` prop that only carried mention rate.
+  perPlatformKpis: SubjectOverview["per_platform_kpis"];
 }) {
   // Cross-subject benchmark caption — null when there's only one
   // subject in the set (no peer to compare against) or when the
@@ -1183,18 +1182,19 @@ function TrajectoryStrip({
     // a single set-wide number meaningfully).
     benchmark: number | null;
     benchmarkCaption: string | null;
-    // Per-platform mention-rate breakdown. Populated only for the
-    // AI Mention Rate tile; other tiles leave this undefined and
-    // the subline-render path no-ops.
-    platformBreakdown?: SubjectOverview["platform_recall"];
+    // Per-platform breakdown for this metric. Generic
+    // {name, value} pairs so each metric can pull a different
+    // field off per_platform_kpis (mention_rate / avg_sentiment /
+    // first_mention_rate) without the consumer needing to know.
+    platformBreakdown?: { name: string; value: number | null }[];
   }[] = [
     {
       title: "AI Mention Rate",
       // "across all topics" qualifier disambiguates this KPI from the
       // topic-specific mention rate shown in the verdict and Gap card
       // — fast readers saw "AI Mention Rate 90%" beside a verdict
-      // saying "mentioned in 50% of answers" and stalled. Average
-      // Tone + Top Result Rate are also all-topics figures but don't
+      // saying "mentioned in 50% of answers" and stalled. The other
+      // tiles in this strip are also all-topics figures but don't
       // co-appear with a topic-specific number, so no qualifier
       // needed there.
       subtitle: "across all topics",
@@ -1206,24 +1206,22 @@ function TrajectoryStrip({
       benchmarkCaption: bmCaption(benchmarks?.ai_mention_rate_avg ?? null),
       // Per-platform decomposition of THIS metric's value — folded
       // in from the standalone "Mention rate by platform" strip
-      // that used to sit below the KPI row. Reader can answer "is
-      // a 50% mention rate driven equally by both AI platforms,
-      // or by one carrying the other?" without scanning to a
-      // separate component.
-      platformBreakdown: platformRecall,
+      // that used to sit below the KPI row. Same pattern (and same
+      // subline renderer) used by Net Favorability + First Result
+      // Mentioned below; all three pull the per_platform_kpis array
+      // shipped on SubjectOverview.
+      platformBreakdown: perPlatformKpis.map((p) => ({
+        name: p.name,
+        value: p.mention_rate,
+      })),
     },
-    {
-      title: "Net Favorability",
-      values: trajectory.avg_sentiment,
-      format: (v) => formatTonePct(v),
-      tooltip: "Net favorability — the mean sentiment score across all AI answers in this snapshot, weighted by intensity. Range −100% (most unfavorable) to +100% (most favorable); 0% is neutral. Measures how favorably AI characterizes the subject when it does mention them.",
-      colorKind: "avg_tone",
-      // Sentiment doesn't have a cross-subject average on the
-      // payload — would be misleading anyway since each subject's
-      // sentiment distribution is shaped by their topic mix.
-      benchmark: null,
-      benchmarkCaption: null,
-    },
+    // Order: AI Mention Rate → First Result Mentioned → Net
+    // Favorability. The two visibility metrics (presence + pole-
+    // position) sit together on the left + center; favorability
+    // sits on the right as the qualitative complement to the two
+    // structural visibility numbers. The earlier order put
+    // favorability between them, breaking the "visibility →
+    // visibility quality → sentiment" reading flow.
     {
       title: "First Result Mentioned",
       values: trajectory.top_result_rate,
@@ -1237,6 +1235,32 @@ function TrajectoryStrip({
       // first), per the api.ts type comment.
       benchmark: benchmarks?.first_mention_rate_avg ?? null,
       benchmarkCaption: bmCaption(benchmarks?.first_mention_rate_avg ?? null),
+      // Per-platform first_mention_rate — answers "which AI lists
+      // this subject first most often?" right next to the headline.
+      platformBreakdown: perPlatformKpis.map((p) => ({
+        name: p.name,
+        value: p.first_mention_rate,
+      })),
+    },
+    {
+      title: "Net Favorability",
+      values: trajectory.avg_sentiment,
+      format: (v) => formatTonePct(v),
+      tooltip: "Net favorability — the mean sentiment score across all AI answers in this snapshot, weighted by intensity. Range −100% (most unfavorable) to +100% (most favorable); 0% is neutral. Measures how favorably AI characterizes the subject when it does mention them.",
+      colorKind: "avg_tone",
+      // Sentiment doesn't have a cross-subject average on the
+      // payload — would be misleading anyway since each subject's
+      // sentiment distribution is shaped by their topic mix.
+      benchmark: null,
+      benchmarkCaption: null,
+      // Per-platform avg_sentiment — answers "is one AI more
+      // favorable than the other?" inline. Signed values (range
+      // −1..+1); the subline renderer handles signing for the
+      // avg_tone colorKind.
+      platformBreakdown: perPlatformKpis.map((p) => ({
+        name: p.name,
+        value: p.avg_sentiment,
+      })),
     },
   ];
 
@@ -1386,12 +1410,29 @@ function TrajectoryStrip({
                 const PLATFORM_BREAKDOWN_TOP_N = 3;
                 const shown = sorted.slice(0, PLATFORM_BREAKDOWN_TOP_N);
                 const remaining = sorted.length - PLATFORM_BREAKDOWN_TOP_N;
-                const pcts = sorted.map((p) =>
-                  Math.min(
-                    100,
-                    Math.max(0, Math.round((p.value as number) * 100)),
-                  ),
-                );
+                // Sentiment is the only metric where values can be
+                // negative (range −1..+1). For unsigned rate metrics
+                // (mention_rate, top_result_rate) we clamp to 0..100
+                // and render "{N}%". For signed sentiment we keep
+                // the sign and render "+12%" / "−7%" / "0%" so the
+                // subline shows direction without the user inferring
+                // from absence of "+".
+                const isSigned = m.colorKind === "avg_tone";
+                const toPct = (v: number) => {
+                  const raw = Math.round(v * 100);
+                  return isSigned ? raw : Math.min(100, Math.max(0, raw));
+                };
+                const fmt = (v: number) => {
+                  const n = toPct(v);
+                  if (!isSigned) return `${n}%`;
+                  if (n === 0) return "0%";
+                  return n > 0 ? `+${n}%` : `${n}%`;
+                };
+                const pcts = sorted.map((p) => toPct(p.value as number));
+                // Spread = max − min on whichever scale this metric
+                // uses. For unsigned rates that's pp on 0..100; for
+                // signed sentiment it's pp on −100..+100 so a swing
+                // from −20% to +30% reads as a 50 pt spread.
                 const spread = pcts[0] - pcts[pcts.length - 1];
                 const isLopsided = spread >= KPI_PLATFORM_SPREAD_LOPSIDED;
                 return (
@@ -1399,31 +1440,22 @@ function TrajectoryStrip({
                     <span className="font-medium text-foreground/55">
                       By platform
                     </span>
-                    {shown.map((p, i) => {
-                      const pct = Math.min(
-                        100,
-                        Math.max(
-                          0,
-                          Math.round((p.value as number) * 100),
-                        ),
-                      );
-                      return (
-                        <span key={`${p.name}-${i}`}>
-                          {" · "}
-                          {p.name}{" "}
-                          <span className="tabular-nums font-medium text-foreground/80">
-                            {pct}%
-                          </span>
+                    {shown.map((p, i) => (
+                      <span key={`${p.name}-${i}`}>
+                        {" · "}
+                        {p.name}{" "}
+                        <span className="tabular-nums font-medium text-foreground/80">
+                          {fmt(p.value as number)}
                         </span>
-                      );
-                    })}
+                      </span>
+                    ))}
                     {remaining > 0 && (
                       <span>{" · "}+{remaining} more</span>
                     )}
                     {isLopsided && (
                       <span
                         className="text-warning tabular-nums"
-                        title="Spread between the highest and lowest platform mention rates. A wide spread means visibility is concentrated on one provider — worth understanding per-platform tactics."
+                        title="Spread between the highest and lowest platform values. A wide spread means this metric is concentrated on one provider — worth understanding per-platform tactics."
                       >
                         {" · "}{spread} pt spread
                       </span>
@@ -2331,7 +2363,7 @@ export default async function SubjectOverviewPage({
                     <TrajectoryStrip
                       trajectory={data.trajectory}
                       benchmarks={data.subject_set_benchmarks}
-                      platformRecall={data.platform_recall}
+                      perPlatformKpis={data.per_platform_kpis}
                     />
                     {data.trajectory.weeks.length >= 2 && (
                       <div className="mt-4 flex justify-end">
