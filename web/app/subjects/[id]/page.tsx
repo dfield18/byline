@@ -465,12 +465,12 @@ function TopicBarRow({
 // Top narrative clusters list for the Band 2 Top Narratives card.
 // Surfaces the AI's RECURRING FRAMINGS — e.g. "MAGA Alignment",
 // "Foreign Policy Critique" — and how often each appears across
-// responses. Visually parallels the now-relocated Visibility-by-
-// topic card via the shared TopicBarRow component (same row
-// layout, label + bar + %). Each bar is sentiment-toned (favorable
-// / critical / neutral) from cluster.sentiment_mean so the color
-// answers WHETHER each framing is positive, not just HOW
-// prevalent it is.
+// responses. Text-only treatment: cluster name on the left, share
+// % on the right, with a leading sentiment dot (favorable green /
+// critical amber / neutral primary) so the framing's direction is
+// readable without the visual weight of bar tracks. Bars live on
+// the sibling Visibility-by-topic tile up in the Vitals row; this
+// card stays text-led to differentiate the two surfaces' shapes.
 function TopNarrativesList({
   clusters,
 }: {
@@ -482,41 +482,60 @@ function TopNarrativesList({
     .slice(0, 4);
   if (sorted.length === 0) return null;
   return (
-    <div className="mt-4">
-      <div className="space-y-2.5">
-        {sorted.map((c) => {
-          // Defensive: clamp share to [0,1] after a finite check
-          // (Math.min/max propagate NaN, so backend regression
-          // producing NaN share would land as a "NaN%" bar width
-          // without the explicit guard).
-          const safeShare = Number.isFinite(c.share)
-            ? Math.max(0, Math.min(1, c.share))
-            : 0;
-          // Tone the bar by the cluster's mean sentiment (not by
-          // share rank). ±0.1 inclusive thresholds match the
-          // backend's net_sentiment classification so the bar
-          // coloring agrees with how the analyzer scored each
-          // response. Null sentiment_mean → neutral.
-          const tone: "success" | "warning" | "neutral" =
-            c.sentiment_mean === null
-              ? "neutral"
-              : c.sentiment_mean >= 0.1
-                ? "success"
-                : c.sentiment_mean <= -0.1
-                  ? "warning"
-                  : "neutral";
-          return (
-            <TopicBarRow
-              key={c.name}
-              label={c.name}
-              pct={Math.round(safeShare * 100)}
-              highlight={null}
-              tone={tone}
+    <ul className="mt-4 space-y-2">
+      {sorted.map((c) => {
+        // Defensive: clamp share to [0,1] after a finite check
+        // (Math.min/max propagate NaN, so backend regression
+        // producing NaN share would land as a "NaN%" without the
+        // explicit guard).
+        const safeShare = Number.isFinite(c.share)
+          ? Math.max(0, Math.min(1, c.share))
+          : 0;
+        // Tone the leading dot + share % by the cluster's mean
+        // sentiment. ±0.1 inclusive thresholds match the backend's
+        // net_sentiment classification so the dot agrees with how
+        // the analyzer scored each response. Null sentiment_mean →
+        // neutral.
+        const tone: "success" | "warning" | "neutral" =
+          c.sentiment_mean === null
+            ? "neutral"
+            : c.sentiment_mean >= 0.1
+              ? "success"
+              : c.sentiment_mean <= -0.1
+                ? "warning"
+                : "neutral";
+        const dotBg =
+          tone === "success"
+            ? "var(--success)"
+            : tone === "warning"
+              ? "var(--warning)"
+              : "var(--primary)";
+        const pctClass =
+          tone === "success"
+            ? "text-success"
+            : tone === "warning"
+              ? "text-warning"
+              : "text-foreground";
+        return (
+          <li
+            key={c.name}
+            className="flex items-baseline gap-3 text-[13px] leading-snug"
+          >
+            <span
+              aria-hidden
+              className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ background: dotBg }}
             />
-          );
-        })}
-      </div>
-    </div>
+            <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+              {c.name}
+            </span>
+            <span className={`tabular-nums font-semibold ${pctClass}`}>
+              {Math.round(safeShare * 100)}%
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -978,25 +997,87 @@ function TrajectoryStrip({
       {renderTrajectoryTile(metrics[0])}
       {/* Net Favorability (trajectory) */}
       {renderTrajectoryTile(metrics[1])}
-      {/* Visibility by topic — snapshot-only, no spark / benchmark
-          / delta. Value = weakest topic's mention rate; suffix =
-          that topic's name; color tracks the diagnosis (warning if
-          there's a real spread, success if even the weakest is
-          ≥70%). The full per-topic bar list lives on the Band 2
-          Top Narratives card's sibling Visibility deep-dive. */}
-      <KpiVitalsTile
-        label="Visibility by topic"
-        tooltipText={`The weakest tracked topic for ${subjectName} — the topic with the lowest AI mention rate in the current snapshot. Color is warning when at least one topic trails the others, success when even the weakest is ≥70%, neutral otherwise. Open the Visibility deep-dive (link below) for the full per-topic breakdown.`}
-        value={
-          weakestTopicPct !== null ? `${weakestTopicPct}%` : "—"
-        }
-        valueSuffix={weakestTopic?.label ?? null}
-        valueColor={
-          weakestTopicPct !== null
-            ? weakestTopicColor
-            : "text-muted-foreground"
-        }
-      />
+      {/* Visibility by topic — per-topic mention-rate bars (top 4
+          tracked topics, sorted descending). Differentiates from
+          the Top Narratives card in Band 2 which stays text-only;
+          the bar surface lives up here in the Vitals row so a
+          reader sees the per-topic spread at a glance. Outer
+          chrome (rounded-md bg-muted/40 p-4 etc.) matches
+          KpiVitalsTile's baseClasses so the three Vitals tiles
+          read as one row. */}
+      {withRecallSnap.length > 0 && (
+        <div className="flex h-full flex-col rounded-md bg-muted/40 p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
+                Visibility by topic
+              </div>
+              {/* Subtitle slot left empty (non-breaking space) so
+                  the title block occupies the same vertical space
+                  as the sibling tiles' "across all topics" / etc.
+                  subtitle lines. */}
+              <div className="text-[10px] text-muted-foreground/75 lowercase mt-0.5">
+                {" "}
+              </div>
+            </div>
+            <KpiTooltipIcon
+              text={`Mention rate per tracked topic for ${subjectName} on topic-area questions (where the prompt doesn't name the subject directly). Bars sorted highest to lowest; warning tone on the weakest topic when there's a real spread. Open the Visibility deep-dive (link below) for snapshot + per-platform detail.`}
+            />
+          </div>
+          {/* Weakest-topic lead line — same shape as the AI Mention
+              Rate tile's delta line. Warning when there's a real
+              spread; success when even the weakest is ≥70%; silent
+              otherwise. */}
+          {weakestTopic && weakestTopicPct !== null && (
+            <p
+              className={`mt-1 text-[12px] font-medium ${
+                gapExistsSnap
+                  ? "text-warning"
+                  : allHighSnap
+                    ? "text-success"
+                    : "text-muted-foreground"
+              }`}
+            >
+              {gapExistsSnap
+                ? `Weakest: ${weakestTopic.label} ${weakestTopicPct}%`
+                : allHighSnap
+                  ? `Floor: ${weakestTopicPct}% (every topic ≥70%)`
+                  : `Floor: ${weakestTopicPct}%`}
+            </p>
+          )}
+          {/* Bar list. Reuses TopicBarRow for visual consistency
+              with the sibling rendering on the Visibility deep-
+              dive. Top 4 only — keeps the tile compact alongside
+              the other Vitals tiles. */}
+          {(() => {
+            const sortedDesc = withRecallSnap
+              .slice()
+              .sort((a, b) => (b.ai_recall ?? 0) - (a.ai_recall ?? 0))
+              .slice(0, 4);
+            const weakestRate = weakestTopic?.ai_recall ?? null;
+            const isWeakestRow = (t: (typeof sortedDesc)[number]) =>
+              weakestRate !== null &&
+              Math.abs((t.ai_recall ?? 0) - weakestRate) < 0.001;
+            return (
+              <div className="mt-3 space-y-2">
+                {sortedDesc.map((t) => (
+                  <TopicBarRow
+                    key={t.label}
+                    label={t.label}
+                    pct={Math.min(
+                      100,
+                      Math.round((t.ai_recall ?? 0) * 100),
+                    )}
+                    highlight={
+                      gapExistsSnap && isWeakestRow(t) ? "weakest" : null
+                    }
+                  />
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }
@@ -1630,7 +1711,7 @@ export default async function SubjectOverviewPage({
                         </div>
                         <TopNarrativesList clusters={data.narrative_clusters} />
                         <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
-                          Shares can overlap · bars don&apos;t sum to 100%
+                          Shares can overlap · values don&apos;t sum to 100%
                         </p>
                         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
                           <span className="inline-flex items-center gap-1">
