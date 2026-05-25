@@ -150,6 +150,121 @@ def _lookup_subject_name(subject_id: int) -> str | None:
     return row[0] if row else None
 
 
+# ─── stale-job reaper ────────────────────────────────────────────────
+#
+# When the worker process is SIGKILL'd mid-job (OOM, host crash,
+# platform-grace-window expiry, manual `kill -9`), `_mark_failed`
+# never runs — the job row stays `status='running'` and the
+# refresh_runs row stays `status='in_progress'` forever. That's bad
+# beyond looking ugly: the per-subject cooldown query in
+# `app/api/routes/subjects.py` counts `running` jobs against the
+# limit, so a single stuck row permanently blocks every future
+# refresh attempt for that subject until an operator opens psql.
+#
+# The reaper is the safety net. On each poll iteration (and at
+# worker startup, before the loop begins) it sweeps both tables for
+# rows that have been `running` / `in_progress` longer than a
+# threshold and flips them to `failed`. The threshold is generous
+# (default 10 minutes) — a real refresh-pipeline run is ~2-5 min
+# end-to-end, so 10 min leaves plenty of headroom while still
+# clearing the runway in single-digit minutes after a crash.
+#
+# Why no heartbeat: a heartbeat-updated `last_heartbeat_at` column
+# would let us reap faster (e.g., 90s after last beat) without
+# false positives on long jobs. But that needs a schema change and
+# a heartbeat coroutine inside the pipeline; for v1, a fixed
+# threshold is good enough and zero-config.
+
+
+def _reap_threshold_minutes() -> int:
+    """How long a row can sit in running/in_progress before being
+    considered stuck. Configurable via env so an operator on a
+    slower environment (or running unusually long jobs) can extend
+    it without code changes."""
+    try:
+        return max(1, int(os.environ.get("BYLINE_REAP_THRESHOLD_MINUTES", "10")))
+    except ValueError:
+        logger.warning(
+            "Invalid BYLINE_REAP_THRESHOLD_MINUTES; falling back to 10."
+        )
+        return 10
+
+
+def reap_stale_jobs(threshold_minutes: int | None = None) -> dict[str, int]:
+    """Mark stuck jobs/refresh_runs as failed. Returns a count dict
+    suitable for logging. Safe to call concurrently from multiple
+    workers — the WHERE clause is naturally idempotent (a row already
+    flipped to 'failed' won't match `status='running'` on the next
+    call). Exposed as a public name (no underscore prefix) so an
+    operator can invoke it ad-hoc:
+        python -c 'from app.worker import reap_stale_jobs; \\
+                   print(reap_stale_jobs())'
+    """
+    threshold = threshold_minutes if threshold_minutes is not None else _reap_threshold_minutes()
+    reaped: dict[str, int] = {"jobs": 0, "refresh_runs": 0}
+    try:
+        with psycopg.connect(get_database_url()) as conn:
+            with conn.cursor() as cur:
+                # `jobs.status='running'` with a stale started_at →
+                # mark failed with a reaper-attributable error string
+                # so the UI / monitoring can distinguish reaper kills
+                # from in-pipeline failures. Subject_id + age go to
+                # logs below for operator visibility.
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'failed',
+                        completed_at = clock_timestamp(),
+                        error = format(
+                            'reaped: job in running state for >%s min (likely worker SIGKILL or crash)',
+                            %s
+                        )
+                    WHERE status = 'running'
+                      AND started_at < clock_timestamp() - (INTERVAL '1 minute' * %s)
+                    RETURNING id, subject_id,
+                        EXTRACT(EPOCH FROM (clock_timestamp() - started_at))::int
+                    """,
+                    (threshold, threshold, threshold),
+                )
+                job_rows = cur.fetchall()
+                # `refresh_runs.status='in_progress'` covers BOTH the
+                # worker-orchestrated path AND CLI-direct runs (a
+                # SIGKILL'd `python -m app.refresh` leaves a refresh_runs
+                # orphan but no jobs row). Reaping this table
+                # independently catches both cases.
+                cur.execute(
+                    """
+                    UPDATE refresh_runs
+                    SET status = 'failed',
+                        completed_at = clock_timestamp()
+                    WHERE status = 'in_progress'
+                      AND started_at < clock_timestamp() - (INTERVAL '1 minute' * %s)
+                    RETURNING id, subject_id,
+                        EXTRACT(EPOCH FROM (clock_timestamp() - started_at))::int
+                    """,
+                    (threshold,),
+                )
+                rr_rows = cur.fetchall()
+            conn.commit()
+        for jid, sid, age in job_rows:
+            logger.warning(
+                "Reaped stale job %s (subject_id=%s, age=%ds, threshold=%dmin)",
+                jid, sid, age, threshold,
+            )
+        for rid, sid, age in rr_rows:
+            logger.warning(
+                "Reaped stale refresh_run %s (subject_id=%s, age=%ds, threshold=%dmin)",
+                rid, sid, age, threshold,
+            )
+        reaped["jobs"] = len(job_rows)
+        reaped["refresh_runs"] = len(rr_rows)
+    except psycopg.Error:
+        # The reaper itself failing is non-fatal — the loop's next
+        # iteration retries. Log loudly so monitoring sees it.
+        logger.exception("Reaper failed (will retry on next poll cycle)")
+    return reaped
+
+
 # ─── job kinds ───────────────────────────────────────────────────────
 
 
@@ -180,9 +295,33 @@ def _install_signal_handlers() -> None:
 
 async def _main(poll_seconds: float) -> None:
     _install_signal_handlers()
-    logger.info("Worker started. Polling every %.1fs.", poll_seconds)
+    threshold = _reap_threshold_minutes()
+    logger.info(
+        "Worker started. Polling every %.1fs, stale-job threshold=%dmin.",
+        poll_seconds, threshold,
+    )
+
+    # Startup reap — clears any orphans the previous worker (or a
+    # SIGKILL'd CLI run) left behind. Without this, subjects with
+    # stuck rows would stay blocked until the next normal poll cycle
+    # tripped the reaper anyway, but doing it eagerly at startup
+    # makes "restart the worker" the obvious recovery action.
+    startup_reaped = reap_stale_jobs(threshold)
+    if startup_reaped["jobs"] or startup_reaped["refresh_runs"]:
+        logger.warning(
+            "Startup reaper cleared %d job(s) and %d refresh_run(s).",
+            startup_reaped["jobs"], startup_reaped["refresh_runs"],
+        )
 
     while not _should_stop:
+        # Per-iteration reap. Cheap when the tables are clean (two
+        # UPDATEs matching zero rows); essential when another worker
+        # process or a CLI run has died mid-job and left orphans.
+        # Runs BEFORE _claim_next_job so a freshly-reaped subject's
+        # cooldown counter is correct by the time the next enqueue
+        # request lands.
+        reap_stale_jobs(threshold)
+
         try:
             job = _claim_next_job()
         except psycopg.Error as exc:
