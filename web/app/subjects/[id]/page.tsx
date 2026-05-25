@@ -788,15 +788,21 @@ function TrajectoryStrip({
   trajectory,
   benchmarks,
   perPlatformKpis,
+  narrativeClusters,
 }: {
   trajectory: SubjectOverview["trajectory"];
   benchmarks: SubjectOverview["subject_set_benchmarks"];
-  // Per-platform breakdown for ALL three KPI tiles. The payload
-  // ships mention_rate, avg_sentiment, and first_mention_rate per
-  // platform on a single per_platform_kpis array; each metric
-  // pulls the field it needs. Earlier this was a narrower
-  // `platformRecall` prop that only carried mention rate.
+  // Per-platform breakdown for the trajectory KPI tiles. The
+  // payload ships mention_rate, avg_sentiment, and
+  // first_mention_rate per platform on a single per_platform_kpis
+  // array; each metric pulls the field it needs.
   perPlatformKpis: SubjectOverview["per_platform_kpis"];
+  // Narrative clusters feed the middle "Top Narrative" tile. The
+  // top cluster by share is rendered as a snapshot-only KPI
+  // (value = share, suffix = cluster name); no trajectory or
+  // benchmark because cluster identity isn't stable across
+  // snapshots in a way that would make a sparkline meaningful.
+  narrativeClusters: SubjectOverview["narrative_clusters"];
 }) {
   // Cross-subject benchmark caption — null when there's only one
   // subject in the set (no peer to compare against) or when the
@@ -856,31 +862,18 @@ function TrajectoryStrip({
         value: p.mention_rate,
       })),
     },
-    // Order: AI Mention Rate → First Result Mentioned → Net
-    // Favorability. The two visibility metrics (presence + pole-
-    // position) sit together on the left + center; favorability
-    // sits on the right as the qualitative complement to the two
-    // structural visibility numbers. The earlier order put
-    // favorability between them, breaking the "visibility →
-    // visibility quality → sentiment" reading flow.
-    {
-      title: "First Result Mentioned",
-      values: trajectory.top_result_rate,
-      format: (v) => formatPct(v, 0),
-      tooltip: "Share of AI answers where this subject is named FIRST among all entities mentioned. A top-of-mind signal. Distinct from Mention Rate (any mention, anywhere in the answer) — this measures whether AI leads with this subject when it lists entities.",
-      colorKind: "top_result_rate",
-      // first_mention_rate_avg is the closest cross-subject
-      // benchmark on the payload — top_result_rate and
-      // competitive[].first_mention_rate share the same definition
-      // (share of unnamed-layer responses where the subject ranks
-      // first), per the api.ts type comment.
-      benchmark: benchmarks?.first_mention_rate_avg ?? null,
-      benchmarkCaption: bmCaption(benchmarks?.first_mention_rate_avg ?? null),
-      // No platformBreakdown — operator chose to keep this tile
-      // bar/text-light. The per-platform first_mention_rate
-      // breakdown still lives on the Visibility deep-dive's
-      // Platform Change Detail table.
-    },
+    // Order: AI Mention Rate → Top Narrative → Net Favorability.
+    // Mention Rate (do we appear?) on the left; Top Narrative
+    // (what's the most-common AI framing of us?) in the middle as
+    // the qualitative-but-discrete companion to the rate;
+    // Favorability (how do those mentions read?) on the right as
+    // the quantitative sentiment summary. Top Narrative replaces
+    // the prior "First Result Mentioned" tile because the latter's
+    // story (pole-position rate) already lives on the Visibility
+    // deep-dive's KPI strip + Platform Change Detail table, and
+    // the narrative middle-tile pulls the top cluster's signal
+    // into the Overview at-a-glance (was previously buried in the
+    // Band 2 Top Narratives card, since removed).
     {
       title: "Net Favorability",
       values: trajectory.avg_sentiment,
@@ -898,70 +891,102 @@ function TrajectoryStrip({
     },
   ];
 
+  // Top cluster (by share) feeds the middle "Top Narrative" tile.
+  // Null when no clusters have been computed for this subject yet,
+  // in which case the tile renders a placeholder so the 3-up grid
+  // doesn't collapse to 2 columns mid-row.
+  const topCluster =
+    narrativeClusters.length > 0
+      ? narrativeClusters.reduce((a, b) => (b.share > a.share ? b : a))
+      : null;
+  // Cluster-sentiment color: matches the bar tone the (now-removed)
+  // Band 2 Top Narratives card used. Threshold ±0.1 inclusive so a
+  // cluster mean of exactly ±0.1 picks up the matching tone — same
+  // boundary the backend uses to compute net_sentiment counts.
+  const topClusterColor: string =
+    topCluster === null || topCluster.sentiment_mean === null
+      ? "text-foreground"
+      : topCluster.sentiment_mean >= 0.1
+        ? "text-success"
+        : topCluster.sentiment_mean <= -0.1
+          ? "text-warning"
+          : "text-foreground";
+
+  const renderTrajectoryTile = (m: (typeof metrics)[number]) => {
+    // Prior value = the IMMEDIATELY preceding snapshot only. Earlier
+    // we scanned right-to-left through nulls to find the nearest
+    // finite predecessor; that produced a misleading "vs previous
+    // snapshot" delta when the actual preceding snapshot was a
+    // backfill gap. When the immediate predecessor isn't measured
+    // we show no delta — the label can't lie.
+    const latestValue = m.values[m.values.length - 1] ?? null;
+    const rawPrior = m.values[m.values.length - 2];
+    const priorValue =
+      rawPrior !== null &&
+      rawPrior !== undefined &&
+      Number.isFinite(rawPrior)
+        ? rawPrior
+        : null;
+    const deltaPp =
+      latestValue !== null &&
+      Number.isFinite(latestValue) &&
+      priorValue !== null
+        ? Math.round((latestValue - priorValue) * 100)
+        : null;
+    const notMeasured =
+      m.values.length > 0 && m.values.every((v) => v === null);
+    const valueColor = notMeasured
+      ? "text-muted-foreground"
+      : getKpiValueColor(m.colorKind, latestValue);
+    const gaugeValue =
+      m.benchmark !== null &&
+      latestValue !== null &&
+      Number.isFinite(latestValue)
+        ? Math.max(0, Math.min(1, latestValue))
+        : null;
+    return (
+      <KpiVitalsTile
+        key={m.title}
+        label={m.title}
+        subtitle={m.subtitle}
+        tooltipText={m.tooltip}
+        value={notMeasured ? "—" : m.format(latestValue)}
+        valueColor={valueColor}
+        deltaPp={notMeasured ? null : deltaPp}
+        gaugeValue={gaugeValue}
+        gaugeBenchmark={m.benchmark}
+        benchmarkCaption={m.benchmarkCaption}
+        sparkValues={m.values}
+        sparkIsHistorical={trajectory.is_historical}
+        sparkLabels={trajectory.weeks}
+        sparkFormat={m.format}
+        platformBreakdown={m.platformBreakdown}
+        platformBreakdownIsSigned={m.colorKind === "avg_tone"}
+        platformBreakdownLopsidedThreshold={KPI_PLATFORM_SPREAD_LOPSIDED}
+      />
+    );
+  };
+
   return (
     <div className="grid md:grid-cols-3 gap-8 items-stretch">
-      {metrics.map((m) => {
-        // Prior value = the IMMEDIATELY preceding snapshot only. Earlier
-        // we scanned right-to-left through nulls to find the nearest
-        // finite predecessor; that produced a misleading "vs previous
-        // snapshot" delta when the actual preceding snapshot was a
-        // backfill gap. When the immediate predecessor isn't measured
-        // we show no delta — the label can't lie.
-        const latestValue = m.values[m.values.length - 1] ?? null;
-        const rawPrior = m.values[m.values.length - 2];
-        const priorValue =
-          rawPrior !== null &&
-          rawPrior !== undefined &&
-          Number.isFinite(rawPrior)
-            ? rawPrior
-            : null;
-        const deltaPp =
-          latestValue !== null &&
-          Number.isFinite(latestValue) &&
-          priorValue !== null
-            ? Math.round((latestValue - priorValue) * 100)
-            : null;
-        // "Not measured" = every snapshot returned null. Distinct from
-        // "no snapshots yet"; the shared tile's MiniSpark renders the
-        // appropriate placeholder for either case.
-        const notMeasured =
-          m.values.length > 0 && m.values.every((v) => v === null);
-        const valueColor = notMeasured
-          ? "text-muted-foreground"
-          : getKpiValueColor(m.colorKind, latestValue);
-        // Gauge fill — 0..1 fraction of the current value. For rate
-        // metrics (mention_rate, top_result_rate; range 0..1) we use
-        // the value directly. Tiles whose metric has no benchmark
-        // (Net Favorability) leave gaugeValue null and the gauge
-        // skips rendering.
-        const gaugeValue =
-          m.benchmark !== null &&
-          latestValue !== null &&
-          Number.isFinite(latestValue)
-            ? Math.max(0, Math.min(1, latestValue))
-            : null;
-        return (
-          <KpiVitalsTile
-            key={m.title}
-            label={m.title}
-            subtitle={m.subtitle}
-            tooltipText={m.tooltip}
-            value={notMeasured ? "—" : m.format(latestValue)}
-            valueColor={valueColor}
-            deltaPp={notMeasured ? null : deltaPp}
-            gaugeValue={gaugeValue}
-            gaugeBenchmark={m.benchmark}
-            benchmarkCaption={m.benchmarkCaption}
-            sparkValues={m.values}
-            sparkIsHistorical={trajectory.is_historical}
-            sparkLabels={trajectory.weeks}
-            sparkFormat={m.format}
-            platformBreakdown={m.platformBreakdown}
-            platformBreakdownIsSigned={m.colorKind === "avg_tone"}
-            platformBreakdownLopsidedThreshold={KPI_PLATFORM_SPREAD_LOPSIDED}
-          />
-        );
-      })}
+      {/* AI Mention Rate (trajectory + per-platform breakdown) */}
+      {renderTrajectoryTile(metrics[0])}
+      {/* Top Narrative — snapshot-only, no spark / benchmark / delta.
+          Value = top cluster's share; suffix = cluster name; color
+          comes from the cluster's mean sentiment so a green "44%
+          Progressive Champion" reads differently from a warning-
+          toned "44% Foreign Policy Critique". */}
+      <KpiVitalsTile
+        label="Top Narrative"
+        tooltipText="The most-prevalent AI framing of this subject in the current snapshot — the largest narrative cluster by share. Color reflects the cluster's mean sentiment (green = favorable, amber = critical, neutral otherwise). Cluster shares can overlap, so this share isn't the only narrative — it's the dominant one."
+        value={
+          topCluster ? `${Math.round(topCluster.share * 100)}%` : "—"
+        }
+        valueSuffix={topCluster?.name ?? null}
+        valueColor={topCluster ? topClusterColor : "text-muted-foreground"}
+      />
+      {/* Net Favorability (trajectory) */}
+      {renderTrajectoryTile(metrics[1])}
     </div>
   );
 }
@@ -1536,6 +1561,7 @@ export default async function SubjectOverviewPage({
                       trajectory={data.trajectory}
                       benchmarks={data.subject_set_benchmarks}
                       perPlatformKpis={data.per_platform_kpis}
+                      narrativeClusters={data.narrative_clusters}
                     />
                     {data.trajectory.weeks.length >= 2 && (
                       <div className="mt-4 flex justify-end">
