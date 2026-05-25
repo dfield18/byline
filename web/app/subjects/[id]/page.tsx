@@ -352,10 +352,10 @@ function formatComparator(labels: string[]): string {
 // Shared "is there actually a gap to surface?" check — true only
 // when there are 2+ topics with finite recall AND at least one
 // differs from the strongest by more than the tie epsilon. Used
-// by both the Band 2 card label (label + tone swap when no gap)
-// and TopicRecallInline (skip the weakest-bar warning override
-// when there's no weakest). Single source of truth so the two
-// surfaces can never disagree about whether a gap exists.
+// by both the Band 2 card label (when present) and the Vitals
+// row's Visibility-by-topic tile (skip warning tone when there's
+// no real spread). Single source of truth so the two surfaces
+// can never disagree about whether a gap exists.
 const TIE_EPSILON = 0.001;
 function hasRealVisibilityGap(
   topics: SubjectOverview["topic_coverage"],
@@ -372,10 +372,10 @@ function hasRealVisibilityGap(
   );
 }
 
-// Row used by the Visibility-by-topic card (TopicRecallInline).
-// Previously also fed TopNarrativesList until that card was
-// dropped from the Overview; kept generic so a future caller can
-// reuse the same label/bar/percent treatment.
+// Shared row used by the Band 2 Top Narratives card
+// (TopNarrativesList). Generic so a future caller can reuse the
+// same label/bar/percent treatment; sort direction, highlight
+// override, and bar tone are caller-supplied.
 //
 // `highlight` semantics:
 //   "weakest" → force warning tone at higher opacity (Gap card)
@@ -462,59 +462,60 @@ function TopicBarRow({
   );
 }
 
-function TopicRecallInline({
-  topics,
+// Top narrative clusters list for the Band 2 Top Narratives card.
+// Surfaces the AI's RECURRING FRAMINGS — e.g. "MAGA Alignment",
+// "Foreign Policy Critique" — and how often each appears across
+// responses. Visually parallels the now-relocated Visibility-by-
+// topic card via the shared TopicBarRow component (same row
+// layout, label + bar + %). Each bar is sentiment-toned (favorable
+// / critical / neutral) from cluster.sentiment_mean so the color
+// answers WHETHER each framing is positive, not just HOW
+// prevalent it is.
+function TopNarrativesList({
+  clusters,
 }: {
-  topics: SubjectOverview["topic_coverage"];
+  clusters: SubjectOverview["narrative_clusters"];
 }) {
-  const sorted = topics
-    .filter(_hasFiniteRecall)
+  const sorted = clusters
     .slice()
-    .sort((a, b) => (b.ai_recall ?? 0) - (a.ai_recall ?? 0));
+    .sort((a, b) => b.share - a.share)
+    .slice(0, 4);
   if (sorted.length === 0) return null;
-  const weakestTopic = findWeakestTopic(sorted);
-  // Same gap check the parent Band 2 card uses for its label swap —
-  // reads from the shared hasRealVisibilityGap helper conceptually.
-  // Kept inline here only because we already have `sorted` in scope.
-  const hasRealGap =
-    sorted.length > 1 &&
-    !sorted.every(
-      (t) =>
-        Math.abs((t.ai_recall ?? 0) - (sorted[0].ai_recall ?? 0)) < TIE_EPSILON,
-    );
   return (
     <div className="mt-4">
-      {/* "Mention rate by topic" sub-eyebrow dropped — the card's
-          outer eyebrow already reads "VISIBILITY GAP BY TOPIC"
-          (or "TOPIC VISIBILITY" in the no-gap case), so this inner
-          header just repeated the framing. Removing it cuts a line
-          of text from a card that was reading busy in Band 2. */}
-      {(() => {
-        // When multiple topics tie for weakest (within TIE_EPSILON),
-        // highlight ALL of them in warning tone rather than singling
-        // out one based on backend insertion order. Without this,
-        // the orange override would flicker between tied bars
-        // snapshot-to-snapshot even though the underlying data
-        // didn't change.
-        const weakestRate = weakestTopic?.ai_recall ?? null;
-        const isAtWeakestRate = (t: typeof sorted[number]) =>
-          weakestRate !== null &&
-          Math.abs((t.ai_recall ?? 0) - weakestRate) < TIE_EPSILON;
-        return (
-          <div className="space-y-2.5">
-            {sorted.map((t) => (
-              <TopicBarRow
-                key={t.label}
-                label={t.label}
-                pct={Math.min(100, Math.round((t.ai_recall ?? 0) * 100))}
-                highlight={
-                  hasRealGap && isAtWeakestRate(t) ? "weakest" : null
-                }
-              />
-            ))}
-          </div>
-        );
-      })()}
+      <div className="space-y-2.5">
+        {sorted.map((c) => {
+          // Defensive: clamp share to [0,1] after a finite check
+          // (Math.min/max propagate NaN, so backend regression
+          // producing NaN share would land as a "NaN%" bar width
+          // without the explicit guard).
+          const safeShare = Number.isFinite(c.share)
+            ? Math.max(0, Math.min(1, c.share))
+            : 0;
+          // Tone the bar by the cluster's mean sentiment (not by
+          // share rank). ±0.1 inclusive thresholds match the
+          // backend's net_sentiment classification so the bar
+          // coloring agrees with how the analyzer scored each
+          // response. Null sentiment_mean → neutral.
+          const tone: "success" | "warning" | "neutral" =
+            c.sentiment_mean === null
+              ? "neutral"
+              : c.sentiment_mean >= 0.1
+                ? "success"
+                : c.sentiment_mean <= -0.1
+                  ? "warning"
+                  : "neutral";
+          return (
+            <TopicBarRow
+              key={c.name}
+              label={c.name}
+              pct={Math.round(safeShare * 100)}
+              highlight={null}
+              tone={tone}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -788,7 +789,8 @@ function TrajectoryStrip({
   trajectory,
   benchmarks,
   perPlatformKpis,
-  narrativeClusters,
+  topicCoverage,
+  subjectName,
 }: {
   trajectory: SubjectOverview["trajectory"];
   benchmarks: SubjectOverview["subject_set_benchmarks"];
@@ -797,12 +799,14 @@ function TrajectoryStrip({
   // first_mention_rate per platform on a single per_platform_kpis
   // array; each metric pulls the field it needs.
   perPlatformKpis: SubjectOverview["per_platform_kpis"];
-  // Narrative clusters feed the middle "Top Narrative" tile. The
-  // top cluster by share is rendered as a snapshot-only KPI
-  // (value = share, suffix = cluster name); no trajectory or
-  // benchmark because cluster identity isn't stable across
-  // snapshots in a way that would make a sparkline meaningful.
-  narrativeClusters: SubjectOverview["narrative_clusters"];
+  // Topic-coverage feeds the rightmost "Visibility by topic" tile
+  // as a snapshot-only KPI (value = weakest topic's mention rate,
+  // suffix = topic name). The full per-topic bar list lives on
+  // the Band 2 Top Narratives card's companion, the Visibility
+  // deep-dive, and (previously) the Band 2 Gap card — this tile
+  // is the at-a-glance summary.
+  topicCoverage: SubjectOverview["topic_coverage"];
+  subjectName: string;
 }) {
   // Cross-subject benchmark caption — null when there's only one
   // subject in the set (no peer to compare against) or when the
@@ -888,26 +892,30 @@ function TrajectoryStrip({
     },
   ];
 
-  // Top cluster (by share) feeds the middle "Top Narrative" tile.
-  // Null when no clusters have been computed for this subject yet,
-  // in which case the tile renders a placeholder so the 3-up grid
-  // doesn't collapse to 2 columns mid-row.
-  const topCluster =
-    narrativeClusters.length > 0
-      ? narrativeClusters.reduce((a, b) => (b.share > a.share ? b : a))
+  // Weakest topic feeds the rightmost "Visibility by topic" tile.
+  // Compressed to value (weakest pct) + suffix (topic name) so the
+  // tile reads at a glance — the full per-topic bar list now lives
+  // on the Band 2 Top Narratives card's sibling surfaces. Tone
+  // tracks the diagnosis: warning when there's a real spread,
+  // success when even the weakest topic is ≥70%, default otherwise.
+  const withRecallSnap = topicCoverage.filter(_hasFiniteRecall);
+  const gapExistsSnap = hasRealVisibilityGap(topicCoverage);
+  const allHighSnap =
+    withRecallSnap.length > 0 &&
+    withRecallSnap.every((t) => (t.ai_recall ?? 0) >= 0.7);
+  const sortedByRecallSnap = withRecallSnap
+    .slice()
+    .sort((a, b) => (a.ai_recall ?? 0) - (b.ai_recall ?? 0));
+  const weakestTopic = sortedByRecallSnap[0] ?? null;
+  const weakestTopicPct =
+    weakestTopic && weakestTopic.ai_recall !== null
+      ? Math.round(weakestTopic.ai_recall * 100)
       : null;
-  // Cluster-sentiment color: matches the bar tone the (now-removed)
-  // Band 2 Top Narratives card used. Threshold ±0.1 inclusive so a
-  // cluster mean of exactly ±0.1 picks up the matching tone — same
-  // boundary the backend uses to compute net_sentiment counts.
-  const topClusterColor: string =
-    topCluster === null || topCluster.sentiment_mean === null
-      ? "text-foreground"
-      : topCluster.sentiment_mean >= 0.1
-        ? "text-success"
-        : topCluster.sentiment_mean <= -0.1
-          ? "text-warning"
-          : "text-foreground";
+  const weakestTopicColor: string = gapExistsSnap
+    ? "text-warning"
+    : allHighSnap
+      ? "text-success"
+      : "text-foreground";
 
   const renderTrajectoryTile = (m: (typeof metrics)[number]) => {
     // Prior value = the IMMEDIATELY preceding snapshot only. Earlier
@@ -970,19 +978,24 @@ function TrajectoryStrip({
       {renderTrajectoryTile(metrics[0])}
       {/* Net Favorability (trajectory) */}
       {renderTrajectoryTile(metrics[1])}
-      {/* Top Narrative — snapshot-only, no spark / benchmark / delta.
-          Value = top cluster's share; suffix = cluster name; color
-          comes from the cluster's mean sentiment so a green "44%
-          Progressive Champion" reads differently from a warning-
-          toned "44% Foreign Policy Critique". */}
+      {/* Visibility by topic — snapshot-only, no spark / benchmark
+          / delta. Value = weakest topic's mention rate; suffix =
+          that topic's name; color tracks the diagnosis (warning if
+          there's a real spread, success if even the weakest is
+          ≥70%). The full per-topic bar list lives on the Band 2
+          Top Narratives card's sibling Visibility deep-dive. */}
       <KpiVitalsTile
-        label="Top Narrative"
-        tooltipText="The most-prevalent AI framing of this subject in the current snapshot — the largest narrative cluster by share. Color reflects the cluster's mean sentiment (green = favorable, amber = critical, neutral otherwise). Cluster shares can overlap, so this share isn't the only narrative — it's the dominant one."
+        label="Visibility by topic"
+        tooltipText={`The weakest tracked topic for ${subjectName} — the topic with the lowest AI mention rate in the current snapshot. Color is warning when at least one topic trails the others, success when even the weakest is ≥70%, neutral otherwise. Open the Visibility deep-dive (link below) for the full per-topic breakdown.`}
         value={
-          topCluster ? `${Math.round(topCluster.share * 100)}%` : "—"
+          weakestTopicPct !== null ? `${weakestTopicPct}%` : "—"
         }
-        valueSuffix={topCluster?.name ?? null}
-        valueColor={topCluster ? topClusterColor : "text-muted-foreground"}
+        valueSuffix={weakestTopic?.label ?? null}
+        valueColor={
+          weakestTopicPct !== null
+            ? weakestTopicColor
+            : "text-muted-foreground"
+        }
       />
     </div>
   );
@@ -1558,7 +1571,8 @@ export default async function SubjectOverviewPage({
                       trajectory={data.trajectory}
                       benchmarks={data.subject_set_benchmarks}
                       perPlatformKpis={data.per_platform_kpis}
-                      narrativeClusters={data.narrative_clusters}
+                      topicCoverage={data.topic_coverage}
+                      subjectName={data.subject_name}
                     />
                     {data.trajectory.weeks.length >= 2 && (
                       <div className="mt-4 flex justify-end">
@@ -1577,162 +1591,72 @@ export default async function SubjectOverviewPage({
             </Card>
           </section>
 
-          {/* BAND 2 — GAP & FIX. Problem and solution adjacent.
-              Left card: the topic-coverage gap (where AI under-
-              mentions the subject). Right card: the recommended
-              move that closes it. Pairs read as one editorial beat. */}
-          {(data.topic_coverage.some(_hasFiniteRecall) ||
+          {/* BAND 2 — NARRATIVES & FIX. The dominant AI framings of
+              the subject sit next to the recommended move. Swapped
+              with Visibility-by-topic, which moved up to the Vitals
+              row as a compressed KPI tile (weakest topic + pct);
+              the per-topic bar list is now reached via the Visibility
+              deep-dive link in the Vitals card. */}
+          {(data.narrative_clusters.length > 0 ||
             data.recommended_actions?.primary) && (
             <section id="gap" className="scroll-mt-28">
-              {/* 3-up: Gap (warning) → Strongest asset (success) → Fix (primary).
-                  The trio reads as one weakness ↔ strength ↔ action beat.
-                  Strongest asset was relocated here from the Competitive
-                  band so the Competitive band can be just chart + stats. */}
               {(() => {
                 // items-stretch + h-full on each Card equalize the
-                // three cards' heights regardless of content length
-                // (the Gap card grows with topic rows; the others
-                // were short and bottomed out with trailing empty
-                // space). mt-auto on the Fix card's "View all"
-                // link bottom-anchors the action while the content
-                // above sits at the top.
+                // two cards' heights regardless of content length.
                 //
                 // Dynamic column count so that when the Fix card (no
                 // recommended action) is absent, the remaining card
                 // fills the row instead of stretching across an empty
-                // slot. gridColsClass picks 1/2 columns based on which
-                // cards will actually render. (Top Narratives was a
-                // third card here previously — removed to keep Band 2
-                // focused on the topic-visibility read + the action.)
-                const gapCardEligible = data.topic_coverage.some(_hasFiniteRecall);
+                // slot.
+                const narrativesCardEligible = data.narrative_clusters.length > 0;
                 const fixCardEligible = Boolean(data.recommended_actions?.primary);
                 const cardCount =
-                  (gapCardEligible ? 1 : 0) + (fixCardEligible ? 1 : 0);
+                  (narrativesCardEligible ? 1 : 0) + (fixCardEligible ? 1 : 0);
                 const gridColsClass =
                   cardCount === 2 ? "md:grid-cols-2" : "md:grid-cols-1";
                 return (
                   <div className={`grid ${gridColsClass} gap-4 items-stretch`}>
-                    {/* Visibility by topic. Eyebrow stays neutral
-                        across gap / no-gap states — the warning-toned
-                        weakest bar + the "Weakest" legend pill below
-                        already carry the "there IS a gap" signal
-                        without the eyebrow having to swap framing.
-                        Earlier the label flipped between "Visibility
-                        gap by topic" (warning) and "Topic visibility"
-                        (success / neutral); collapsed for consistency
-                        with how the AI Mention Rate KPI tile treats
-                        its label (one neutral noun, color signal lives
-                        on the value + bars). Success tone retained for
-                        the strong all-topics-≥70% case as a quiet
-                        positive cue. */}
-                    {data.topic_coverage.some(_hasFiniteRecall) && (() => {
-                      const gapExists = hasRealVisibilityGap(data.topic_coverage);
-                      const withRecall = data.topic_coverage.filter(_hasFiniteRecall);
-                      const allHigh =
-                        withRecall.length > 0 &&
-                        withRecall.every((t) => (t.ai_recall ?? 0) >= 0.7);
-                      const label = "Visibility by topic";
-                      const labelTone = allHigh
-                        ? "text-success"
-                        : "text-foreground/55";
-                      // Lead-line takeaway: surface the weakest topic
-                      // (or, in the all-≥70% case, the floor) above
-                      // the bar list so the headline reads before the
-                      // bars themselves. Earlier the bar list was the
-                      // only signal; a reader had to scan all four
-                      // rows to find the lowest. Tone tracks the
-                      // diagnosis — warning when there's a real gap,
-                      // success when even the weakest is strong,
-                      // suppressed when only one topic is measured
-                      // (no comparative read possible).
-                      const sortedByRecall = withRecall
-                        .slice()
-                        .sort(
-                          (a, b) => (a.ai_recall ?? 0) - (b.ai_recall ?? 0),
-                        );
-                      const weakest = sortedByRecall[0] ?? null;
-                      const weakestPct =
-                        weakest && weakest.ai_recall !== null
-                          ? Math.round(weakest.ai_recall * 100)
-                          : null;
-                      const summary =
-                        weakest === null || weakestPct === null
-                          ? null
-                          : gapExists
-                            ? {
-                                text: `Weakest: ${weakest.label} ${weakestPct}%`,
-                                tone: "text-warning",
-                              }
-                            : allHigh
-                              ? {
-                                  text: `Strong on every topic — floor ${weakestPct}%`,
-                                  tone: "text-success",
-                                }
-                              : null;
-                      return (
-                        <Card className="flex h-full flex-col p-6 border-border/60">
-                          <div className={`text-[10.5px] font-semibold uppercase tracking-[0.08em] ${labelTone} mb-3`}>
-                            {label}
-                          </div>
-                          {summary && (
-                            <p className={`mb-3 text-[13px] font-medium ${summary.tone}`}>
-                              {summary.text}
-                            </p>
-                          )}
-                          <TopicRecallInline topics={data.topic_coverage} />
-                          {/* Footer pad — methodology line + color
-                              legend balance this card's vertical
-                              weight with the Top Narratives card next
-                              to it (which carries an analogous
-                              "Each share is independent…" caption +
-                              Favorable/Neutral/Critical legend below
-                              its bars). Without this pad, the Gap
-                              card ended right after its 4 bars
-                              while Top Narratives had ~3 lines of
-                              supporting content underneath, making
-                              the equal-height grid look unbalanced. */}
-                          {/* Methodology fragment — was a full sentence
-                              ("Each row = … . Lower = bigger gap …"),
-                              now a tighter ·-separated phrase to keep
-                              the card from reading text-heavy. The
-                              eyebrow + bar values + legend already
-                              carry most of the meaning; this just
-                              names the metric inline so a non-
-                              technical reader doesn't have to infer
-                              the denominator. */}
-                          <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
-                            % of AI answers per topic that mention {data.subject_name} · lower = bigger gap
-                          </p>
-                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
-                            <span className="inline-flex items-center gap-1">
-                              <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--primary)" }} />
-                              Tracked topic
-                            </span>
-                            {/* Weakest pill only when there's a real
-                                gap to call out. In the no-gap case
-                                (all topics within TIE_EPSILON, card
-                                relabels to "Topic visibility") no
-                                bar is warning-toned, so the legend
-                                item would be a lie. */}
-                            {gapExists && (
-                              <span className="inline-flex items-center gap-1">
-                                <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--warning)" }} />
-                                Weakest
-                              </span>
-                            )}
-                          </div>
-                        </Card>
-                      );
-                    })()}
+                    {/* Top narratives — the recurring AI framings
+                        (clusters) and how often each appears across
+                        responses, sentiment-toned. Swapped here from
+                        the Vitals row's single-cluster KPI tile so
+                        the full top-4 list lands in Band 2 alongside
+                        The fix as one "what's the narrative · what
+                        do we do about it" beat. */}
+                    {data.narrative_clusters.length > 0 && (
+                      <Card className="flex h-full flex-col p-6 border-border/60">
+                        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-primary mb-3">
+                          Top narratives
+                        </div>
+                        <TopNarrativesList clusters={data.narrative_clusters} />
+                        <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
+                          Shares can overlap · bars don&apos;t sum to 100%
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-1">
+                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--success)" }} />
+                            Favorable
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--primary)" }} />
+                            Neutral
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--warning)" }} />
+                            Critical
+                          </span>
+                        </div>
+                      </Card>
+                    )}
 
                     {/* The fix. Primary-tinted card so it reads
                         as the actionable callout. Secondaries
                         surfaced inline below the primary so the card
                         fills out and matches the vertical weight of
-                        the Visibility-by-topic card to its left
-                        (without the secondaries the card had ~3
-                        lines of text and a block of whitespace
-                        before the bottom-pinned link). */}
+                        the Top Narratives card to its left (without
+                        the secondaries the card had ~3 lines of text
+                        and a block of whitespace before the bottom-
+                        pinned link). */}
                     {data.recommended_actions?.primary && (
                       <Card className="flex h-full flex-col p-6 border border-primary/30 bg-primary/[0.04]">
                         <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-primary mb-3">
