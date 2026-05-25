@@ -479,7 +479,15 @@ function BottomLineBlock({ text }: { text: string }) {
         {title}
       </div>
       {body && (
-        <p className="mt-2 text-[14px] text-foreground/75 leading-relaxed [text-wrap:balance] max-w-[90%]">
+        // Punchline pad: a thin warning-toned left rule + tighter
+        // top spacing make the contrast clause read as a deliberate
+        // "but…" callout instead of a faded continuation paragraph.
+        // Without the rule, the body sat as its own block of
+        // muted-foreground text and a reader's eye skipped it; with
+        // it, the contrast that's usually the actionable beat
+        // ("…but only 25% on Current events") has a visual signal
+        // pulling the eye there.
+        <p className="mt-2 max-w-[90%] border-l-2 border-warning/60 pl-3 text-[14px] text-foreground/85 leading-relaxed [text-wrap:balance]">
           {body}
         </p>
       )}
@@ -2452,6 +2460,28 @@ export default async function SubjectOverviewPage({
                         }))}
                         height={280}
                       />
+                      {/* Methodology footer matching Visibility Gap +
+                          Top Narratives in Band 2 — keeps "what does
+                          this percentage mean?" answerable inline on
+                          every chart instead of asking the reader to
+                          infer the metric definition. Plus a small
+                          legend disambiguating the subject's primary-
+                          toned bar from the muted peer bars. */}
+                      <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
+                        Each bar = % of AI answers about {data.subject_name}&apos;s
+                        topic areas that name this entity. Higher = more
+                        AI mind-share within the comparison set.
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--primary)" }} />
+                          {data.subject_name}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--muted-foreground)", opacity: 0.45 }} />
+                          Tracked competitor
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -2658,6 +2688,21 @@ export default async function SubjectOverviewPage({
                     );
                   })()}
                 </div>
+                {/* Drill-in link — matches the "Open Visibility
+                    deep-dive →" affordance on the Vitals card so
+                    every band has a consistent "go deeper here"
+                    exit. Without this, the page felt asymmetric:
+                    only the Vitals band invited the reader to keep
+                    going, the rest dead-ended. */}
+                <div className="mt-5 pt-4 border-t border-border/40 flex justify-end">
+                  <Link
+                    href={`/subjects/${subjectId}/competition`}
+                    className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                  >
+                    Open Competitive Visibility deep-dive
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                  </Link>
+                </div>
               </Card>
             </section>
           )}
@@ -2682,6 +2727,17 @@ export default async function SubjectOverviewPage({
               </div>
               <SourcesTypeMix sources={data.sources} />
             </div>
+            {/* Drill-in link — same affordance as the Vitals +
+                Competitive bands above. */}
+            <div className="mt-5 pt-4 border-t border-border/40 flex justify-end">
+              <Link
+                href={`/subjects/${subjectId}/sources`}
+                className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+              >
+                Open Sources deep-dive
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+              </Link>
+            </div>
           </section>
 
           {/* EVIDENCE — moved to the bottom so the page closes with
@@ -2705,6 +2761,19 @@ export default async function SubjectOverviewPage({
                     subjectId={subjectId}
                   />
                 ))}
+              </div>
+              {/* Drill-in link — Prompts spoke carries the full
+                  per-prompt × per-platform response feed that the
+                  3 sampled quotes here are pulled from. Matches
+                  the Vitals + Competitive + Sources bands above. */}
+              <div className="mt-5 pt-4 border-t border-border/40 flex justify-end">
+                <Link
+                  href={`/subjects/${subjectId}/prompts`}
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  Open Prompts deep-dive
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                </Link>
               </div>
             </section>
           )}

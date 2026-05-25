@@ -42,42 +42,6 @@ const SOURCE_TYPE_COLORS = [
   "oklch(0.97 0.025 245)",
 ];
 
-type DonutSegment = {
-  color: string;
-  dashArray: string;
-  dashOffset: number;
-  name: string;
-  pct: number;
-};
-
-// Pure helper kept outside the component so the running-sum mutation
-// (`cumOffset += dashLength`) sits in plain JS rather than inside a
-// React render closure — satisfies react-hooks/immutability without
-// forcing an O(n²) reduce-and-spread dance for a ≤7-element array.
-function computeDonutSegments(
-  aggregated: { name: string; score: number }[],
-  total: number,
-  circumference: number,
-  paletteIndices: number[],
-): DonutSegment[] {
-  let cumOffset = 0;
-  return aggregated.map((t, i) => {
-    const pct = (t.score / total) * 100;
-    const dashLength = (pct / 100) * circumference;
-    const seg: DonutSegment = {
-      color: SOURCE_TYPE_COLORS[paletteIndices[i]],
-      dashArray: `${dashLength} ${circumference - dashLength}`,
-      // Negative offset advances the start point by the cumulative
-      // length already drawn by prior segments.
-      dashOffset: -cumOffset,
-      name: t.name,
-      pct: Math.round(pct),
-    };
-    cumOffset += dashLength;
-    return seg;
-  });
-}
-
 export function SourcesTypeMix({
   sources,
 }: {
@@ -154,18 +118,23 @@ export function SourcesTypeMix({
     SOURCE_TYPE_COLORS.length,
   );
 
-  const size = 144;
-  const strokeWidth = 26;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const segments = computeDonutSegments(
-    aggregated,
-    total,
-    circumference,
-    paletteIndices,
-  );
+  // Pre-compute each segment's pct so the bar + legend reuse the
+  // same numbers (no rounding drift between the visualization and
+  // the readable map below it).
+  const segments = aggregated.map((t, i) => ({
+    name: t.name,
+    pct: Math.round((t.score / total) * 100),
+    color: SOURCE_TYPE_COLORS[paletteIndices[i]],
+  }));
 
-  const hoveredSeg = hovered !== null ? segments[hovered] : null;
+  // Top category callout — a single hero stat that anchors the
+  // right column the way the donut used to. The donut occupied
+  // ~144px of vertical space for what was usually 3-4 categories;
+  // the new stacked-bar layout frees that space, and surfacing
+  // "{News} drives {52%} of cited sources" gives the right column
+  // an actual second-order insight instead of just a different
+  // visualization of the same percentage list.
+  const topSegment = segments[0];
 
   return (
     <div className="lg:border-l lg:border-border/60 lg:pl-8 pt-1">
@@ -173,99 +142,75 @@ export function SourcesTypeMix({
         By category
       </div>
 
-      {/* Donut chart — same color scheme (shades of blue) as the
-          prior stacked-bar variant. Hovering a segment highlights it,
-          dims the others, and surfaces its name + percentage in the
-          center label. The legend below carries the same info
-          statically for at-a-glance reading. */}
-      <div className="relative flex justify-center">
-        <svg
-          viewBox={`0 0 ${size} ${size}`}
-          className="h-[144px] w-[144px]"
-          role="img"
-          aria-label="Source category mix"
-        >
-          {/* Background ring — fills any rounding gaps between
-              segments and gives the donut a single-shape silhouette
-              even when one category dominates. */}
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke="var(--muted)"
-            strokeWidth={strokeWidth}
-          />
-          {/* Segments — rotate -90deg so the first segment starts at
-              12 o'clock. Each segment is a stroked circle whose
-              dash-array exposes only its slice of the circumference.
-              onClick toggles the selection for touch devices (which
-              don't fire hover events). On desktop, hover and tap
-              both work; tapping the same segment a second time
-              clears it. */}
-          <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-            {segments.map((s, i) => {
-              const isHovered = hovered === i;
-              const isDimmed = hovered !== null && !isHovered;
-              return (
-                <circle
-                  key={s.name}
-                  cx={size / 2}
-                  cy={size / 2}
-                  r={radius}
-                  fill="none"
-                  stroke={s.color}
-                  strokeWidth={strokeWidth}
-                  strokeDasharray={s.dashArray}
-                  strokeDashoffset={s.dashOffset}
-                  opacity={isDimmed ? 0.35 : 1}
-                  style={{
-                    cursor: "pointer",
-                    transition: "opacity 120ms ease",
-                  }}
-                  onMouseEnter={() => setHovered(i)}
-                  onMouseLeave={() => setHovered(null)}
-                  onClick={() => setHovered((cur) => (cur === i ? null : i))}
-                />
-              );
-            })}
-          </g>
-        </svg>
-
-        {/* Center label — absolutely positioned over the donut hole.
-            HTML (not SVG <text>) so the type stays crisp and supports
-            multi-line truncation cleanly. Shows the hovered segment's
-            name + percentage; renders empty when nothing's hovered so
-            the center reads as intentional empty space. */}
-        <div
-          className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center"
-          aria-live="polite"
-        >
-          {hoveredSeg && (
-            <>
-              <div className="text-lg font-semibold tracking-tight text-foreground leading-none">
-                {hoveredSeg.pct}%
-              </div>
-              <div className="mt-1 text-[10px] text-foreground/70 leading-tight max-w-[80px] line-clamp-2">
-                {hoveredSeg.name}
-              </div>
-            </>
-          )}
+      {/* Hero callout — top category name + share, success-toned so
+          it reads as the actionable signal ("most of AI's citations
+          flow from this kind of source"). One-line subtitle names
+          the second-place category for context. */}
+      {topSegment && (
+        <div className="mb-4">
+          <div className="text-[22px] font-medium tracking-tight tabular-nums text-foreground leading-none">
+            {topSegment.pct}%
+          </div>
+          <div className="mt-1.5 text-[12.5px] text-foreground/70 leading-snug">
+            of cited sources are{" "}
+            <span className="font-medium text-foreground/90">
+              {topSegment.name}
+            </span>
+            {segments.length > 1 && (
+              <>
+                {"; "}
+                <span className="font-medium text-foreground/85">
+                  {segments[1].name}
+                </span>{" "}
+                runs {segments[1].pct}%
+              </>
+            )}
+            .
+          </div>
         </div>
+      )}
+
+      {/* Horizontal stacked bar — replaces the prior donut. Same
+          color palette + same hover-to-highlight behavior; the bar
+          form factor takes far less vertical space (8px tall vs
+          144px) and shows the cumulative composition left-to-right
+          in the same way the eye scans the legend below. */}
+      <div
+        className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label="Source category mix"
+      >
+        {segments.map((s, i) => {
+          const isDimmed = hovered !== null && hovered !== i;
+          return (
+            <div
+              key={s.name}
+              className="h-full transition-opacity"
+              style={{
+                width: `${s.pct}%`,
+                background: s.color,
+                opacity: isDimmed ? 0.35 : 1,
+                cursor: "pointer",
+              }}
+              title={`${s.name}: ${s.pct}%`}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+              onClick={() => setHovered((cur) => (cur === i ? null : i))}
+            />
+          );
+        })}
       </div>
 
-      {/* Legend with full category names + percentages. The donut is
-          the at-a-glance visual; the legend is the readable map. Both
-          surfaces (donut segment + legend row) drive the same hovered
-          state — hovering one highlights the other. Tap-toggles on
-          legend rows for touch parity with the donut segments. */}
+      {/* Legend with full category names + percentages. Bar segment +
+          legend row drive the same hovered state — hover one
+          highlights the other. Tap-toggles on legend rows for touch
+          parity with bar segments. */}
       <ul className="mt-4 space-y-2">
-        {aggregated.map((t, i) => {
-          const isHovered = hovered === i;
-          const isDimmed = hovered !== null && !isHovered;
+        {segments.map((s, i) => {
+          const isDimmed = hovered !== null && hovered !== i;
           return (
             <li
-              key={t.name}
+              key={s.name}
               className="flex items-center justify-between gap-2 text-[13px] transition-opacity cursor-pointer"
               style={{ opacity: isDimmed ? 0.45 : 1 }}
               onMouseEnter={() => setHovered(i)}
@@ -275,15 +220,12 @@ export function SourcesTypeMix({
               <span className="flex items-center gap-2 min-w-0">
                 <span
                   className="h-2 w-2 rounded-sm shrink-0"
-                  style={{
-                    backgroundColor:
-                      SOURCE_TYPE_COLORS[paletteIndices[i]],
-                  }}
+                  style={{ backgroundColor: s.color }}
                 />
-                <span className="truncate text-foreground/85">{t.name}</span>
+                <span className="truncate text-foreground/85">{s.name}</span>
               </span>
               <span className="tabular-nums font-medium text-foreground/70">
-                {Math.round((t.score / total) * 100)}%
+                {s.pct}%
               </span>
             </li>
           );
