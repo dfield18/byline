@@ -918,9 +918,19 @@ export default async function VisibilityPage({
       gaugeBenchmark: bm.ai_mention_rate_avg,
       caption: bmCaption(bm.ai_mention_rate_avg, (v) => formatPct(v)),
       anchor: "trend",
+      // Delta still rendered as ↑/↓ N pts beside the value — it's a
+      // single number derived from the trajectory's last two
+      // measured points, not a duplicate of the Trend chart's curve.
       deltaPp: deltaFromSeries(data.trajectory.ai_recall),
-      sparkValues: data.trajectory.ai_recall,
-      sparkFormat: (v) => formatPct(v),
+      // Sparkline intentionally omitted on this tab — the full
+      // "Mention Rate Over Time" Trend chart sits in the next
+      // section (#trend) and renders the SAME ai_recall series at
+      // chart-size with axes + dots, so a mini-version here would
+      // duplicate the very thing the click-through navigates to.
+      // The other three Visibility tiles keep their sparklines
+      // because their series (top_result_rate, weakest-topic
+      // mention rate) aren't replicated in any chart on this tab.
+      // sparkValues / sparkFormat deliberately unset.
     },
     {
       label: "Average Mention Position",
@@ -1634,35 +1644,27 @@ export default async function VisibilityPage({
                   <>
                     <div>
                       <table className="w-full text-left">
+                        {/* Mention Rate column dropped — it duplicated
+                            the Current Platform Snapshot heatmap above
+                            (which shows per-(platform × topic) mention
+                            rate, with the all-topics rollup explained
+                            in the heatmap's own tooltip). The remaining
+                            5 columns surface per-platform signals that
+                            don't appear elsewhere on this tab:
+                            Position, First Mention, Change, Status.
+                            Widths redistributed across 5 cols summing
+                            to 100%. */}
                         <colgroup>
-                          <col style={{ width: "25%" }} />
-                          <col style={{ width: "13%" }} />
+                          <col style={{ width: "26%" }} />
+                          <col style={{ width: "20%" }} />
+                          <col style={{ width: "20%" }} />
                           <col style={{ width: "16%" }} />
-                          <col style={{ width: "16%" }} />
-                          <col style={{ width: "14%" }} />
-                          <col style={{ width: "16%" }} />
+                          <col style={{ width: "18%" }} />
                         </colgroup>
                         <thead>
                           <tr className="border-b border-border/60 text-[10.5px] uppercase tracking-[0.06em] text-foreground/65">
                             <th className="py-2.5 pr-3 font-semibold">
                               Platform
-                            </th>
-                            <th className="py-2.5 px-3 text-right font-semibold">
-                              <span className="inline-flex items-center justify-end gap-1">
-                                Mention Rate{" "}
-                                <span className="font-normal lowercase text-foreground/55">
-                                  {topic ? "(on this topic)" : "(all topics)"}
-                                </span>
-                                <KpiTooltipIcon
-                                  text={
-                                    topic
-                                      ? "Share of this platform's monitored prompts ON THE SELECTED TOPIC where the subject was mentioned."
-                                      : "Overall mention rate across ALL tracked topics, per platform. The Current Platform Snapshot heatmap above breaks this down by topic — the all-topics number here aggregates those cells per platform (so a per-topic 50% cell and an all-topics 80% row for the same platform are different granularities, not a conflict)."
-                                  }
-                                  align="right"
-                                  direction="below"
-                                />
-                              </span>
                             </th>
                             <th className="py-2.5 px-3 text-right font-semibold">
                               <span className="inline-flex items-center justify-end gap-1">
@@ -1743,9 +1745,6 @@ export default async function VisibilityPage({
                                       </span>
                                     );
                                   })()}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums text-foreground/90">
-                                  {formatPct(p.mention_rate)}
                                 </td>
                                 <td className="py-3 px-3 text-right tabular-nums text-foreground/90">
                                   {isPoorPosition(p.avg_rank) ? (
