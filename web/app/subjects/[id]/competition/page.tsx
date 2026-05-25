@@ -1113,27 +1113,33 @@ export default async function CompetitionPage({
   };
 
   // Trajectory + delta inputs for the four Standing KPI tiles.
-  // Card 1 (Competitive Rank): subject's SoV trajectory — the
-  // underlying metric the rank is computed from. Rank trajectories
-  // invert the y-axis ("lower = better") and read backwards in a
-  // sparkline; showing SoV directly keeps the read intuitive
-  // (sparkline rising = subject gaining share = rank likely
-  // improving).
-  const competitiveRankSpark = data.trajectory.share_of_voice;
+  // Metric choice — everything on the Standing band is anchored on
+  // mention rate (`competitive[].sov` per the API: "subject_mentions /
+  // total_responses"), which is what the ranking table's "Share of
+  // Voice" column actually shows. Headlines, inline row deltas,
+  // these sparklines, AND the snapshot-diff strip below must all
+  // pull from the same metric or chip values disagree numerically
+  // with the table the user reads them against. So: subject series
+  // uses `data.trajectory.ai_recall` (subject mention rate over
+  // time); competitor series uses `competitor_trajectories[].mention_rate`
+  // (peer mention rate over time). The sibling field
+  // `trajectory.share_of_voice` is the *pie-share* definition used
+  // by Visibility's Trend chart and is intentionally NOT used here.
+  const competitiveRankSpark = data.trajectory.ai_recall;
   const competitiveRankDelta = changeFromTrajectory(competitiveRankSpark);
-  // Card 2 (Top Competitor): gap = subject SoV − current top
-  // competitor's SoV, pinned to whoever holds top-competitor today.
-  // Trajectory is per-week so a reader can see whether the gap to
-  // their CURRENT nearest rival is closing or widening — different
-  // question from "who was nearest in the past" (the name itself
-  // could have changed snapshot to snapshot).
+  // Card 2 (Closest Rival): gap = subject mention rate − current
+  // closest rival's mention rate, pinned to whoever holds the slot
+  // today. Trajectory is per-week so a reader can see whether the
+  // gap to their CURRENT nearest rival is closing or widening —
+  // different question from "who was nearest in the past" (the
+  // name itself could change snapshot to snapshot).
   const topCompetitorTrajectory =
     topCompetitorName !== null
       ? data.competitor_trajectories.find((c) => c.name === topCompetitorName)
-          ?.share_of_voice ?? null
+          ?.mention_rate ?? null
       : null;
   const topCompetitorGapSpark: (number | null)[] | null = topCompetitorTrajectory
-    ? data.trajectory.share_of_voice.map((sv, i) => {
+    ? data.trajectory.ai_recall.map((sv, i) => {
         const rv = topCompetitorTrajectory[i];
         if (sv === null || rv === null || rv === undefined) return null;
         return sv - rv;
@@ -1337,28 +1343,25 @@ export default async function CompetitionPage({
   });
 
   // Snapshot-diff strip data for the Standing band. Reuses the same
-  // composer the Trend section uses, but with SoV trajectories swapped
-  // in (the composer is field-agnostic, it just reads `mention_rate`
-  // off each competitor row). SoV is the right axis here because the
-  // Standing band is anchored on the SoV-sorted ranking table; using
-  // mention-rate would surface a different mover set than the table.
-  // Full-trajectory window (not the user-selected trend slice) so the
-  // strip describes "across recorded history" — matches the
-  // Visibility spoke's What-Changed sidebar convention.
-  const competitorSovTrajectories = data.competitor_trajectories.map(
-    (c) => ({ ...c, mention_rate: c.share_of_voice }),
-  );
+  // composer the Trend section uses, on the same mention-rate metric
+  // the ranking table column actually shows (see the metric-choice
+  // comment above). Earlier this strip pulled `trajectory.share_of_voice`
+  // (pie-share) — that surfaced a different mover set and the chip
+  // values disagreed numerically with the table column they sat
+  // under. Full-trajectory window (not the user-selected trend slice)
+  // so the strip describes "across recorded history."
   const snapshotDiff = composeCompetitionWhatChanged({
     trajectoryWeeks: data.trajectory.weeks,
-    aiRecall: data.trajectory.share_of_voice,
-    competitorTrajectories: competitorSovTrajectories,
+    aiRecall: data.trajectory.ai_recall,
+    competitorTrajectories: data.competitor_trajectories,
   });
-  // Relabel the "Overall mention rate" entry to the subject's name +
-  // SoV framing — clearer in the Standing context than the generic
-  // overall label the Trend section uses.
+  // Relabel the "Overall mention rate" entry to the subject's name —
+  // shorter and clearer in the Standing context. The metric is still
+  // mention rate; the chip's value matches the SoV column reading
+  // (which IS mention rate despite the column header's label).
   const snapshotDiffDeltas = snapshotDiff.deltas.map((d) =>
     d.kind === "overall"
-      ? { ...d, label: `${data.subject_name} SoV` }
+      ? { ...d, label: data.subject_name }
       : d,
   );
 
