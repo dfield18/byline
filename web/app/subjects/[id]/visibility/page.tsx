@@ -1414,50 +1414,15 @@ export default async function VisibilityPage({
                         })}
                       </div>
                     </div>
-                    {/* Color legend — closes the loop on the tiered
-                        background colors so the reader doesn't need
-                        to hover a cell or read the section tooltip
-                        to learn what each tint means. Swatches match
-                        the tier styles exactly (color-mix expressions
-                        identical to heatTierStyle output) so legend
-                        and grid stay in sync if the palette ever
-                        shifts. */}
+                    {/* Color legend — only the "No data" swatch
+                        remains; the three tier swatches (Healthy /
+                        Mid / Gap) were dropped per design call —
+                        the section tooltip + cell hover already
+                        explain the tier coloring, and the auto-
+                        summary line below carries the gap count
+                        explicitly so colorblind readers still get
+                        the read. */}
                     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          aria-hidden
-                          className="inline-block h-3 w-3 rounded-sm"
-                          style={{
-                            background:
-                              "color-mix(in oklab, var(--primary) 10%, transparent)",
-                          }}
-                        />
-                        Healthy ≥60%
-                      </span>
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          aria-hidden
-                          className="inline-block h-3 w-3 rounded-sm"
-                          style={{
-                            background:
-                              "color-mix(in oklab, var(--muted) 65%, transparent)",
-                          }}
-                        />
-                        Mid 30-60%
-                      </span>
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          aria-hidden
-                          className="inline-block h-3 w-3 rounded-sm"
-                          style={{
-                            background:
-                              "color-mix(in oklab, var(--warning) 22%, transparent)",
-                            border:
-                              "1px solid color-mix(in oklab, var(--warning) 55%, transparent)",
-                          }}
-                        />
-                        Gap &lt;30%
-                      </span>
                       <span className="inline-flex items-center gap-1.5">
                         <span
                           aria-hidden
@@ -1515,7 +1480,15 @@ export default async function VisibilityPage({
                 subjectValues={trendSubjectValues}
                 overlays={platformOverlays}
                 helperText={`Mention rate shows the share of tracked AI answers where ${data.subject_name} appeared — overall, with each platform's mention rate as a lighter line for context.`}
-                overlayOpacity={0.5}
+                // Per-platform overlays sit FURTHER back than
+                // Competition's competitor lines — Visibility's
+                // focal read is "Overall", and the per-platform
+                // splits are reference context, not co-equal series.
+                // Lighter (0.35 vs 0.5) + thinner (1.25 vs 2) keeps
+                // the four LLM lines legible on hover but stops them
+                // from competing with the subject line for the eye.
+                overlayOpacity={0.35}
+                overlayStrokeWidth={1.25}
                 // Opt into end-of-line labels — Visibility's overlays
                 // are per-platform breakdowns of the SAME metric
                 // (typically 2-4 platforms), so they spread across

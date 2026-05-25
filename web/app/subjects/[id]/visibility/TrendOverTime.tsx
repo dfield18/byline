@@ -180,6 +180,7 @@ export function TrendOverTime({
   overlays,
   helperText,
   overlayOpacity = 0.7,
+  overlayStrokeWidth = 2,
   height = 320,
   subjectOnlyAxis = false,
   showEndLabels = false,
@@ -199,6 +200,12 @@ export function TrendOverTime({
   // competitor lines crowd the chart and the subject needs to read
   // as the focal series.
   overlayOpacity?: number;
+  // Stroke width for overlay lines. Default 2px matches the
+  // Competition spoke's competitor lines. Visibility's per-platform
+  // overlays pass a thinner value (~1.25) so the four LLM lines
+  // recede further behind the subject's "Overall" series — the
+  // per-platform splits are reference context, not the focal read.
+  overlayStrokeWidth?: number;
   // Chart pixel height for both populated and empty states. Default
   // 320 keeps the Trend section in proportion with the other
   // Visibility sections (summary band, tables) rather than letting
@@ -540,7 +547,7 @@ export function TrendOverTime({
                 // the chart read as "lots of lines" instead of "one
                 // subject, several context lines."
                 strokeOpacity={opacityFor(o.name, overlayOpacity)}
-                strokeWidth={2}
+                strokeWidth={overlayStrokeWidth}
                 dot={false}
                 activeDot={{
                   r: 3,
