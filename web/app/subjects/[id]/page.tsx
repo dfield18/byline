@@ -372,11 +372,10 @@ function hasRealVisibilityGap(
   );
 }
 
-// Shared row used by the Gap card (TopicRecallInline) and the
-// Top Narratives card (TopNarrativesList). Keeps the two cards
-// visually parallel — same row dimensions, same label/bar/percent
-// treatment — so they only differ in sort direction, highlight
-// override, and (for narratives) sentiment-derived bar tone.
+// Row used by the Visibility-by-topic card (TopicRecallInline).
+// Previously also fed TopNarrativesList until that card was
+// dropped from the Overview; kept generic so a future caller can
+// reuse the same label/bar/percent treatment.
 //
 // `highlight` semantics:
 //   "weakest" → force warning tone at higher opacity (Gap card)
@@ -516,84 +515,6 @@ function TopicRecallInline({
           </div>
         );
       })()}
-    </div>
-  );
-}
-
-// Top narrative clusters list for the Band 2 middle card.
-// Surfaces the AI's RECURRING FRAMINGS — e.g. "Progressive
-// Policy Advocate", "Foreign Policy Critique" — and how often
-// each appears across responses. Visually parallels the Gap
-// card via the shared TopicBarRow component (same row layout,
-// label + bar + %). Each bar is sentiment-toned (favorable /
-// critical / neutral) from cluster.sentiment_mean so the color
-// reflects WHETHER each framing is positive, not just HOW
-// prevalent it is — answers the question the share alone
-// can't ("is the most-common narrative for or against us?").
-function TopNarrativesList({
-  clusters,
-}: {
-  clusters: SubjectOverview["narrative_clusters"];
-}) {
-  const sorted = clusters
-    .slice()
-    .sort((a, b) => b.share - a.share)
-    .slice(0, 4);
-  if (sorted.length === 0) return null;
-  return (
-    <div className="mt-4">
-      {/* "Cluster share of responses" sub-eyebrow dropped — duplicated
-          the card's outer "TOP NARRATIVES" eyebrow. */}
-      <div className="space-y-2.5">
-        {sorted.map((c) => {
-          // Clamp share to [0, 1] before converting to a percentage —
-          // defensive against backend float round-off that could
-          // produce tiny negatives, or model math glitches that
-          // would push a cluster's share above 100% (cluster
-          // overlap double-counting, etc). Without this, the bar
-          // width can overflow its track or render visually broken.
-          // Finite check before clamp — Math.min/max propagate NaN,
-          // so a backend regression producing NaN share would land
-          // as a "NaN%" bar width without this guard. Same defensive
-          // pattern as CompetitorBarsFromData's sov guard.
-          const safeShare = Number.isFinite(c.share)
-            ? Math.max(0, Math.min(1, c.share))
-            : 0;
-          // Tone the bar by the cluster's mean sentiment (not by
-          // share rank). Resolves the "Adversarial Critique" bar
-          // painted the same green as "Progressive Champion" — the
-          // share alone tells the reader WHAT framings dominate
-          // but not WHETHER each is favorable or critical. ±0.1
-          // neutral band matches the same threshold the backend
-          // uses to compute net_sentiment counts, so the bar
-          // coloring agrees with how the analyzer classified each
-          // response. Null sentiment_mean → neutral (no
-          // responses scored).
-          // Inclusive boundaries at ±0.1 so a cluster whose mean
-          // lands exactly on 0.1 (or −0.1) gets the matching tone
-          // rather than being silently rounded into neutral. Edge
-          // case but real: sentiment_mean is the bare mean of
-          // response scores, which on small clusters can resolve
-          // to exact 0.1.
-          const tone: "success" | "warning" | "neutral" =
-            c.sentiment_mean === null
-              ? "neutral"
-              : c.sentiment_mean >= 0.1
-                ? "success"
-                : c.sentiment_mean <= -0.1
-                  ? "warning"
-                  : "neutral";
-          return (
-            <TopicBarRow
-              key={c.name}
-              label={c.name}
-              pct={Math.round(safeShare * 100)}
-              highlight={null}
-              tone={tone}
-            />
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -1653,53 +1574,44 @@ export default async function SubjectOverviewPage({
                 // link bottom-anchors the action while the content
                 // above sits at the top.
                 //
-                // Dynamic column count so that when Top Narratives
-                // (no clusters yet) or the Fix card (no recommended
-                // action) is absent, the remaining cards fill the
-                // row instead of stretching across an empty slot.
-                // gridColsClass picks 1/2/3 columns based on which
-                // cards will actually render. Computed here so the
-                // grid template matches the conditional render
-                // result one block down.
+                // Dynamic column count so that when the Fix card (no
+                // recommended action) is absent, the remaining card
+                // fills the row instead of stretching across an empty
+                // slot. gridColsClass picks 1/2 columns based on which
+                // cards will actually render. (Top Narratives was a
+                // third card here previously — removed to keep Band 2
+                // focused on the topic-visibility read + the action.)
                 const gapCardEligible = data.topic_coverage.some(_hasFiniteRecall);
-                const narrativesCardEligible = data.narrative_clusters.length > 0;
                 const fixCardEligible = Boolean(data.recommended_actions?.primary);
                 const cardCount =
-                  (gapCardEligible ? 1 : 0) +
-                  (narrativesCardEligible ? 1 : 0) +
-                  (fixCardEligible ? 1 : 0);
+                  (gapCardEligible ? 1 : 0) + (fixCardEligible ? 1 : 0);
                 const gridColsClass =
-                  cardCount === 3
-                    ? "md:grid-cols-3"
-                    : cardCount === 2
-                      ? "md:grid-cols-2"
-                      : "md:grid-cols-1";
+                  cardCount === 2 ? "md:grid-cols-2" : "md:grid-cols-1";
                 return (
                   <div className={`grid ${gridColsClass} gap-4 items-stretch`}>
-                    {/* The gap (or "Topic visibility" when every
-                        topic ties). When there's no real gap to
-                        surface (all topics within TIE_EPSILON of each
-                        other), the warning-toned "gap" framing
-                        misrepresents the data. Swap both the label
-                        AND the tone: success-toned "Topic visibility"
-                        if everyone's at ≥70%, neutral otherwise.
-                        TopicRecallInline already mutes its bar-level
-                        warning treatment in the no-gap case, so the
-                        bars and the eyebrow read consistently. */}
+                    {/* Visibility by topic. Eyebrow stays neutral
+                        across gap / no-gap states — the warning-toned
+                        weakest bar + the "Weakest" legend pill below
+                        already carry the "there IS a gap" signal
+                        without the eyebrow having to swap framing.
+                        Earlier the label flipped between "Visibility
+                        gap by topic" (warning) and "Topic visibility"
+                        (success / neutral); collapsed for consistency
+                        with how the AI Mention Rate KPI tile treats
+                        its label (one neutral noun, color signal lives
+                        on the value + bars). Success tone retained for
+                        the strong all-topics-≥70% case as a quiet
+                        positive cue. */}
                     {data.topic_coverage.some(_hasFiniteRecall) && (() => {
                       const gapExists = hasRealVisibilityGap(data.topic_coverage);
                       const withRecall = data.topic_coverage.filter(_hasFiniteRecall);
                       const allHigh =
                         withRecall.length > 0 &&
                         withRecall.every((t) => (t.ai_recall ?? 0) >= 0.7);
-                      const label = gapExists
-                        ? "Visibility gap by topic"
-                        : "Topic visibility";
-                      const labelTone = gapExists
-                        ? "text-warning"
-                        : allHigh
-                          ? "text-success"
-                          : "text-foreground/55";
+                      const label = "Visibility by topic";
+                      const labelTone = allHigh
+                        ? "text-success"
+                        : "text-foreground/55";
                       return (
                         <Card className="flex h-full flex-col p-6 border-border/60">
                           <div className={`text-[10.5px] font-semibold uppercase tracking-[0.08em] ${labelTone} mb-3`}>
@@ -1751,64 +1663,11 @@ export default async function SubjectOverviewPage({
                       );
                     })()}
 
-                    {/* Top narratives — replaces the prior "Strongest
-                        asset" content. The asset card showed a
-                        ranked list of top topics, which duplicated
-                        the data the Gap card on its left already
-                        renders (same topics, same mention rates,
-                        just opposite sort + opposite highlight). This
-                        card now surfaces a different dimension: the
-                        recurring AI framings (narrative clusters) and
-                        how often each appears across responses. Uses
-                        the shared TopicBarRow so the visual unit
-                        matches the Gap card exactly — only the data
-                        is different. */}
-                    {data.narrative_clusters.length > 0 && (
-                      <Card className="flex h-full flex-col p-6 border-border/60">
-                        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-primary mb-3">
-                          Top narratives
-                        </div>
-                        {/* "Recurring AI framings of {subject}." tagline
-                            dropped — the eyebrow above + the cluster
-                            names below carry that meaning. */}
-                        <TopNarrativesList clusters={data.narrative_clusters} />
-                        {/* Methodology fragment — was a full sentence
-                            warning that shares can sum above 100%
-                            because clusters overlap; now a tighter
-                            ·-separated phrase. The warning still has
-                            to surface (a reader totaling the bars to
-                            87% or 110% would otherwise think the data
-                            is broken) but at less visual weight. */}
-                        <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
-                          Shares can overlap · bars don&apos;t sum to 100%
-                        </p>
-                        {/* Color legend pairs with the sentiment-toned
-                            bars + dots so the meaning of the colors
-                            doesn't have to be guessed. Kept terse —
-                            the eye picks up "green = favorable,
-                            orange = critical" in one glance. */}
-                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
-                          <span className="inline-flex items-center gap-1">
-                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--success)" }} />
-                            Favorable
-                          </span>
-                          <span className="inline-flex items-center gap-1">
-                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--primary)" }} />
-                            Neutral
-                          </span>
-                          <span className="inline-flex items-center gap-1">
-                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--warning)" }} />
-                            Critical
-                          </span>
-                        </div>
-                      </Card>
-                    )}
-
                     {/* The fix. Primary-tinted card so it reads
                         as the actionable callout. Secondaries
                         surfaced inline below the primary so the card
                         fills out and matches the vertical weight of
-                        Visibility Gap + Top Narratives to its left
+                        the Visibility-by-topic card to its left
                         (without the secondaries the card had ~3
                         lines of text and a block of whitespace
                         before the bottom-pinned link). */}
