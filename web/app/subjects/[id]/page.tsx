@@ -680,10 +680,12 @@ function TopicRecallInline({
         Math.abs((t.ai_recall ?? 0) - (sorted[0].ai_recall ?? 0)) < TIE_EPSILON,
     );
   return (
-    <div className="mt-5">
-      <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-2.5">
-        Mention rate by topic
-      </div>
+    <div className="mt-4">
+      {/* "Mention rate by topic" sub-eyebrow dropped — the card's
+          outer eyebrow already reads "VISIBILITY GAP BY TOPIC"
+          (or "TOPIC VISIBILITY" in the no-gap case), so this inner
+          header just repeated the framing. Removing it cuts a line
+          of text from a card that was reading busy in Band 2. */}
       {(() => {
         // When multiple topics tie for weakest (within TIE_EPSILON),
         // highlight ALL of them in warning tone rather than singling
@@ -736,9 +738,8 @@ function TopNarrativesList({
   if (sorted.length === 0) return null;
   return (
     <div className="mt-4">
-      <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/55 mb-2.5">
-        Cluster share of responses
-      </div>
+      {/* "Cluster share of responses" sub-eyebrow dropped — duplicated
+          the card's outer "TOP NARRATIVES" eyebrow. */}
       <div className="space-y-2.5">
         {sorted.map((c) => {
           // Clamp share to [0, 1] before converting to a percentage —
@@ -2399,10 +2400,17 @@ export default async function SubjectOverviewPage({
                               while Top Narratives had ~3 lines of
                               supporting content underneath, making
                               the equal-height grid look unbalanced. */}
+                          {/* Methodology fragment — was a full sentence
+                              ("Each row = … . Lower = bigger gap …"),
+                              now a tighter ·-separated phrase to keep
+                              the card from reading text-heavy. The
+                              eyebrow + bar values + legend already
+                              carry most of the meaning; this just
+                              names the metric inline so a non-
+                              technical reader doesn't have to infer
+                              the denominator. */}
                           <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
-                            Each row = % of AI answers about that topic
-                            that mention {data.subject_name}. Lower =
-                            bigger visibility gap to close.
+                            % of AI answers per topic that mention {data.subject_name} · lower = bigger gap
                           </p>
                           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
                             <span className="inline-flex items-center gap-1">
@@ -2443,19 +2451,19 @@ export default async function SubjectOverviewPage({
                         <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-primary mb-3">
                           Top narratives
                         </div>
-                        <p className="text-[12.5px] text-foreground/70 leading-relaxed">
-                          Recurring AI framings of {data.subject_name}.
-                        </p>
+                        {/* "Recurring AI framings of {subject}." tagline
+                            dropped — the eyebrow above + the cluster
+                            names below carry that meaning. */}
                         <TopNarrativesList clusters={data.narrative_clusters} />
-                        {/* Shares are independent per cluster — a
-                            response can be tagged with multiple
-                            framings, or none — so they don't
-                            necessarily sum to 100%. Without this
-                            note a reader who totals the bars and
-                            finds 87% (or 110%) thinks the data is
-                            broken. */}
+                        {/* Methodology fragment — was a full sentence
+                            warning that shares can sum above 100%
+                            because clusters overlap; now a tighter
+                            ·-separated phrase. The warning still has
+                            to surface (a reader totaling the bars to
+                            87% or 110% would otherwise think the data
+                            is broken) but at less visual weight. */}
                         <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
-                          Each share is independent; clusters may overlap, so the bars don&apos;t have to sum to 100%.
+                          Shares can overlap · bars don&apos;t sum to 100%
                         </p>
                         {/* Color legend pairs with the sentiment-toned
                             bars + dots so the meaning of the colors
@@ -2499,28 +2507,29 @@ export default async function SubjectOverviewPage({
                             the card from outgrowing its siblings on
                             subjects with many tracked actions —
                             "View all N" link below still surfaces
-                            anything beyond the cap. */}
+                            anything beyond the cap. Rendered as a
+                            compact bulleted list (was a paragraph
+                            with bold "Label." prefixes — the label
+                            and action duplicated each other in
+                            practice and the bold prefix made the
+                            card read text-heavy in Band 2). */}
                         {data.recommended_actions.secondary.length > 0 && (
-                          <div className="mt-4 pt-3 border-t border-primary/15 space-y-2">
-                            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-primary/70">
-                              Also worth doing
-                            </div>
+                          <ul className="mt-3 pt-3 border-t border-primary/15 space-y-1.5">
                             {data.recommended_actions.secondary
                               .slice(0, 2)
                               .map((s) => (
-                                <div
+                                <li
                                   key={s.label}
-                                  className="text-[12.5px] text-foreground/80 leading-snug"
+                                  className="flex gap-2 text-[12.5px] text-foreground/75 leading-snug"
                                 >
-                                  <span className="font-medium text-foreground/90">
-                                    {s.label}.
-                                  </span>{" "}
-                                  <span className="text-foreground/70">
-                                    {s.action}
-                                  </span>
-                                </div>
+                                  <span
+                                    aria-hidden
+                                    className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-primary/60"
+                                  />
+                                  <span>{s.action}</span>
+                                </li>
                               ))}
-                          </div>
+                          </ul>
                         )}
                         {data.recommended_actions.secondary.length > 0 && (
                           <Link
