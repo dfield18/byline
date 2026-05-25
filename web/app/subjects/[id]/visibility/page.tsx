@@ -1462,7 +1462,11 @@ export default async function VisibilityPage({
             <SectionTitle
               eyebrow="Trend"
               title="Mention Rate Over Time"
-              description="Mention rate over time, with each platform as a lighter overlay line."
+              // Section description dropped — the chart's helperText
+              // (now rendered above the chart) carries the same
+              // explanation in more specific terms (names the
+              // subject, defines mention rate). Keeping both stacked
+              // two near-identical lines above the chart.
               className="mb-5"
               right={<TrendWindowToggle />}
             />

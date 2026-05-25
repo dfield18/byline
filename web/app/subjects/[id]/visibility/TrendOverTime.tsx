@@ -476,6 +476,16 @@ export function TrendOverTime({
 
   return (
     <div>
+      {/* helperText renders ABOVE the chart so the legend chips and
+          "What changed" delta line sit unobstructed at the bottom.
+          Previously the helper paragraph sat below the legend and
+          competed with the delta line for the eye; moving it up
+          frames the chart on first read instead. */}
+      {helperText && (
+        <p className="mb-3 text-[12px] leading-relaxed text-muted-foreground">
+          {helperText}
+        </p>
+      )}
       {/* Wrapper height tracks the `height` prop so Visibility (320,
           default) and Competition (340, explicit) each render at
           their own size. Wrapper used to be hardcoded h-[420px],
@@ -754,11 +764,6 @@ export function TrendOverTime({
           </button>
         )}
       </div>
-      {helperText && (
-        <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
-          {helperText}
-        </p>
-      )}
     </div>
   );
 }
