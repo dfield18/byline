@@ -30,6 +30,12 @@ import {
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { BottomLineBlock } from "@/components/dashboard/BottomLineBlock";
+import { TinySpark } from "@/components/dashboard/Sparklines";
+import { KpiVitalsTile } from "@/components/dashboard/KpiVitalsTile";
+import {
+  KPI_PLATFORM_SPREAD_LOPSIDED,
+  getKpiValueColor,
+} from "@/lib/kpiThresholds";
 import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
 import {
   getSubject,
@@ -142,161 +148,6 @@ function KpiTooltipIcon({
   );
 }
 
-// ── Wired sections ──────────────────────────────────────────────────
-
-// Conditional color for a KPI value based on the metric kind and the
-// raw value (units consistent with the underlying field — `ai_recall`
-// and `risk_frame_rate` are 0..1; `avg_sentiment` is −1..+1).
-//
-// Thresholds chosen to be restrained: only step into success/warning
-// when the value clearly clears the noise band. Anything in between
-// stays in neutral foreground so the color treatment doesn't over-fire
-// on small differences. `text-warning` reserved for values that
-// genuinely warrant attention rather than as a default for "risk"
-// metrics (the prior behavior, which painted Risk Frame Rate orange
-// even at 0%).
-
-// ─── Named strength thresholds ──────────────────────────────────────
-//
-// The KPI tile color rule is: the big VALUE is colored by absolute
-// strength tier (success / neutral / warning); the ↑/↓ DELTA below
-// it is colored by direction. A strong value that's slipping reads
-// as green-number + red-arrow ("strong but losing ground") — and
-// that's the intended signal. Without this split, a steep decline
-// (e.g. a 50pt drop) hides behind a green number when the absolute
-// level is still high, and comms readers scan past the trend.
-//
-// Constants here are the SOURCE OF TRUTH for "strong / moderate /
-// weak" on the Overview spoke. For `mention_rate`, values match
-// the Visibility spoke's `STATUS_STRONG_MENTION_RATE` /
-// `STATUS_WEAK_MENTION_RATE` (visibility/page.tsx:183-185) so the
-// product is internally consistent — "strong" on the Visibility
-// platform pills means the same thing as "strong" on the Overview
-// KPI tile.
-
-// Mention rate — 0..1, higher better. Mirrors Visibility status
-// pills exactly. A 50% Vance-style mention rate now lands NEUTRAL,
-// not success — refuses to celebrate "half the time" as a win.
-const KPI_STRONG_MENTION_RATE = 0.6;
-const KPI_WEAK_MENTION_RATE = 0.3;
-
-// Top-result rate — 0..1, higher better. Real-world range caps
-// lower than mention rate (top-of-mind first-rank share tops out
-// ~30-40% even for dominant subjects), so the strong floor sits
-// lower while still being aspirational, and the weak floor sits
-// higher than the old <5% so a 10% rate reads as weak (it is).
-const KPI_STRONG_TOP_RESULT_RATE = 0.5;
-const KPI_WEAK_TOP_RESULT_RATE = 0.2;
-
-// Per-platform spread above which the AI Mention Rate tile's
-// "by platform" subline appends a warning-toned "{N} pt spread"
-// flag. Below this threshold the platforms are close enough that
-// the breakdown is informational; at or above it, the subject's
-// visibility is single-platform-dependent (e.g. Gemini 80% /
-// ChatGPT 20% = 60 pts → load-bearing on one provider). The
-// 40 pt cut is intentionally higher than the prior strip's 30 pt
-// "notable" tier because we're surfacing this inline as a warning,
-// not a passive eyebrow — the bar should clear "huh that's a lot"
-// not just "modestly uneven."
-const KPI_PLATFORM_SPREAD_LOPSIDED = 40;
-
-// Average sentiment / favorability — −1..+1, treat SYMMETRICALLY
-// around zero (this metric is NOT a 0..1 rate; positive can be
-// "strong" in either direction relative to zero). ±10% neutral
-// band absorbs snapshot-to-snapshot noise so a -7% reading doesn't
-// fire the warning tone while a +4 pts improvement is happening
-// — the value is still inside the neutral band, the delta arrow
-// carries the directional story.
-const KPI_STRONG_AVG_TONE = 0.10;
-const KPI_WEAK_AVG_TONE = -0.10;
-
-function getKpiValueColor(
-  kind:
-    | "mention_rate"
-    | "avg_tone"
-    | "risk_frame_rate"
-    | "weakest_topic_recall"
-    | "citation_rate"
-    | "net_sentiment"
-    | "top_result_rate",
-  value: number | null,
-): string {
-  if (value === null) return "text-foreground";
-  switch (kind) {
-    case "mention_rate":
-      // 0..1 — higher is better. Thresholds aligned with Visibility's
-      // STATUS_STRONG_MENTION_RATE (0.6) / STATUS_WEAK_MENTION_RATE
-      // (0.3) via KPI_STRONG_MENTION_RATE / KPI_WEAK_MENTION_RATE
-      // above. The 30-60% band reads as NEUTRAL — visibility that
-      // could go either way — not as success. Prior ≥50% cutoff
-      // celebrated a "half the time" mention rate as a win, which
-      // hid Vance-style steep declines (50% after a -50pt drop
-      // showed up as green).
-      if (value >= KPI_STRONG_MENTION_RATE) return "text-success";
-      if (value < KPI_WEAK_MENTION_RATE) return "text-warning";
-      return "text-foreground";
-    case "avg_tone":
-      // −1..+1 — treated SYMMETRICALLY around zero (this metric is
-      // NOT a 0..1 rate). ±10% neutral band so mild-negative readings
-      // like -7% (within snapshot noise) don't fire warning while
-      // their +4 pts delta arrow is already carrying the directional
-      // story. Prior ±0.5% band collapsed too tight — any tiny shift
-      // across zero flipped the value's color, conflicting with the
-      // delta arrow that's already direction-coded.
-      if (value >= KPI_STRONG_AVG_TONE) return "text-success";
-      if (value <= KPI_WEAK_AVG_TONE) return "text-warning";
-      return "text-foreground";
-    case "risk_frame_rate":
-      // 0..1 — lower is better
-      if (value <= 0.05) return "text-success";
-      if (value > 0.2) return "text-warning";
-      return "text-foreground";
-    case "weakest_topic_recall":
-      // 0..1 — narrower color ladder than overall mention rate. Even
-      // at 50% the framing of the tile is "this is the weakest topic"
-      // / "this is where AI underweights the subject" — celebrating
-      // that with a green value undercuts the headline. Only go
-      // warning for genuinely severe gaps (<30%); otherwise stay
-      // neutral. Never go success: the weakest topic isn't a "win,"
-      // and on the only path where weakest = 100% (all topics tied at
-      // ceiling) the templated Bottom Line returns null and this tile
-      // sits next to no actionable gap to surface anyway.
-      if (value < 0.3) return "text-warning";
-      return "text-foreground";
-    case "citation_rate":
-      // 0..1 — higher is better, but the real-world range is much
-      // lower than overall mention rate (canonical URLs typically
-      // appear in 5–25% of cited responses, not 50%+). Softer ladder:
-      // genuinely strong citation share goes green at ≥20%; truly
-      // absent (=0%) stays neutral since it often just means no
-      // canonical_url is configured for the subject, not a real
-      // signal. Warning fires only for low-but-nonzero (<5%, >0%) —
-      // a configured site that AI is essentially ignoring.
-      if (value >= 0.2) return "text-success";
-      if (value > 0 && value < 0.05) return "text-warning";
-      return "text-foreground";
-    case "net_sentiment":
-      // Signed integer count: positive_responses − negative_responses
-      // per snapshot (±0.1 neutral band excluded from both counts).
-      // Net positive → success; net negative → warning; ties stay
-      // neutral. Magnitude varies with response volume so we don't
-      // ladder by absolute threshold — direction is the signal.
-      if (value > 0) return "text-success";
-      if (value < 0) return "text-warning";
-      return "text-foreground";
-    case "top_result_rate":
-      // 0..1 — higher is better. Real-world range caps lower than
-      // overall mention rate (30-40% even for dominant subjects),
-      // so the strong floor sits at 50% (KPI_STRONG_TOP_RESULT_RATE)
-      // and weak at 20% (KPI_WEAK_TOP_RESULT_RATE) — tighter than
-      // the old 25%/5% which let a 10% rate read as neutral. A
-      // subject AI picks as the first entity only 1-in-10 times
-      // is structurally weak, not neutral, on this dimension.
-      if (value >= KPI_STRONG_TOP_RESULT_RATE) return "text-success";
-      if (value < KPI_WEAK_TOP_RESULT_RATE) return "text-warning";
-      return "text-foreground";
-  }
-}
 
 // Predicate used by every consumer of topic_coverage to filter out
 // non-finite recall values. `!== null` alone lets NaN / Infinity
@@ -895,66 +746,10 @@ function StatCard({
   );
 }
 
-// Tiny inline sparkline for use inside a compact StatCard. Hand-
-// rolled SVG (no recharts) so it stays at ~22px tall without the
-// axis-label overhead MiniSpark carries. Uses the same monotone-
-// cubic smoothing as MiniSpark via `buildMonoCubicPath` so the
-// two sparkline sizes have consistent visual character — a reader
-// scanning the same page shouldn't see one sparkline curve and
-// another zigzag. Renders nothing if fewer than two finite values.
-function TinySpark({
-  values,
-  color = "var(--primary)",
-}: {
-  values: (number | null)[];
-  color?: string;
-}) {
-  const numeric = values.filter((v): v is number => v !== null && Number.isFinite(v));
-  if (numeric.length < 2) return null;
-  // Asymmetric padding to match MiniSpark (40% below, 15% above)
-  // so the line never grazes the chart floor.
-  const dataMin = Math.min(...numeric);
-  const dataMax = Math.max(...numeric);
-  const rawRange = dataMax - dataMin || 1;
-  const plotMin = dataMin - rawRange * 0.4;
-  const plotMax = dataMax + rawRange * 0.15;
-  const range = plotMax - plotMin || 1;
-  const w = 120;
-  const h = 22;
-  const pad = 2;
-  const step = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
-  // Group into runs of contiguous measured points so nulls break
-  // the curve (same null-handling as MiniSpark). Each run gets
-  // smoothed independently via buildMonoCubicPath; runs are joined
-  // with SVG M moves so a null between two measured spans reads
-  // as discontinuity, not as a curve through the gap.
-  const runs: { x: number; y: number }[][] = [];
-  let cur: { x: number; y: number }[] = [];
-  values.forEach((v, i) => {
-    if (v === null || !Number.isFinite(v)) {
-      if (cur.length > 0) {
-        runs.push(cur);
-        cur = [];
-      }
-      return;
-    }
-    const x = pad + i * step;
-    const y = h - pad - ((v - plotMin) / range) * (h - pad * 2);
-    cur.push({ x, y });
-  });
-  if (cur.length > 0) runs.push(cur);
-  const path = runs.map(buildMonoCubicPath);
-  return (
-    <svg
-      viewBox={`0 0 ${w} ${h}`}
-      preserveAspectRatio="none"
-      className="w-full h-[22px]"
-      aria-hidden
-    >
-      <path d={path.join(" ")} fill="none" stroke={color} strokeWidth={1.5} />
-    </svg>
-  );
-}
+// TinySpark + MiniSpark + buildMonoCubicPath now live in
+// components/dashboard/Sparklines.tsx — imported above so both
+// Overview's vitals KPI tiles and Visibility's briefing tiles share
+// identical sparkline visual character.
 
 // Derive the competitive position stats from the chart's own
 // data array. Returned values match exactly what the bars show
@@ -1185,524 +980,67 @@ function TrajectoryStrip({
   return (
     <div className="grid md:grid-cols-3 gap-8 items-stretch">
       {metrics.map((m) => {
+        // Prior value = the IMMEDIATELY preceding snapshot only. Earlier
+        // we scanned right-to-left through nulls to find the nearest
+        // finite predecessor; that produced a misleading "vs previous
+        // snapshot" delta when the actual preceding snapshot was a
+        // backfill gap. When the immediate predecessor isn't measured
+        // we show no delta — the label can't lie.
         const latestValue = m.values[m.values.length - 1] ?? null;
-        // Prior value = the IMMEDIATELY preceding snapshot only.
-        // Previously we scanned right-to-left through nulls to find
-        // the nearest finite predecessor, which produced a misleading
-        // "vs previous snapshot" delta when the actual preceding
-        // snapshot was a backfill gap (the delta would silently span
-        // 2+ snapshots). When the immediate predecessor isn't measured,
-        // we now show no delta at all — the label can't lie.
         const rawPrior = m.values[m.values.length - 2];
         const priorValue =
-          rawPrior !== null && rawPrior !== undefined && Number.isFinite(rawPrior)
+          rawPrior !== null &&
+          rawPrior !== undefined &&
+          Number.isFinite(rawPrior)
             ? rawPrior
             : null;
-        // Delta in points. All three KPIs are on the ±1 / 0..1
-        // scale (mention_rate, top_result_rate are 0..1; avg_tone
-        // is −1..+1), so multiplying by 100 yields point deltas
-        // consistently. Null when one endpoint is missing.
         const deltaPp =
           latestValue !== null &&
           Number.isFinite(latestValue) &&
           priorValue !== null
             ? Math.round((latestValue - priorValue) * 100)
             : null;
-        // "Not measured" when every snapshot returned null for this
-        // metric (e.g. Citation Rate for a subject with no
-        // canonical_url). Distinct from "no snapshots yet" — the
-        // header value and footer copy both adjust so the tile reads
-        // as not-applicable rather than waiting-on-data.
+        // "Not measured" = every snapshot returned null. Distinct from
+        // "no snapshots yet"; the shared tile's MiniSpark renders the
+        // appropriate placeholder for either case.
         const notMeasured =
-          m.values.length > 0 &&
-          m.values.every((v) => v === null);
+          m.values.length > 0 && m.values.every((v) => v === null);
         const valueColor = notMeasured
           ? "text-muted-foreground"
           : getKpiValueColor(m.colorKind, latestValue);
+        // Gauge fill — 0..1 fraction of the current value. For rate
+        // metrics (mention_rate, top_result_rate; range 0..1) we use
+        // the value directly. Tiles whose metric has no benchmark
+        // (Net Favorability) leave gaugeValue null and the gauge
+        // skips rendering.
+        const gaugeValue =
+          m.benchmark !== null &&
+          latestValue !== null &&
+          Number.isFinite(latestValue)
+            ? Math.max(0, Math.min(1, latestValue))
+            : null;
         return (
-          // Secondary-surface tile — matches the StatCard treatment
-          // (bg-muted/40 rounded-md p-4) so Visibility briefing
-          // tiles + Overview Vitals tiles read with the same chrome.
-          // h-full + flex-col + mt-auto on the sparkline ensures
-          // baselines align across all three tiles regardless of
-          // title-block height variance.
-          <div
+          <KpiVitalsTile
             key={m.title}
-            className="flex h-full flex-col rounded-md bg-muted/40 p-4"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
-                  {m.title}
-                </div>
-                {/* Subtitle slot reserved on EVERY tile (non-breaking
-                    space placeholder when empty) so the title block
-                    occupies the same vertical space across all three
-                    tiles. Without this, "AI Mention Rate / across
-                    all topics" pushes its value + sparkline down,
-                    misaligning the sparkline baselines with the
-                    other two tiles. */}
-                <div className="text-[10px] text-muted-foreground/75 lowercase mt-0.5">
-                  {m.subtitle || " "}
-                </div>
-              </div>
-              <KpiTooltipIcon text={m.tooltip} align="right" />
-            </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <div className={`text-2xl font-semibold tracking-tight ${valueColor}`}>
-                {notMeasured ? "—" : m.format(latestValue)}
-              </div>
-              {/* Trend delta vs the previous snapshot. Reconciles the
-                  "green value + falling sparkline" misread: the value
-                  is still strong in absolute terms (success-toned by
-                  level), and the delta carries the directional signal
-                  (warning when falling, success when rising). */}
-              {!notMeasured && deltaPp !== null && (
-                <span
-                  className={`text-[12px] font-medium tabular-nums ${
-                    deltaPp > 0
-                      ? "text-success"
-                      : deltaPp < 0
-                        ? "text-warning"
-                        : "text-muted-foreground"
-                  }`}
-                  aria-label={`Change vs previous snapshot: ${deltaPp > 0 ? "up" : deltaPp < 0 ? "down" : "no change"} ${Math.abs(deltaPp)} points`}
-                  title="vs previous snapshot"
-                >
-                  {deltaPp > 0 ? "↑" : deltaPp < 0 ? "↓" : ""}
-                  {Math.abs(deltaPp)} pts
-                </span>
-              )}
-            </div>
-            {/* Subject-set benchmark caption — was the small text
-                label embedded inside the KpiGauge bar that used to
-                sit here ("vs 70% subject-set avg"). The bar itself
-                is removed at the user's request; the caption stays
-                as a small muted line so the cross-subject comparison
-                signal isn't lost. Renders only when a benchmark
-                exists for this metric (Net Favorability doesn't ship
-                one). */}
-            {!notMeasured &&
-              latestValue !== null &&
-              Number.isFinite(latestValue) &&
-              m.benchmark !== null &&
-              m.benchmarkCaption && (
-                <div className="mt-1.5 text-[11px] text-muted-foreground/75 leading-snug">
-                  {m.benchmarkCaption}
-                </div>
-              )}
-            {/* Spark + per-platform subline pinned to the tile floor.
-                Subline order changed to sit BELOW the sparkline so
-                the chart leads visually and the textual breakdown
-                supports it; previously the subline sat between the
-                benchmark caption and the spark, which made the
-                eye stop reading mid-tile. Both elements share the
-                mt-auto wrapper so the {spark, subline} block hugs
-                the floor as one unit — sparkline baselines still
-                align across the three tiles. */}
-            <div className="mt-auto pt-3">
-              <MiniSpark
-                values={m.values}
-                isHistorical={trajectory.is_historical}
-                labels={trajectory.weeks}
-                format={m.format}
-              />
-              {/* Per-platform subline — top-3 platforms rendered as
-                  "{Name} {pct}%" segments separated by "·", sorted
-                  desc by metric value. When the spread between top
-                  and bottom platforms is ≥ KPI_PLATFORM_SPREAD_LOPSIDED
-                  (40 pts), a warning-toned "· {N} pt spread" flag
-                  appends. Renders nothing when platforms ≤ 1 (no
-                  spread to talk about). */}
-              {!notMeasured &&
-                m.platformBreakdown &&
-                (() => {
-                  const sorted = m.platformBreakdown
-                    .filter(
-                      (p) => p.value !== null && Number.isFinite(p.value),
-                    )
-                    .slice()
-                    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
-                  if (sorted.length < 2) return null;
-                  const PLATFORM_BREAKDOWN_TOP_N = 3;
-                  const shown = sorted.slice(0, PLATFORM_BREAKDOWN_TOP_N);
-                  const remaining = sorted.length - PLATFORM_BREAKDOWN_TOP_N;
-                  // Sentiment is the only metric where values can
-                  // be negative (range −1..+1). For unsigned rate
-                  // metrics we clamp to 0..100 and render "{N}%".
-                  // For signed sentiment we keep the sign and
-                  // render "+12%" / "−7%" / "0%" so the subline
-                  // shows direction without the user inferring from
-                  // absence of "+".
-                  const isSigned = m.colorKind === "avg_tone";
-                  const toPct = (v: number) => {
-                    const raw = Math.round(v * 100);
-                    return isSigned ? raw : Math.min(100, Math.max(0, raw));
-                  };
-                  const fmt = (v: number) => {
-                    const n = toPct(v);
-                    if (!isSigned) return `${n}%`;
-                    if (n === 0) return "0%";
-                    return n > 0 ? `+${n}%` : `${n}%`;
-                  };
-                  const pcts = sorted.map((p) => toPct(p.value as number));
-                  const spread = pcts[0] - pcts[pcts.length - 1];
-                  const isLopsided = spread >= KPI_PLATFORM_SPREAD_LOPSIDED;
-                  return (
-                    <div className="mt-2 text-[10.5px] text-muted-foreground leading-relaxed">
-                      <span className="font-medium text-foreground/55">
-                        By platform
-                      </span>
-                      {shown.map((p, i) => (
-                        <span key={`${p.name}-${i}`}>
-                          {" · "}
-                          {p.name}{" "}
-                          <span className="tabular-nums font-medium text-foreground/80">
-                            {fmt(p.value as number)}
-                          </span>
-                        </span>
-                      ))}
-                      {remaining > 0 && (
-                        <span>{" · "}+{remaining} more</span>
-                      )}
-                      {isLopsided && (
-                        <span
-                          className="text-warning tabular-nums"
-                          title="Spread between the highest and lowest platform values. A wide spread means this metric is concentrated on one provider — worth understanding per-platform tactics."
-                        >
-                          {" · "}{spread} pt spread
-                        </span>
-                      )}
-                    </div>
-                  );
-                })()}
-            </div>
-            {/* Per-tile footer reserved for the "not measured" case
-                only — the section-level description already carries
-                the snapshot count + live/historical legend, so
-                repeating it three times across tiles was dead text. */}
-            {notMeasured && (
-              <div className="mt-3 pt-3 border-t border-border text-xs text-foreground/70 leading-relaxed">
-                This metric isn&apos;t measured for this subject.
-              </div>
-            )}
-          </div>
+            label={m.title}
+            subtitle={m.subtitle}
+            tooltipText={m.tooltip}
+            value={notMeasured ? "—" : m.format(latestValue)}
+            valueColor={valueColor}
+            deltaPp={notMeasured ? null : deltaPp}
+            gaugeValue={gaugeValue}
+            gaugeBenchmark={m.benchmark}
+            benchmarkCaption={m.benchmarkCaption}
+            sparkValues={m.values}
+            sparkIsHistorical={trajectory.is_historical}
+            sparkLabels={trajectory.weeks}
+            sparkFormat={m.format}
+            platformBreakdown={m.platformBreakdown}
+            platformBreakdownIsSigned={m.colorKind === "avg_tone"}
+            platformBreakdownLopsidedThreshold={KPI_PLATFORM_SPREAD_LOPSIDED}
+          />
         );
       })}
-    </div>
-  );
-}
-
-// PlatformBreakdownStrip was a standalone full-width platform-rate
-// bar that used to sit below the Vitals KPI strip. Folded into the
-// AI Mention Rate tile as a compact subline ("By platform · Gemini
-// 80% · ChatGPT 20% · 60 pt spread") since the bar was just a
-// per-platform decomposition of that one metric and didn't need
-// its own surface. The full per-platform breakdown still lives in
-// the Visibility spoke's Platform Change Detail table. Removing
-// the strip clawed back ~80px of vertical real estate and stopped
-// duplicating signal already in the deep-dive.
-
-// Monotone cubic interpolation (Fritsch-Carlson) → cubic-Bezier SVG
-// path. Used by MiniSpark to draw smooth-but-monotone curves between
-// snapshots. Why this curve type:
-//   - cardinal / Catmull-Rom splines look smoother but can overshoot
-//     local extremes, which on a 0..100% rate sparkline produces a
-//     curve briefly dipping below 0 or peaking above 100 — wrong
-//     even though the dataset can't reach those values.
-//   - monotone cubic guarantees the curve passes through every data
-//     point AND never overshoots — slopes at each point are clipped
-//     when they'd cause a local max or min to be violated.
-//
-// Algorithm:
-//   1. Slopes between adjacent points: k[i] = (y[i+1]−y[i])/(x[i+1]−x[i])
-//   2. Initial tangents: average of neighboring slopes (interior)
-//      and one-sided slopes at endpoints. Set to 0 when adjacent
-//      slopes have opposite signs (extremum point).
-//   3. Fritsch-Carlson constraint: if the unit-circle-like measure
-//      a²+b² > 9 (where a, b are tangent/slope ratios), scale the
-//      pair down by τ = 3/√(a²+b²) so monotonicity is preserved.
-//   4. Convert each tangent pair to cubic Bezier control points
-//      one-third of the way along each segment.
-//
-// Returns "" for empty input, "M x,y" for a single point, a linear
-// path for two points (a cubic spline needs ≥3 points to compute
-// neighbor-aware tangents).
-function buildMonoCubicPath(points: { x: number; y: number }[]): string {
-  if (points.length === 0) return "";
-  if (points.length === 1) {
-    return `M${points[0].x},${points[0].y}`;
-  }
-  if (points.length === 2) {
-    return `M${points[0].x},${points[0].y}L${points[1].x},${points[1].y}`;
-  }
-  const n = points.length;
-  const dx: number[] = new Array(n - 1);
-  const k: number[] = new Array(n - 1);
-  for (let i = 0; i < n - 1; i++) {
-    dx[i] = points[i + 1].x - points[i].x;
-    k[i] = (points[i + 1].y - points[i].y) / (dx[i] || 1);
-  }
-  const m: number[] = new Array(n);
-  m[0] = k[0];
-  m[n - 1] = k[n - 2];
-  for (let i = 1; i < n - 1; i++) {
-    m[i] = k[i - 1] * k[i] <= 0 ? 0 : (k[i - 1] + k[i]) / 2;
-  }
-  // Fritsch-Carlson monotone clamp.
-  for (let i = 0; i < n - 1; i++) {
-    if (k[i] === 0) {
-      m[i] = 0;
-      m[i + 1] = 0;
-      continue;
-    }
-    const a = m[i] / k[i];
-    const b = m[i + 1] / k[i];
-    const h = a * a + b * b;
-    if (h > 9) {
-      const tau = 3 / Math.sqrt(h);
-      m[i] = tau * a * k[i];
-      m[i + 1] = tau * b * k[i];
-    }
-  }
-  let d = `M${points[0].x},${points[0].y}`;
-  for (let i = 0; i < n - 1; i++) {
-    const t = dx[i] / 3;
-    const x1 = points[i].x + t;
-    const y1 = points[i].y + m[i] * t;
-    const x2 = points[i + 1].x - t;
-    const y2 = points[i + 1].y - m[i + 1] * t;
-    d += ` C${x1},${y1} ${x2},${y2} ${points[i + 1].x},${points[i + 1].y}`;
-  }
-  return d;
-}
-
-function MiniSpark({
-  values,
-  isHistorical,
-  labels,
-  format,
-}: {
-  values: (number | null)[];
-  isHistorical: boolean[];
-  labels: string[];
-  // Formatter used to render the min/max axis labels in the same units
-  // as the metric (so a recall trajectory shows "75%" not "0.75",
-  // tone shows "+12% positive" not "0.12", etc.). Same callback the
-  // tile uses for its big value, kept consistent.
-  format: (v: number | null) => string;
-}) {
-  const numericValues = values.filter((v): v is number => v !== null);
-  // Distinguish "we have snapshots but the metric isn't measurable for
-  // this subject" from "we just don't have enough snapshots yet." For
-  // Citation Rate against a subject with no canonical_url, every
-  // snapshot's value is null — the user shouldn't see "need more
-  // snapshots" since taking more wouldn't fix it.
-  if (values.length > 0 && numericValues.length === 0) {
-    return (
-      <div className="h-[120px] flex items-center justify-center text-center text-[11px] text-muted-foreground px-3 leading-relaxed">
-        Not measured for this subject
-      </div>
-    );
-  }
-  if (numericValues.length < 2) {
-    // Single data point — render a dot at the value instead of a
-    // "need more snapshots" placeholder, which read as a broken tile
-    // when it sat beside two fully-rendered sparklines. The tile's
-    // headline value already carries the number; this just gives the
-    // chart area a non-empty visual + a count of how much data
-    // backs that value.
-    return (
-      <div className="h-[120px] flex flex-col items-center justify-center gap-2 px-3">
-        <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-        <div className="text-[11px] text-muted-foreground leading-relaxed text-center">
-          1 of {values.length} snapshots scored so far
-        </div>
-      </div>
-    );
-  }
-  // Padded plot range so the line never grazes the top or bottom
-  // edge of the chart — readers were misreading a sparkline that
-  // bottomed out at 90% as "the value is 0%". Asymmetric buffer:
-  // heavier headroom BELOW the data (40%) so the lowest data
-  // point sits well above the chart floor, lighter buffer above
-  // (15%) since the top of a sparkline is less likely to be
-  // misread. Axis labels still show the actual data extremes
-  // (e.g. "90%" / "100%") — only the line's vertical position
-  // gets extra breathing room.
-  const dataMin = Math.min(...numericValues);
-  const dataMax = Math.max(...numericValues);
-  const min = dataMin;
-  const max = dataMax;
-  const rawRange = dataMax - dataMin || 1;
-  const plotMin = dataMin - rawRange * 0.4;
-  const plotMax = dataMax + rawRange * 0.15;
-  const range = plotMax - plotMin || 1;
-  const w = 280;
-  const h = 120;
-  const pad = 6;
-  const step = (w - pad * 2) / (values.length - 1);
-  const yFor = (v: number | null) =>
-    v === null ? null : h - pad - ((v - plotMin) / range) * (h - pad * 2);
-
-  // Build path with monotone cubic interpolation (Fritsch-Carlson) so
-  // the line reads as a smooth curve between snapshots instead of
-  // straight zigzag segments. Monotone cubic was picked over a
-  // standard cardinal spline because it GUARANTEES the curve never
-  // overshoots local minima or maxima — important for rate metrics
-  // (0..100%) where a cardinal-curve dip below 0 or rise above 100
-  // would look wrong even though the dataset can't actually take
-  // those values.
-  //
-  // Null-gap handling is preserved: contiguous runs of measured
-  // values are smoothed independently and joined by SVG `M` moves
-  // so a null still reads as a discontinuity (snapshot whose
-  // analyzer crashed shouldn't appear connected to its neighbors).
-  const measuredRuns: { x: number; y: number }[][] = [];
-  let currentRun: { x: number; y: number }[] = [];
-  values.forEach((v, i) => {
-    const y = yFor(v);
-    if (y === null) {
-      if (currentRun.length > 0) {
-        measuredRuns.push(currentRun);
-        currentRun = [];
-      }
-      return;
-    }
-    currentRun.push({ x: pad + i * step, y });
-  });
-  if (currentRun.length > 0) measuredRuns.push(currentRun);
-  const path: string[] = measuredRuns.map(buildMonoCubicPath);
-
-  // Axis labels live as HTML overlays (not SVG <text>) because the
-  // SVG uses preserveAspectRatio="none" to stretch the line full
-  // width — that would distort SVG text. Container reserves left
-  // padding (pl-9) so the SVG plot area visually starts to the right
-  // of the axis labels; the SVG itself still renders edge-to-edge
-  // within the remaining width.
-  // When every numeric value is identical (e.g. flat 100% recall
-  // across all snapshots), min === max and both axis labels would
-  // render the same text stacked. Show a single vertically-centered
-  // label instead — clearer about what's being depicted.
-  const flatLine = min === max;
-  // Date ticks under the chart — first measured · midpoint · last
-  // measured. Picks indices from the actual values (not just the
-  // labels array) so a sparkline with leading nulls doesn't show
-  // a date for an empty point. Renders a 3-cell flex row below
-  // the SVG; the parent reserves space via the wrapping div.
-  const measuredIndices: number[] = [];
-  for (let i = 0; i < values.length; i++) {
-    if (values[i] !== null) measuredIndices.push(i);
-  }
-  const fmtShortDate = (iso: string | undefined): string => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    // Force UTC formatting so a snapshot dated "2026-05-23" doesn't
-    // appear as "May 22" to viewers in PST (where 2026-05-23T00:00Z
-    // is 4pm PST the previous day). Backend stores snapshot dates
-    // in UTC; the label should match.
-    return d.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      timeZone: "UTC",
-    });
-  };
-  const firstIdx = measuredIndices[0];
-  const lastIdx = measuredIndices[measuredIndices.length - 1];
-  const midIdx =
-    measuredIndices[Math.floor(measuredIndices.length / 2)];
-  return (
-    <div>
-      <div className="relative h-[120px] pl-9">
-        {flatLine ? (
-          <span className="absolute left-0 top-1/2 -translate-y-1/2 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
-            {format(max)}
-          </span>
-        ) : (
-          <>
-            <span className="absolute left-0 top-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
-              {format(max)}
-            </span>
-            <span className="absolute left-0 bottom-0 text-[9px] leading-none text-muted-foreground/55 tabular-nums">
-              {format(min)}
-            </span>
-          </>
-        )}
-      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-full w-full">
-        {/* Subtle top/bottom gridlines anchor the line to the axis
-            labels' values. Dashed + faint so they read as guidance
-            rather than chart structure. */}
-        <line
-          x1={pad}
-          y1={pad}
-          x2={w - pad}
-          y2={pad}
-          stroke="var(--border)"
-          strokeWidth={1}
-          strokeDasharray="2 3"
-          opacity={0.5}
-          vectorEffect="non-scaling-stroke"
-        />
-        <line
-          x1={pad}
-          y1={h - pad}
-          x2={w - pad}
-          y2={h - pad}
-          stroke="var(--border)"
-          strokeWidth={1}
-          strokeDasharray="2 3"
-          opacity={0.5}
-          vectorEffect="non-scaling-stroke"
-        />
-        <path
-          d={path.join(" ")}
-          fill="none"
-          stroke="var(--primary)"
-          strokeWidth={1.5}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
-      {values.map((v, i) => {
-        const y = yFor(v);
-        if (y === null) return null;
-        const x = pad + i * step;
-        // Historical dots are open circles; live points are filled
-        return (
-          <circle
-            key={i}
-            cx={x}
-            cy={y}
-            r={2.5}
-            fill={isHistorical[i] ? "var(--card)" : "var(--primary)"}
-            stroke="var(--primary)"
-            strokeWidth={1.4}
-            vectorEffect="non-scaling-stroke"
-          >
-            <title>
-              {`${labels[i]}: ${format(v)}${
-                isHistorical[i] ? " (retrospective estimate)" : ""
-              }`}
-            </title>
-          </circle>
-        );
-      })}
-        </svg>
-      </div>
-      {/* X-axis date row — start · midpoint · end of the measured
-          range. Mirrors the date-tick pattern on the Narrative
-          spoke's sparklines so a reader can see what time window
-          the line covers without consulting the section header.
-          Indented to match the SVG's pl-9 plot area so the labels
-          align with the plotted points. */}
-      <div className="mt-1.5 pl-9 flex items-center justify-between text-[9px] tabular-nums text-muted-foreground/55">
-        <span>{fmtShortDate(labels[firstIdx])}</span>
-        {measuredIndices.length >= 3 && (
-          <span>{fmtShortDate(labels[midIdx])}</span>
-        )}
-        <span>{fmtShortDate(labels[lastIdx])}</span>
-      </div>
     </div>
   );
 }

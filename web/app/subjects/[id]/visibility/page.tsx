@@ -25,6 +25,8 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { BottomLineBlock } from "@/components/dashboard/BottomLineBlock";
+import { KpiVitalsTile } from "@/components/dashboard/KpiVitalsTile";
+import { getKpiValueColor } from "@/lib/kpiThresholds";
 import { TrendOverTime } from "./TrendOverTime";
 import { OverviewSubNav } from "../OverviewSubNav";
 import { VisibilityTopicFilter } from "./VisibilityTopicFilter";
@@ -800,61 +802,48 @@ export default async function VisibilityPage({
     avgRank: focal?.avg_rank ?? null,
     weakestTopic,
   });
-  // Color all four KPI cards by threshold for a consistent verdict
-  // policy — previously only AI Mention Rate was toned, which read
-  // as "the others don't have an opinion." Each metric has its own
-  // polarity (whether higher or lower is the desired direction);
-  // toneByThreshold flips the success/warning mapping accordingly.
+  // Polarity is kept on the KpiCard shape as documentation of each
+  // metric's "is higher or lower better?" — even though the actual
+  // color resolution is now centralized in getKpiValueColor from
+  // @/lib/kpiThresholds, the polarity tag stays useful when adding
+  // new metrics or auditing the table. The local toneByThreshold
+  // helper that used to live here was removed when the shared
+  // resolver landed.
   type Polarity = "higher_better" | "lower_better";
-  const toneByThreshold = (
-    value: number | null,
-    polarity: Polarity,
-    good: number,
-    bad: number,
-  ): string => {
-    if (value === null || !Number.isFinite(value)) return "text-foreground/60";
-    if (polarity === "higher_better") {
-      if (value >= good) return "text-success";
-      if (value <= bad) return "text-warning";
-      return "text-foreground";
-    }
-    if (value <= good) return "text-success";
-    if (value >= bad) return "text-warning";
-    return "text-foreground";
-  };
 
   type KpiCard = {
     label: string;
     value: string;
     // Optional smaller text appended inline after the primary value
-    // (e.g. the Weakest Topic name following its rate). Renders at
-    // a middle size — smaller than the value, larger than caption —
-    // so the suffix reads as a qualifier on the number, not as a
-    // sibling line of headline content.
+    // (e.g. the Weakest Topic name following its rate).
     valueSuffix?: string | null;
     helper: string;
-    // Optional longer-form tooltip text. Falls back to `helper`
-    // when omitted. Lets the visible caption stay short while
-    // the tooltip carries the full definition + polarity hint.
     tooltip?: string;
     valueColor: string;
     polarity: Polarity;
-    // 0..1 fraction for the KpiGauge fill. Null when this metric
-    // doesn't have a meaningful 0..1 scale or when we want to skip
-    // the gauge (Weakest Topic uses caption-only framing).
+    // 0..1 fraction for the KpiGauge fill. Null skips the gauge.
     gaugeValue: number | null;
-    // Optional 0..1 benchmark for the gauge tick. Null = bar
-    // renders as plain fill (no comparison tick).
     gaugeBenchmark: number | null;
-    // Sub-line rendered below the value (and below the gauge when
-    // present). Carries either "vs N% subject-set avg" for metrics
-    // with a benchmark, or descriptive text for metrics without
-    // (Weakest Topic uses this for the topic name / no-gap copy).
+    // Optional one-line caption rendered below the gauge — used
+    // for inverse-tier metrics ("lower is better") so the gauge
+    // isn't misread against the rate-card convention.
+    gaugeOrientationCaption?: string;
+    // Sub-line carried via the gauge (when present) or rendered
+    // as the standalone caption (when no gauge).
     caption: string | null;
-    // Anchor on this same page that the tile navigates to when
-    // clicked — turns the briefing tiles into entry points into
-    // the deeper sections rather than passive numbers.
     anchor?: string;
+    // Signed pp delta vs the prior snapshot. Direction-toned ↑/↓
+    // arrow rendered by the shared tile component; null hides
+    // the delta entirely.
+    deltaPp?: number | null;
+    // Sparkline series (aligned to data.trajectory.weeks). Omit
+    // when the metric has no time series at all — the tile drops
+    // the spark slot rather than fabricating a line.
+    sparkValues?: (number | null)[];
+    // Format function for sparkline axis labels — defaults to
+    // string-cast; pass the same formatter used for the headline
+    // value so the axis reads in matching units.
+    sparkFormat?: (v: number | null) => string;
   };
   // Defensive: a stale uvicorn process can serve an older payload
   // missing this field, which would crash the page. Fall back to
@@ -884,30 +873,54 @@ export default async function VisibilityPage({
     if (rank === null || !Number.isFinite(rank)) return null;
     return Math.max(0, Math.min(1, 1 - (rank - 1) / 9));
   };
+  // Helper to compute "delta vs the IMMEDIATELY preceding snapshot"
+  // for a trajectory series. Returns the signed pp delta, or null
+  // when one endpoint is missing — same rule the Overview tiles use
+  // so a backfill gap doesn't silently make the delta span 2+
+  // snapshots.
+  const deltaFromSeries = (
+    series: (number | null)[] | undefined,
+  ): number | null => {
+    if (!series || series.length < 2) return null;
+    const latest = series[series.length - 1];
+    const prior = series[series.length - 2];
+    if (
+      latest === null ||
+      prior === null ||
+      !Number.isFinite(latest) ||
+      !Number.isFinite(prior)
+    ) {
+      return null;
+    }
+    return Math.round(((latest as number) - (prior as number)) * 100);
+  };
+  // Weakest-topic sparkline pinned to the CURRENT weakest topic
+  // (the topic identity can change snapshot-to-snapshot; the spark
+  // shows how THIS topic — whichever one is weakest today — has
+  // trended over time). Null when no topic_trajectories row matches
+  // (newly-added topic) or no weakest topic identified.
+  const weakestTopicSparkValues =
+    weakestTopic && data.topic_trajectories
+      ? data.topic_trajectories.find(
+          (t) => t.label === weakestTopic.label,
+        )?.mention_rate ?? null
+      : null;
   const kpis: KpiCard[] = [
     {
       label: "AI Mention Rate",
       value: formatPct(mentionRate),
       helper: "Share of monitored prompts where the subject appeared.",
-      // Aligned with STATUS_STRONG_MENTION_RATE / STATUS_WEAK_MENTION_RATE
-      // (this file's own platform-status thresholds) and with Overview's
-      // KPI_STRONG_MENTION_RATE constant — same metric, same tier
-      // semantics across both spokes and across this spoke's own
-      // platform pills. Was inline (0.7 / 0.4), which colored a 65%
-      // mention rate neutral here but would color it success on
-      // Overview's tile next to it; readers cross-checking the two
-      // spokes saw the same number painted two different colors.
-      valueColor: toneByThreshold(
-        mentionRate,
-        "higher_better",
-        STATUS_STRONG_MENTION_RATE,
-        STATUS_WEAK_MENTION_RATE,
-      ),
+      // Shared getKpiValueColor — same constants Overview's tile uses
+      // so the same 50% reads the same color on both spokes.
+      valueColor: getKpiValueColor("mention_rate", mentionRate),
       polarity: "higher_better",
       gaugeValue: mentionRate,
       gaugeBenchmark: bm.ai_mention_rate_avg,
       caption: bmCaption(bm.ai_mention_rate_avg, (v) => formatPct(v)),
       anchor: "trend",
+      deltaPp: deltaFromSeries(data.trajectory.ai_recall),
+      sparkValues: data.trajectory.ai_recall,
+      sparkFormat: (v) => formatPct(v),
     },
     {
       label: "Average Mention Position",
@@ -915,32 +928,44 @@ export default async function VisibilityPage({
       helper: "Average position when this entity appears in an answer.",
       tooltip:
         "Average answer position among responses where the subject is mentioned. Lower values mean the subject appears earlier in the answer.",
-      // Neutral by default — lower is better on this scale and a
-      // green/orange tone risks implying high = good (opposite of
-      // truth). Direction is encoded by the value's numeric meaning
-      // and the tooltip; color stays out of it.
-      valueColor: "text-foreground",
+      // Inverse-tier: rank ≤ 2.0 success, > 4.0 warning — handled
+      // by getKpiValueColor("avg_rank", ...). The gauge fill is
+      // pre-inverted via rankToFrac (1.0 = best maps to a full bar)
+      // and the gaugeOrientationCaption ("lower position rank is
+      // better") clarifies the polarity flip vs the rate cards.
+      valueColor: getKpiValueColor("avg_rank", focal?.avg_rank ?? null),
       polarity: "lower_better",
       gaugeValue: rankToFrac(focal?.avg_rank ?? null),
       gaugeBenchmark: rankToFrac(bm.avg_mention_rank_avg),
+      gaugeOrientationCaption: "lower position rank is better",
       caption: bmCaption(bm.avg_mention_rank_avg, (v) => v.toFixed(1)),
       anchor: "position",
+      // No sparkline — avg_rank is not shipped as a trajectory
+      // series on data.trajectory. Per the parity spec, when a
+      // KPI has no history the spark slot omits rather than
+      // fabricates a line. Caller leaves sparkValues undefined and
+      // the shared tile drops the spark wrapper.
     },
     {
       label: "First Mention Share",
       value: formatPct(focal?.first_mention_rate ?? null),
       helper: "How often the subject appeared first among named entities.",
-      valueColor: toneByThreshold(
+      valueColor: getKpiValueColor(
+        "top_result_rate",
         focal?.first_mention_rate ?? null,
-        "higher_better",
-        0.5,
-        0.2,
       ),
       polarity: "higher_better",
       gaugeValue: focal?.first_mention_rate ?? null,
       gaugeBenchmark: bm.first_mention_rate_avg,
       caption: bmCaption(bm.first_mention_rate_avg, (v) => formatPct(v)),
       anchor: "position",
+      // trajectory.top_result_rate uses the same definition as the
+      // backend's first_mention_rate per the api.ts type comment —
+      // both are "share of unnamed-layer responses where the
+      // subject ranks first." Spark + delta align with the headline.
+      deltaPp: deltaFromSeries(data.trajectory.top_result_rate),
+      sparkValues: data.trajectory.top_result_rate,
+      sparkFormat: (v) => formatPct(v),
     },
     (() => {
       // Reformed to mirror the Overview spoke's "Weakest topic
@@ -986,13 +1011,15 @@ export default async function VisibilityPage({
         valueSuffix: weakestSuffix,
         helper:
           "Lowest topic-level mention rate in this snapshot. The topic name is appended to the rate only when its rate is at least 15 pts below the average of the other tracked topics.",
-        valueColor: toneByThreshold(
-          weakestRecall,
-          "higher_better",
-          0.7,
-          0.4,
-        ),
+        // Shared color rule for the weakest-topic context — only
+        // fires warning on genuinely severe gaps (<30%); never
+        // success (this tile's framing is "this is the weakest" so
+        // a green value would undercut the message). Matches
+        // Overview's weakest-topic color treatment.
+        valueColor: getKpiValueColor("weakest_topic_recall", weakestRecall),
         polarity: "higher_better" as const,
+        // No gauge for Weakest Topic — no subject-set benchmark
+        // for "the weakest" to compare against.
         gaugeValue: null,
         gaugeBenchmark: null,
         // Caption suppressed when the topic is already in the value
@@ -1004,6 +1031,12 @@ export default async function VisibilityPage({
               ? "No material gap across tracked topics"
               : "No tracked topics",
         anchor: "topics",
+        // Spark pinned to whichever topic is weakest TODAY — so a
+        // reader sees how this topic has trended over time, not a
+        // moving-target series across different topics.
+        sparkValues: weakestTopicSparkValues ?? undefined,
+        sparkFormat: (v) => formatPct(v),
+        deltaPp: deltaFromSeries(weakestTopicSparkValues ?? undefined),
       };
     })(),
   ];
@@ -1133,84 +1166,47 @@ export default async function VisibilityPage({
                   to render, so the cross-subject comparison signal
                   isn't lost. */}
               <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 items-stretch">
-                {kpis.map((k) => {
-                  const tileInner = (
-                    <>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
-                            {k.label}
-                          </div>
-                        </div>
-                        <KpiTooltipIcon
-                          text={k.tooltip ?? k.helper}
-                          align="right"
-                        />
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
-                        <span
-                          className={`text-2xl font-semibold tracking-tight tabular-nums leading-tight ${k.valueColor}`}
-                        >
-                          {k.value}
-                        </span>
-                        {k.valueSuffix && (
-                          <span
-                            className={`text-base font-medium leading-tight ${k.valueColor}`}
-                            title={k.valueSuffix}
-                          >
-                            {k.valueSuffix}
-                          </span>
-                        )}
-                      </div>
-                      {/* Benchmark caption ("vs N% subject-set avg")
-                          — was embedded inside the KpiGauge bar that
-                          used to render here; now a small muted line
-                          in the same slot. Renders for tiles that
-                          ship a benchmark (the gauge gated on
-                          gaugeBenchmark, so use the same gate). */}
-                      {k.caption && k.gaugeBenchmark !== null && (
-                        <div className="mt-1.5 text-[11px] text-muted-foreground/75 leading-snug">
-                          {k.caption}
-                        </div>
-                      )}
-                      {/* Tiles without a benchmark (e.g. Weakest Topic
-                          — no cross-subject comparison) keep their
-                          caption at the floor via mt-auto so all
-                          tiles' captions baseline-align across the
-                          row. */}
-                      {k.caption && k.gaugeBenchmark === null && (
-                        <div
-                          className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug line-clamp-2"
-                          title={k.caption}
-                        >
-                          {k.caption}
-                        </div>
-                      )}
-                    </>
-                  );
-                  // Secondary-surface bg + rounded-md + p-4 matches
-                  // the Overview StatCard treatment (bg-muted/40
-                  // rounded-md) so Visibility KPI tiles read with
-                  // the same chrome as Overview's KPI cards.
-                  const baseClasses =
-                    "flex h-full flex-col rounded-md bg-muted/40 p-4";
-                  if (k.anchor) {
-                    return (
-                      <a
-                        key={k.label}
-                        href={`#${k.anchor}`}
-                        className={`${baseClasses} group transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm`}
-                      >
-                        {tileInner}
-                      </a>
-                    );
-                  }
-                  return (
-                    <div key={k.label} className={baseClasses}>
-                      {tileInner}
-                    </div>
-                  );
-                })}
+                {kpis.map((k) => (
+                  <KpiVitalsTile
+                    key={k.label}
+                    label={k.label}
+                    tooltipText={k.tooltip ?? k.helper}
+                    value={k.value}
+                    valueSuffix={k.valueSuffix}
+                    valueColor={k.valueColor}
+                    deltaPp={k.deltaPp}
+                    gaugeValue={k.gaugeValue}
+                    gaugeBenchmark={k.gaugeBenchmark}
+                    // gauge's inline caption — only rendered when a
+                    // gauge is present. For no-gauge tiles (Weakest
+                    // Topic) the same `caption` field flows into
+                    // standaloneCaption below so the text still
+                    // renders, just in a different slot.
+                    benchmarkCaption={
+                      k.gaugeBenchmark !== null ? k.caption : null
+                    }
+                    gaugeOrientationCaption={k.gaugeOrientationCaption}
+                    standaloneCaption={
+                      k.gaugeBenchmark === null ? k.caption : null
+                    }
+                    sparkValues={k.sparkValues}
+                    sparkIsHistorical={
+                      k.sparkValues
+                        ? data.trajectory.is_historical.slice(
+                            0,
+                            k.sparkValues.length,
+                          )
+                        : undefined
+                    }
+                    sparkLabels={
+                      k.sparkValues
+                        ? data.trajectory.weeks.slice(0, k.sparkValues.length)
+                        : undefined
+                    }
+                    sparkFormat={k.sparkFormat}
+                    anchor={k.anchor}
+                  />
+                ))}
               </div>
 
               {/* Platform Visibility Snapshot — secondary heatmap
