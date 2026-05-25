@@ -465,12 +465,11 @@ function TopicBarRow({
 // Top narrative clusters list for the Band 2 Top Narratives card.
 // Surfaces the AI's RECURRING FRAMINGS — e.g. "MAGA Alignment",
 // "Foreign Policy Critique" — and how often each appears across
-// responses. Text-only treatment: cluster name on the left, share
-// % on the right, with a leading sentiment dot (favorable green /
-// critical amber / neutral primary) so the framing's direction is
-// readable without the visual weight of bar tracks. Bars live on
-// the sibling Visibility-by-topic tile up in the Vitals row; this
-// card stays text-led to differentiate the two surfaces' shapes.
+// responses. Plain-text treatment per design: cluster name on the
+// left, share % on the right, no dots / no color tinting. The
+// sibling Visibility-by-topic tile up in the Vitals row carries
+// the bar visualization; this card stays uniformly text to
+// differentiate the two surfaces.
 function TopNarrativesList({
   clusters,
 }: {
@@ -491,45 +490,15 @@ function TopNarrativesList({
         const safeShare = Number.isFinite(c.share)
           ? Math.max(0, Math.min(1, c.share))
           : 0;
-        // Tone the leading dot + share % by the cluster's mean
-        // sentiment. ±0.1 inclusive thresholds match the backend's
-        // net_sentiment classification so the dot agrees with how
-        // the analyzer scored each response. Null sentiment_mean →
-        // neutral.
-        const tone: "success" | "warning" | "neutral" =
-          c.sentiment_mean === null
-            ? "neutral"
-            : c.sentiment_mean >= 0.1
-              ? "success"
-              : c.sentiment_mean <= -0.1
-                ? "warning"
-                : "neutral";
-        const dotBg =
-          tone === "success"
-            ? "var(--success)"
-            : tone === "warning"
-              ? "var(--warning)"
-              : "var(--primary)";
-        const pctClass =
-          tone === "success"
-            ? "text-success"
-            : tone === "warning"
-              ? "text-warning"
-              : "text-foreground";
         return (
           <li
             key={c.name}
             className="flex items-baseline gap-3 text-[13px] leading-snug"
           >
-            <span
-              aria-hidden
-              className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{ background: dotBg }}
-            />
             <span className="min-w-0 flex-1 truncate font-medium text-foreground">
               {c.name}
             </span>
-            <span className={`tabular-nums font-semibold ${pctClass}`}>
+            <span className="tabular-nums font-semibold text-foreground">
               {Math.round(safeShare * 100)}%
             </span>
           </li>
@@ -1713,20 +1682,6 @@ export default async function SubjectOverviewPage({
                         <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
                           Shares can overlap · values don&apos;t sum to 100%
                         </p>
-                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
-                          <span className="inline-flex items-center gap-1">
-                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--success)" }} />
-                            Favorable
-                          </span>
-                          <span className="inline-flex items-center gap-1">
-                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--primary)" }} />
-                            Neutral
-                          </span>
-                          <span className="inline-flex items-center gap-1">
-                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--warning)" }} />
-                            Critical
-                          </span>
-                        </div>
                       </Card>
                     )}
 
