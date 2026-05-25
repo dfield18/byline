@@ -2171,6 +2171,40 @@ export default async function SubjectOverviewPage({
                             {label}
                           </div>
                           <TopicRecallInline topics={data.topic_coverage} />
+                          {/* Footer pad — methodology line + color
+                              legend balance this card's vertical
+                              weight with the Top Narratives card next
+                              to it (which carries an analogous
+                              "Each share is independent…" caption +
+                              Favorable/Neutral/Critical legend below
+                              its bars). Without this pad, the Gap
+                              card ended right after its 4 bars
+                              while Top Narratives had ~3 lines of
+                              supporting content underneath, making
+                              the equal-height grid look unbalanced. */}
+                          <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
+                            Each row = % of AI answers about that topic
+                            that mention {data.subject_name}. Lower =
+                            bigger visibility gap to close.
+                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
+                            <span className="inline-flex items-center gap-1">
+                              <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--primary)" }} />
+                              Tracked topic
+                            </span>
+                            {/* Weakest pill only when there's a real
+                                gap to call out. In the no-gap case
+                                (all topics within TIE_EPSILON, card
+                                relabels to "Topic visibility") no
+                                bar is warning-toned, so the legend
+                                item would be a lie. */}
+                            {gapExists && (
+                              <span className="inline-flex items-center gap-1">
+                                <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--warning)" }} />
+                                Weakest
+                              </span>
+                            )}
+                          </div>
                         </Card>
                       );
                     })()}
