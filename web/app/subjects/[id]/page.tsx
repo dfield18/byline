@@ -1235,12 +1235,10 @@ function TrajectoryStrip({
       // first), per the api.ts type comment.
       benchmark: benchmarks?.first_mention_rate_avg ?? null,
       benchmarkCaption: bmCaption(benchmarks?.first_mention_rate_avg ?? null),
-      // Per-platform first_mention_rate — answers "which AI lists
-      // this subject first most often?" right next to the headline.
-      platformBreakdown: perPlatformKpis.map((p) => ({
-        name: p.name,
-        value: p.first_mention_rate,
-      })),
+      // No platformBreakdown — operator chose to keep this tile
+      // bar/text-light. The per-platform first_mention_rate
+      // breakdown still lives on the Visibility deep-dive's
+      // Platform Change Detail table.
     },
     {
       title: "Net Favorability",
@@ -1253,14 +1251,9 @@ function TrajectoryStrip({
       // sentiment distribution is shaped by their topic mix.
       benchmark: null,
       benchmarkCaption: null,
-      // Per-platform avg_sentiment — answers "is one AI more
-      // favorable than the other?" inline. Signed values (range
-      // −1..+1); the subline renderer handles signing for the
-      // avg_tone colorKind.
-      platformBreakdown: perPlatformKpis.map((p) => ({
-        name: p.name,
-        value: p.avg_sentiment,
-      })),
+      // No platformBreakdown — same operator choice as the
+      // First Result tile. Per-platform sentiment is on the
+      // Narrative deep-dive.
     },
   ];
 
