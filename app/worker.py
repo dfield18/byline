@@ -37,29 +37,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.analyzer import (  # noqa: E402
-    DescriptorExtractor,
-    EntitiesExtractor,
-    Extractor,
-    MentionDetectionExtractor,
-    NarrativeThemesExtractor,
-    ScoresExtractor,
-    SourcesExtractor,
-    _fetch_source_type_ids,
-    run_analysis,
-)
-from app.cross_analyzer import (  # noqa: E402
-    AsymmetryAnalyzer,
-    NarrativeClusterAnalyzer,
-    NarrativeDriftAnalyzer,
-    ShareOfVoiceAnalyzer,
-    TopQuotesAnalyzer,
-    run_cross_analysis,
-)
 from app.db import get_database_url  # noqa: E402
-from app.query_engine import run_refresh  # noqa: E402
-from app.refresh import _ensure_recent_news_fresh  # noqa: E402
-from dashboard.lib.queries import get_subject_overview  # noqa: E402
+from app.pipeline import run_full_refresh_pipeline  # noqa: E402
 
 import psycopg  # noqa: E402
 from psycopg.types.json import Json  # noqa: E402
@@ -174,110 +153,13 @@ def _lookup_subject_name(subject_id: int) -> str | None:
 # ─── job kinds ───────────────────────────────────────────────────────
 
 
-def _default_extractors() -> list[Extractor]:
-    """The same extractor list the analyzer CLI uses (non-combined mode)."""
-    source_type_ids = _fetch_source_type_ids()
-    return [
-        DescriptorExtractor(),
-        SourcesExtractor(source_type_ids),
-        EntitiesExtractor(),
-        ScoresExtractor(),
-        NarrativeThemesExtractor(),
-        MentionDetectionExtractor(),
-    ]
-
-
 async def _execute_refresh_job(
     subject_id: int, subject_name: str
 ) -> dict[str, Any]:
-    """The refresh chain. Returns a dict suitable for jobs.result."""
-    # 1. Recent news. `_ensure_recent_news_fresh` is sync but uses
-    # asyncio.run() internally for the web fetch — pushing it to a
-    # thread avoids the "cannot call asyncio.run() from a running event
-    # loop" collision with our outer worker loop. Non-fatal on failure.
-    await asyncio.to_thread(_ensure_recent_news_fresh, subject_id, subject_name)
-
-    # 2. Query the providers.
-    logger.info("[subject %s] starting refresh", subject_id)
-    refresh_run_id = await run_refresh(subject_id)
-    logger.info("[subject %s] refresh_run_id=%s", subject_id, refresh_run_id)
-
-    # 3. Per-response analysis (descriptors / sources / entities / …).
-    extractors = _default_extractors()
-    logger.info(
-        "[refresh %s] running %d extractor(s)", refresh_run_id, len(extractors)
-    )
-    analysis_run_id = await run_analysis(refresh_run_id, extractors)
-    logger.info("[refresh %s] analysis_run_id=%s", refresh_run_id, analysis_run_id)
-
-    # 4. Cross-response analysis. `run_cross_analysis` is sync and may
-    # internally invoke asyncio.run() for its LLM-backed analyzers
-    # (TopQuotes, NarrativeDrift). Same to_thread pattern as step 1.
-    cross_analyzers = [
-        AsymmetryAnalyzer(),
-        TopQuotesAnalyzer(),
-        ShareOfVoiceAnalyzer(),
-        NarrativeDriftAnalyzer(),
-        NarrativeClusterAnalyzer(),
-    ]
-    logger.info(
-        "[refresh %s] running %d cross-analyzer(s)",
-        refresh_run_id,
-        len(cross_analyzers),
-    )
-    cross_analysis_run_id = await asyncio.to_thread(
-        run_cross_analysis, refresh_run_id, cross_analyzers
-    )
-    logger.info(
-        "[refresh %s] cross_analysis_run_id=%s",
-        refresh_run_id,
-        cross_analysis_run_id,
-    )
-
-    # 5. Precompute the dashboard's Recommended Actions (LLM-driven,
-    # 5-15s Gemini 2.5 Pro call) so the first dashboard load for this
-    # subject is a pure cache hit instead of paying the full LLM
-    # latency in the user-facing request path. Triggered as a side
-    # effect of `get_subject_overview`, which calls
-    # `_compute_recommended_actions` and writes the result to
-    # `refresh_analyses` via the upsert + advisory-lock pattern.
-    #
-    # Failure handling: any exception here is logged at WARNING and
-    # swallowed. The dashboard render path falls back to firing the
-    # LLM call on demand the same way it did before this precompute
-    # existed — worst case is the user waits the full 5-15s, same
-    # as the pre-L11 behavior.
-    #
-    # Concurrency: if a user opens the dashboard for this subject
-    # concurrently with the worker's precompute, the advisory lock
-    # serializes them. Only one LLM call fires regardless of who
-    # gets to it first.
-    #
-    # `get_subject_overview(subject_id)` (no org_id) runs in
-    # operator/unscoped mode — appropriate for the worker, which
-    # has no Clerk user context.
-    try:
-        logger.info(
-            "[refresh %s] precomputing recommended actions",
-            refresh_run_id,
-        )
-        await asyncio.to_thread(get_subject_overview, subject_id)
-        logger.info(
-            "[refresh %s] recommended actions precomputed",
-            refresh_run_id,
-        )
-    except Exception as e:
-        logger.warning(
-            "[refresh %s] recommended actions precompute failed: %s",
-            refresh_run_id,
-            e,
-        )
-
-    return {
-        "refresh_run_id": refresh_run_id,
-        "analysis_run_id": analysis_run_id,
-        "cross_analysis_run_id": cross_analysis_run_id,
-    }
+    """Worker entry point — delegates to the shared pipeline so the
+    worker and the CLI run the exact same 5-step chain. Result dict
+    flows back into `jobs.result`."""
+    return await run_full_refresh_pipeline(subject_id, subject_name)
 
 
 # ─── main loop ───────────────────────────────────────────────────────

@@ -32,7 +32,8 @@ import yaml
 
 from app.db import get_cursor
 from app.providers import get_provider
-from app.query_engine import run_refresh
+# Imported lazily inside main() to avoid a circular import: app.pipeline
+# imports `_ensure_recent_news_fresh` from this module.
 
 
 # Recent news is re-fetched if the cached value is older than this.
@@ -410,26 +411,42 @@ def main(
     if historical_date is not None:
         typer.echo(
             f"\nRunning HISTORICAL refresh as-of {historical_date.isoformat()}. "
-            f"Generated prompts skipped; grounding ON with `before:` filter."
+            f"Generated prompts skipped; grounding ON with `before:` filter. "
+            f"Recommended-actions precompute skipped (historical refreshes "
+            f"don't change 'latest snapshot' semantics)."
         )
-    else:
-        # Re-fetch recent_news if cached value is older than 7 days (or missing).
-        # Non-fatal: a web-search failure doesn't block the refresh.
-        _ensure_recent_news_fresh(subject_id, name)
 
-    refresh_run_id = asyncio.run(
-        run_refresh(
+    # Drive the full 5-step pipeline (refresh → analysis → cross-analysis
+    # → recommended-actions precompute). Before app/pipeline.py existed,
+    # this CLI only ran step 2; historical backfills and any operator
+    # using the CLI shipped subjects with empty analyzer data. The
+    # pipeline module is the single source of truth — worker and CLI
+    # share it now — and it auto-skips steps 1 + 5 in historical mode
+    # because those are "latest snapshot" operations.
+    #
+    # Lazy import: app.pipeline imports _ensure_recent_news_fresh from
+    # this module, so a top-level import would loop.
+    from app.pipeline import run_full_refresh_pipeline
+
+    result = asyncio.run(
+        run_full_refresh_pipeline(
             subject_id,
+            name,
             max_concurrency=max_concurrency,
             historical_as_of=historical_date,
         )
     )
+    refresh_run_id = result["refresh_run_id"]
     subject_name, status, successful, total, cost, seconds = _summarize(refresh_run_id)
 
     typer.echo(
         f"\nCompleted refresh for {subject_name}: "
         f"{successful}/{total} successful, ${cost:.2f} total cost, "
         f"{seconds} seconds elapsed"
+    )
+    typer.echo(
+        f"  analysis_run_id={result['analysis_run_id']} "
+        f"cross_analysis_run_id={result['cross_analysis_run_id']}"
     )
 
 
