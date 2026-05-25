@@ -16,7 +16,6 @@ import { notFound, redirect } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill, KpiGauge } from "@/components/dashboard/ui";
-import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
 import { CompetitiveScatter } from "./CompetitiveScatter";
 import { TopicProminenceFilter } from "./TopicProminenceFilter";
 import { LandscapePlatformFilter } from "./LandscapePlatformFilter";
@@ -1273,20 +1272,19 @@ export default async function CompetitionPage({
         {hasCompetitive && (
           <OverviewSubNav
             items={[
-              // "Vitals" leads the rail to mirror the Visibility +
-              // Overview spokes — the first item always points at
-              // the band that holds the executive summary + KPI
-              // tiles. Subsequent items follow the page's reading
-              // order; conditional sections (Trend needs ≥2 weeks,
-              // Co-Mentions needs subject-mention responses) are
-              // included unconditionally so the rail stays stable
-              // across snapshots, even though individual sections
-              // may render empty-state cards.
-              { id: "vitals", label: "Vitals", num: "01" },
-              { id: "trend", label: "Trend", num: "02" },
-              { id: "landscape", label: "Landscape", num: "03" },
-              { id: "ranking-table", label: "Ranking", num: "04" },
-              { id: "co-mentions", label: "Co-Mentions", num: "05" },
+              // Four question-driven bands replace the prior 5-item
+              // layout (Vitals + Trend + Landscape + Ranking + Co-
+              // Mentions). Each band answers one question — no
+              // metric is shown twice across sections. Standing
+              // absorbs Vitals + the Ranking table (with inline SoV
+              // bars replacing the prior standalone bar chart);
+              // Positioning absorbs the Position vs Share scatter
+              // + the Platform Ownership matrix (out of Vitals);
+              // Trend + Co-Mentions stay as their own bands.
+              { id: "standing", label: "Standing", num: "01" },
+              { id: "positioning", label: "Positioning", num: "02" },
+              { id: "trend", label: "Trend", num: "03" },
+              { id: "co-mentions", label: "Co-Mentions", num: "04" },
             ]}
             right={
               <>
@@ -1327,15 +1325,19 @@ export default async function CompetitionPage({
                   with four RELATIVE KPIs scoped to the comparison
                   set, so a reader switching between the two pages
                   sees the same hero layout but a different read. */}
-              {/* ── 01. VITALS (Competitive Briefing) ─────────────── */}
-              {/* id="vitals" matches the first sub-nav item ("01
-                  Vitals") so the rail scrolls to this band; same
-                  scroll-mt-28 the other sections use. Card chrome
-                  mirrors the Visibility spoke's Vitals card exactly:
-                  p-6 md:p-7 + border-border/60 + the subtle primary-
-                  tinted gradient overlay so the two heroes read as
-                  the same surface across spokes. */}
-              <section id="vitals" className="scroll-mt-28">
+              {/* ── 01. STANDING — "Where do I stand?" ───────────── */}
+              {/* First of four question-driven bands. Wraps two
+                  cards: the Vitals briefing (BOTTOM LINE + 4 KPIs)
+                  + the Competitive Ranking table (now the single
+                  source of standings, with inline SoV bars
+                  replacing the prior standalone bar chart). The
+                  Current Platform Ownership matrix that used to
+                  live inside the Vitals card moved to the
+                  Positioning band below. Card chrome on the Vitals
+                  card mirrors the Visibility spoke's Vitals card
+                  exactly so the two spoke heroes read as the same
+                  surface. */}
+              <section id="standing" className="scroll-mt-28">
                 <Card className="relative overflow-hidden p-6 md:p-7 border-border/60">
                   <div
                     className="absolute inset-0 pointer-events-none"
@@ -1479,205 +1481,582 @@ export default async function CompetitionPage({
                       );
                     })}
                   </div>
-                  {/* Current Platform Ownership — compact heatmap
-                      inside the briefing card. Mirrors the Visibility
-                      spoke's "Current Platform Snapshot" pattern:
-                      same matrix as the standalone section once
-                      lived in, visually de-emphasized so the four
-                      KPI tiles above lead the read. The standalone
-                      Platform Ownership section was retired in favor
-                      of this in-briefing placement. */}
-                  {hasOwnershipData && (() => {
-                    // Tiered cells (dominant ≥40% · contested 15-40%
-                    // · marginal <15%) replace the prior continuous
-                    // alpha ramp — same visual logic as the Visibility
-                    // spoke's Current Platform Snapshot, just with
-                    // SoV-tuned thresholds since SoV distributions
-                    // sit lower than mention rates. The prior
-                    // auto-summary line below the grid was removed
-                    // at request; the color legend + per-cell
-                    // tooltips still carry the read.
-                    return (
-                      <div className="relative mt-8 border-t border-border/50 pt-6">
-                        <div className="mb-3">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 inline-flex items-center gap-1">
-                            Current Platform Ownership
-                            <KpiTooltipIcon
-                              text="Share of Voice for each comparison-set entity on each AI platform. Amber cells flag marginal share (<15%); calm cells are at dominant share (≥40%)."
-                              align="left"
-                            />
-                          </div>
-                          <p className="mt-1 text-[12.5px] text-muted-foreground">
-                            Current Share of Voice by entity and AI platform.
-                          </p>
-                        </div>
-                        <div className="overflow-x-auto">
-                          <div
-                            className="grid gap-1 min-w-fit"
-                            style={{
-                              gridTemplateColumns: `minmax(140px, auto) repeat(${ownershipPlatforms.length}, minmax(56px, 1fr))`,
-                            }}
-                          >
-                            <div />
-                            {ownershipPlatforms.map((p) => (
-                              // Two-element nesting: outer flex owns
-                              // the reserved height + alignment, inner
-                              // span owns the line-clamp. Combining
-                              // flex + line-clamp-* on one element
-                              // collides (line-clamp forces
-                              // display:-webkit-box).
-                              <div
-                                key={p.slug}
-                                className="flex items-end justify-center px-1 min-h-[26px]"
-                                title={p.name}
-                              >
-                                <span className="line-clamp-2 text-center text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground/60">
-                                  {p.name}
-                                </span>
-                              </div>
-                            ))}
-                            {ownershipRows.map((e) => (
-                              <div
-                                key={e.name}
-                                style={{ display: "contents" }}
-                              >
-                                {/* Subject row name cell: bumped to
-                                    bold + primary-tinted left accent
-                                    + slightly larger font so the
-                                    subject's row reads as the row
-                                    that matters. Same emphasis stack
-                                    as the Ranking table — the two
-                                    tables now match treatment. */}
-                                <div
-                                  className={`self-center text-[12px] ${
-                                    e.is_subject
-                                      ? "font-bold text-foreground border-l-2 border-l-primary/60 pl-2 pr-2"
-                                      : "pr-2 text-foreground/80"
-                                  }`}
-                                >
-                                  {e.name}
-                                </div>
-                                {ownershipPlatforms.map((p) => {
-                                  const cell = ownershipCells.find(
-                                    (c) =>
-                                      c.platform_slug === p.slug &&
-                                      c.entity_name === e.name,
-                                  );
-                                  const sov = cell?.sov ?? null;
-                                  const tier = sovTier(sov);
-                                  const ts = sovTierStyle(tier);
-                                  const titleLabel = `${p.name} × ${e.name}: ${
-                                    sov === null
-                                      ? "no data"
-                                      : `${Math.round(sov * 100)}% (${cell?.n_appearances ?? 0}/${p.n_responses})`
-                                  }`;
-                                  return (
-                                    <div
-                                      key={p.slug}
-                                      // Subject cell: bumped ring
-                                      // from ring-1 ring-primary/30
-                                      // to ring-2 ring-primary/50 so
-                                      // the frame is clearly visible
-                                      // against the tier-colored fill
-                                      // instead of whispering at the
-                                      // edge.
-                                      className={`relative flex h-7 items-center justify-center rounded-sm ${
-                                        e.is_subject
-                                          ? "ring-2 ring-primary/50"
-                                          : ""
-                                      }`}
-                                      style={{
-                                        background: ts.background,
-                                        border: ts.border,
-                                      }}
-                                      title={titleLabel}
-                                    >
+                </Card>
+                {/* Competitive Ranking Card — second piece of the
+                    Standing band, sibling to the Vitals card above.
+                    The standalone Competitive Share of Voice bar
+                    chart that used to live in the Landscape band
+                    was redundant with this table's SoV column; the
+                    bar moved INLINE into each row's SoV cell so the
+                    bar + percent sit together. mt-6 spaces this
+                    card from the Vitals card without the larger
+                    inter-section gap used between bands. */}
+                <Card className="mt-6 p-6 border-border/60">
+                  {/* No `overflow-x-auto` wrapper — the table already
+                      fits at common card widths after the column
+                      headers were tightened to short labels (Avg.
+                      Position, 1st Mention). Removing the scroll
+                      wrapper drops the gray scrollbar that was
+                      otherwise pinned to the bottom of the card.
+                      The text-wrap on the Entity column absorbs the
+                      occasional narrow-viewport squeeze without
+                      data being clipped. */}
+                  <div>
+                    {(() => {
+                      // Source data prep — keep leader rank +
+                      // position computation off the FULL set
+                      // (subject included) so peer position pills
+                      // are still calculated relative to whoever
+                      // leads the comparison set, even though the
+                      // subject renders separately above the table.
+                      const sortedAll = [...landscapeEntities].sort(
+                        (a, b) => b.sov - a.sov,
+                      );
+                      const leaderRow = sortedAll[0];
+                      const leaderName = leaderRow?.name ?? null;
+                      const leaderSov = leaderRow?.sov ?? null;
+                      const subjectRow = landscapeEntities.find(
+                        (e) => e.is_subject,
+                      ) ?? null;
+                      // Subject's change pulls from the page's
+                      // primary trajectory (ai_recall); competitors
+                      // pull from competitor_trajectories. When
+                      // scoped to a topic OR platform, skip the
+                      // change calc entirely — no per-(scope ×
+                      // entity) trajectories exist.
+                      const subjectChange =
+                        subjectRow && !(prominenceTopic || landscapePlatform)
+                          ? changeFromTrajectory(
+                              data.trajectory.ai_recall,
+                            )
+                          : null;
+                      const subjectPosition = subjectRow
+                        ? currentPosition({
+                            mention_rate: subjectRow.sov,
+                            is_subject: true,
+                            is_leader: subjectRow.name === leaderName,
+                            leader_mention_rate: leaderSov,
+                          })
+                        : null;
+                      const peerRows = sortedAll.filter(
+                        (r) => !r.is_subject,
+                      );
+                      // Inline-delta formatter shared by the subject
+                      // row and the peer rows so the change column
+                      // reads the same in both: "+5 pts" / "0 pts"
+                      // / "-10 pts" (uses the page-wide
+                      // formatSignedPpRaw, which already carries
+                      // the "pts" suffix). Earlier the strip used
+                      // "-10 pts" while peer rows used bare "-10";
+                      // unifying matters now that the subject is
+                      // an in-table row sitting directly above the
+                      // peers — different formats would read as
+                      // different metrics.
+                      return (
+                        <>
+                          {/* Single table — the subject is now the
+                              first row of the same grid as the
+                              peers, not a floating stat strip
+                              above. Browser handles native column
+                              alignment so SoV sits over SoV,
+                              Position over Position, etc. Subject
+                              row distinguishes itself via
+                              info-tinted background + left accent
+                              + bolder weight; peer rows render in
+                              muted text-foreground/75. Columns: 5
+                              (Entity · SoV with bar + % + change
+                              delta · Avg. Position · First Mention
+                              Rate · Status). The dropped Trend
+                              column was uniformly "Stable" — zero
+                              information — and is not re-added. */}
+                          <table className="w-full text-left table-fixed">
+                            {/* Explicit column widths so headers
+                                anchor predictably above their data
+                                regardless of header-label vs cell-
+                                content width variance. Without this
+                                the browser auto-sizes each column to
+                                its widest natural content (header
+                                tooltip + bar+%+delta cluster), which
+                                makes the SoV column wider than the
+                                others and the right-aligned headers
+                                feel inconsistently spaced relative
+                                to their data. Widths sum to 100%
+                                and use proportional units so the
+                                grid scales cleanly across viewport
+                                widths. table-fixed on the wrapper
+                                lets the col widths govern instead
+                                of auto-layout. */}
+                            <colgroup>
+                              <col style={{ width: "26%" }} />
+                              <col style={{ width: "32%" }} />
+                              <col style={{ width: "12%" }} />
+                              <col style={{ width: "16%" }} />
+                              <col style={{ width: "14%" }} />
+                            </colgroup>
+                            <thead>
+                              <tr className="border-b border-border/60 text-[10.5px] uppercase tracking-[0.06em] text-foreground/65">
+                                <th className="py-3 pr-4 font-semibold">
+                                  <span className="inline-flex items-center gap-1">
+                                    Entity
+                                    <KpiTooltipIcon
+                                      text="Top competitor entities AI surfaced alongside the subject in this snapshot. The subject itself appears in the stat strip above, not as a table row. Names come from the competitors_mentioned extraction; name variants are not deduped."
+                                      align="left"
+                                      direction="below"
+                                    />
+                                  </span>
+                                </th>
+                                <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
+                                  <span className="inline-flex items-center justify-end gap-1">
+                                    Share of Voice
+                                    <KpiTooltipIcon
+                                      text={`Share of Voice — fraction of unnamed-layer responses where this entity appeared. The small signed number next to the % is the entity's mention-rate change across the ${trendWindowKey === "all" ? "all-time" : trendWindowKey} trend window (positive green = up, negative amber = down).`}
+                                      align="right"
+                                      direction="below"
+                                    />
+                                  </span>
+                                </th>
+                                <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
+                                  <span className="inline-flex items-center justify-end gap-1">
+                                    Avg. Position
+                                    <KpiTooltipIcon
+                                      text="Average answer position when this entity was mentioned. Lower is better; 1.0 means always listed first. Renders an em-dash when the entity was never measured at a known rank in this snapshot."
+                                      align="right"
+                                      direction="below"
+                                    />
+                                  </span>
+                                </th>
+                                <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
+                                  <span className="inline-flex items-center justify-end gap-1">
+                                    First Mention Rate
+                                    <KpiTooltipIcon
+                                      text="Share of responses where this entity was AI's first-named entity (rank #1). Pole-position visibility — different from Share, which counts any mention regardless of rank."
+                                      align="right"
+                                      direction="below"
+                                    />
+                                  </span>
+                                </th>
+                                <th className="py-3 pl-3 text-right font-semibold whitespace-nowrap">
+                                  <span className="inline-flex items-center justify-end gap-1">
+                                    Status
+                                    <KpiTooltipIcon
+                                      text="Where this entity sits in the comparison set today, by share of voice. Leader = highest share. Challenger ≥60% of the leader's share. Mid-tier ≥25%. Low visibility below that."
+                                      align="right"
+                                      direction="below"
+                                    />
+                                  </span>
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {/* Subject row — first row of the
+                                  same grid as the peers below, info-
+                                  tinted + bolder so the subject
+                                  visually leads the comparison
+                                  without being a floating element.
+                                  Uses the SAME 5-cell structure as
+                                  peer rows so each column (SoV,
+                                  Position, First Mention, Status)
+                                  aligns vertically — a reader can
+                                  drop straight down from the
+                                  subject's value to any peer's. */}
+                              {subjectRow && subjectPosition && (
+                                <tr className="border-b border-border/30 text-[14px] text-foreground bg-primary/[0.08] border-l-2 border-l-primary/50">
+                                  <td className="py-3.5 pr-4 font-semibold">
+                                    {subjectRow.name}
+                                  </td>
+                                  <td className="py-3.5 px-3 text-right tabular-nums">
+                                    <div className="inline-flex items-center justify-end gap-2 w-full">
+                                      <div
+                                        className="relative h-2 w-20 overflow-hidden rounded-full bg-muted/70 shrink-0"
+                                        aria-hidden
+                                      >
+                                        <div
+                                          className="absolute inset-y-0 left-0 rounded-full"
+                                          style={{
+                                            width: `${Math.max(0, Math.min(100, subjectRow.sov * 100))}%`,
+                                            background: colorForEntity(subjectRow.name),
+                                            opacity: 0.85,
+                                          }}
+                                        />
+                                      </div>
+                                      <span className="shrink-0 min-w-[2.5rem] text-right font-semibold">
+                                        {Math.round(subjectRow.sov * 100)}%
+                                      </span>
                                       <span
-                                        className={`text-[10.5px] tabular-nums ${ts.textClass} ${
-                                          e.is_subject ? "font-bold" : ""
+                                        className={`shrink-0 min-w-[3rem] text-right text-[11px] tabular-nums ${
+                                          subjectChange === null
+                                            ? "text-muted-foreground/60"
+                                            : deltaToneClass(subjectChange)
                                         }`}
                                       >
-                                        {sov === null
-                                          ? "—"
-                                          : `${Math.round(sov * 100)}%`}
+                                        {subjectChange === null
+                                          ? ""
+                                          : formatSignedPpRaw(subjectChange)}
                                       </span>
                                     </div>
-                                  );
-                                })}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        {/* Color legend — closes the loop on the
-                            tiered background colors so the reader
-                            doesn't need to hover a cell or read the
-                            section tooltip to learn what each tint
-                            means. Swatches match the tier styles
-                            exactly (color-mix expressions identical
-                            to sovTierStyle output) so legend and
-                            grid stay in sync if the palette ever
-                            shifts. SoV-tuned labels mirror the
-                            Visibility spoke's heatmap legend
-                            pattern. */}
-                        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
-                          <span className="inline-flex items-center gap-1.5">
-                            <span
-                              aria-hidden
-                              className="inline-block h-3 w-3 rounded-sm"
-                              style={{
-                                background:
-                                  "color-mix(in oklab, var(--primary) 55%, transparent)",
-                                border:
-                                  "1px solid color-mix(in oklab, var(--primary) 75%, transparent)",
-                              }}
-                            />
-                            Dominant ≥40%
-                          </span>
-                          <span className="inline-flex items-center gap-1.5">
-                            <span
-                              aria-hidden
-                              className="inline-block h-3 w-3 rounded-sm"
-                              style={{
-                                background:
-                                  "color-mix(in oklab, var(--muted) 75%, transparent)",
-                              }}
-                            />
-                            Contested 15-40%
-                          </span>
-                          <span className="inline-flex items-center gap-1.5">
-                            <span
-                              aria-hidden
-                              className="inline-block h-3 w-3 rounded-sm"
-                              style={{
-                                background:
-                                  "color-mix(in oklab, var(--warning) 22%, transparent)",
-                                border:
-                                  "1px solid color-mix(in oklab, var(--warning) 55%, transparent)",
-                              }}
-                            />
-                            Marginal &lt;15%
-                          </span>
-                          <span className="inline-flex items-center gap-1.5">
-                            <span
-                              aria-hidden
-                              className="inline-block h-3 w-3 rounded-sm"
-                              style={{
-                                background:
-                                  "repeating-linear-gradient(45deg, color-mix(in oklab, var(--muted) 25%, transparent), color-mix(in oklab, var(--muted) 25%, transparent) 2px, color-mix(in oklab, var(--muted-foreground) 12%, transparent) 2px, color-mix(in oklab, var(--muted-foreground) 12%, transparent) 4px)",
-                                border:
-                                  "1px dashed color-mix(in oklab, var(--muted-foreground) 45%, transparent)",
-                              }}
-                            />
-                            No data
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                                  </td>
+                                  <td className="py-3.5 px-3 text-right tabular-nums font-medium">
+                                    {subjectRow.avg_rank === null
+                                      ? "—"
+                                      : subjectRow.avg_rank.toFixed(1)}
+                                  </td>
+                                  <td className="py-3.5 px-3 text-right tabular-nums font-medium">
+                                    {Math.round(subjectRow.first_mention_rate * 100)}%
+                                  </td>
+                                  <td className="py-3.5 pl-3 text-right whitespace-nowrap">
+                                    <Pill tone={subjectPosition.tone}>
+                                      {subjectPosition.label}
+                                    </Pill>
+                                  </td>
+                                </tr>
+                              )}
+                              {peerRows.map((c) => {
+                                const change =
+                                  prominenceTopic || landscapePlatform
+                                    ? null
+                                    : changeFromTrajectory(
+                                        data.competitor_trajectories.find(
+                                          (ct) => ct.name === c.name,
+                                        )?.mention_rate,
+                                      );
+                                const position = currentPosition({
+                                  mention_rate: c.sov,
+                                  is_subject: false,
+                                  is_leader: c.name === leaderName,
+                                  leader_mention_rate: leaderSov,
+                                });
+                                return (
+                                  <tr
+                                    key={c.name}
+                                    className="border-b border-border/30 last:border-0 text-[14px] text-foreground/75"
+                                  >
+                                    <td className="py-3.5 pr-4 font-medium">
+                                      {c.name}
+                                    </td>
+                                    <td className="py-3.5 px-3 text-right tabular-nums">
+                                      <div className="inline-flex items-center justify-end gap-2 w-full">
+                                        <div
+                                          className="relative h-2 w-20 overflow-hidden rounded-full bg-muted/70 shrink-0"
+                                          aria-hidden
+                                        >
+                                          <div
+                                            className="absolute inset-y-0 left-0 rounded-full"
+                                            style={{
+                                              width: `${Math.max(0, Math.min(100, c.sov * 100))}%`,
+                                              background: colorForEntity(c.name),
+                                              opacity: 0.85,
+                                            }}
+                                          />
+                                        </div>
+                                        <span className="shrink-0 min-w-[2.5rem] text-right">
+                                          {Math.round(c.sov * 100)}%
+                                        </span>
+                                        {/* Change delta beside the
+                                            percent — uses the same
+                                            formatSignedPpRaw ("-10
+                                            pts") format as the
+                                            subject row above so
+                                            both rows render the
+                                            metric identically.
+                                            min-w-[3rem] reserves
+                                            slot width for "-10 pts"
+                                            so rows align even when
+                                            a row has no measured
+                                            change (slot stays,
+                                            renders empty). */}
+                                        <span
+                                          className={`shrink-0 min-w-[3rem] text-right text-[11px] tabular-nums ${
+                                            change === null
+                                              ? "text-muted-foreground/60"
+                                              : deltaToneClass(change)
+                                          }`}
+                                        >
+                                          {change === null
+                                            ? ""
+                                            : formatSignedPpRaw(change)}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="py-3.5 px-3 text-right tabular-nums">
+                                      {c.avg_rank === null
+                                        ? "—"
+                                        : c.avg_rank.toFixed(1)}
+                                    </td>
+                                    <td className="py-3.5 px-3 text-right tabular-nums">
+                                      {Math.round(c.first_mention_rate * 100)}%
+                                    </td>
+                                    <td className="py-3.5 pl-3 text-right whitespace-nowrap">
+                                      <Pill tone={position.tone}>
+                                        {position.label}
+                                      </Pill>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </>
+                      );
+                    })()}
+                  </div>
                 </Card>
               </section>
 
-              {/* ── 01. TREND ─────────────────────────────────────── */}
+              {/* ── 02. POSITIONING — "How is the field positioned?" ── */}
+              {/* Pairs the Position vs Share scatter (subject + 7
+                  competitor entities placed on a position × share
+                  plane) with the Current Platform Ownership matrix
+                  (per-(entity × AI platform) SoV grid). Both answer
+                  "positioning / who owns what" rather than "ranking";
+                  the matrix moved here from inside the Vitals card.
+                  Scatter gets the wider column (3fr) because its
+                  layout needs horizontal room for entity labels with
+                  collision-aware leader lines; matrix gets the
+                  narrower column (2fr) but its compact grid fits
+                  comfortably. */}
+              <section id="positioning" className="scroll-mt-28">
+                <SectionTitle
+                  eyebrow="Positioning"
+                  title="How is the field positioned?"
+                  description={(() => {
+                    const parts: string[] = [];
+                    if (prominenceTopic) {
+                      parts.push(`scoped to ${prominenceTopic}`);
+                    }
+                    if (scopedLandscapePlatformName) {
+                      parts.push(`on ${scopedLandscapePlatformName}`);
+                    }
+                    if (parts.length === 0) {
+                      return "Where each entity sits on the position × share plane, and who owns each AI platform.";
+                    }
+                    return `Where each entity sits ${parts.join(", ")}, on the position × share plane and across AI platforms.`;
+                  })()}
+                />
+                {landscapeFellBackFromCombo && scopedLandscapePlatformName && (
+                  <div className="mb-4 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[12.5px] leading-relaxed text-muted-foreground">
+                    <span className="font-semibold text-foreground/85">
+                      No responses
+                    </span>{" "}
+                    for this topic on{" "}
+                    {scopedLandscapePlatformName} in the latest snapshot
+                    — showing{" "}
+                    {scopedLandscapePlatformName}{" "}
+                    totals across all topics.
+                  </div>
+                )}
+                {/* Single Card with internal divider — same one-
+                    card-one-divider pattern the Trend chart + What-
+                    changed footer share. Scatter takes 3fr (wider)
+                    so its labels have horizontal breathing room;
+                    matrix takes 2fr (narrower) since its content is
+                    a compact grid. At narrow widths both stack with
+                    a horizontal border between. */}
+                <Card className="p-6 border-border/60">
+                  <div className="grid gap-6 lg:grid-cols-[3fr_2fr] lg:divide-x divide-border/60">
+                    <div className="lg:pr-6">
+                      <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
+                        Position vs Share
+                      </div>
+                      <CompetitiveScatter
+                        entities={landscapeEntities.map((c) => ({
+                          name: c.name,
+                          sov: c.sov,
+                          avg_rank: c.avg_rank,
+                          is_subject: c.is_subject,
+                        }))}
+                        colorByName={entityColorByName}
+                      />
+                    </div>
+                    <div className="lg:pl-6 border-t lg:border-t-0 border-border/60 pt-6 lg:pt-0">
+                      {hasOwnershipData && (() => {
+                        // Tiered cells (dominant ≥40% · contested
+                        // 15-40% · marginal <15%) — same SoV-tuned
+                        // sovTier system used before the move. The
+                        // legend below the grid spells out tier
+                        // colors; per-cell tooltips carry the
+                        // numeric read. Subject row gets bold + a
+                        // primary left accent so the eye lands on
+                        // it first, matching the Ranking table's
+                        // subject row emphasis.
+                        return (
+                          <div>
+                            <div className="mb-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 inline-flex items-center gap-1">
+                                Current Platform Ownership
+                                <KpiTooltipIcon
+                                  text="Share of Voice for each comparison-set entity on each AI platform. Amber cells flag marginal share (<15%); calm cells are at dominant share (≥40%)."
+                                  align="left"
+                                />
+                              </div>
+                              <p className="mt-1 text-[12.5px] text-muted-foreground">
+                                Current Share of Voice by entity and AI platform.
+                              </p>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <div
+                                className="grid gap-1 min-w-fit"
+                                style={{
+                                  gridTemplateColumns: `minmax(140px, auto) repeat(${ownershipPlatforms.length}, minmax(56px, 1fr))`,
+                                }}
+                              >
+                                <div />
+                                {ownershipPlatforms.map((p) => (
+                                  // Two-element nesting: outer flex
+                                  // owns the reserved height +
+                                  // alignment, inner span owns the
+                                  // line-clamp. Combining flex +
+                                  // line-clamp-* on one element
+                                  // collides (line-clamp forces
+                                  // display:-webkit-box).
+                                  <div
+                                    key={p.slug}
+                                    className="flex items-end justify-center px-1 min-h-[26px]"
+                                    title={p.name}
+                                  >
+                                    <span className="line-clamp-2 text-center text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground/60">
+                                      {p.name}
+                                    </span>
+                                  </div>
+                                ))}
+                                {ownershipRows.map((e) => (
+                                  <div
+                                    key={e.name}
+                                    style={{ display: "contents" }}
+                                  >
+                                    {/* Subject row name cell: bold +
+                                        primary left-accent border +
+                                        slightly larger font so the
+                                        subject's row reads as the
+                                        row that matters. Matches
+                                        the Ranking table's subject
+                                        row emphasis. */}
+                                    <div
+                                      className={`self-center text-[12px] ${
+                                        e.is_subject
+                                          ? "font-bold text-foreground border-l-2 border-l-primary/60 pl-2 pr-2"
+                                          : "pr-2 text-foreground/80"
+                                      }`}
+                                    >
+                                      {e.name}
+                                    </div>
+                                    {ownershipPlatforms.map((p) => {
+                                      const cell = ownershipCells.find(
+                                        (c) =>
+                                          c.platform_slug === p.slug &&
+                                          c.entity_name === e.name,
+                                      );
+                                      const sov = cell?.sov ?? null;
+                                      const tier = sovTier(sov);
+                                      const ts = sovTierStyle(tier);
+                                      const titleLabel = `${p.name} × ${e.name}: ${
+                                        sov === null
+                                          ? "no data"
+                                          : `${Math.round(sov * 100)}% (${cell?.n_appearances ?? 0}/${p.n_responses})`
+                                      }`;
+                                      return (
+                                        <div
+                                          key={p.slug}
+                                          // Subject cell: bumped
+                                          // ring from ring-1
+                                          // ring-primary/30 to
+                                          // ring-2 ring-primary/50
+                                          // so the frame is clearly
+                                          // visible against the
+                                          // tier-colored fill.
+                                          className={`relative flex h-7 items-center justify-center rounded-sm ${
+                                            e.is_subject
+                                              ? "ring-2 ring-primary/50"
+                                              : ""
+                                          }`}
+                                          style={{
+                                            background: ts.background,
+                                            border: ts.border,
+                                          }}
+                                          title={titleLabel}
+                                        >
+                                          <span
+                                            className={`text-[10.5px] tabular-nums ${ts.textClass} ${
+                                              e.is_subject ? "font-bold" : ""
+                                            }`}
+                                          >
+                                            {sov === null
+                                              ? "—"
+                                              : `${Math.round(sov * 100)}%`}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            {/* Color legend — closes the loop on
+                                the tiered background colors so the
+                                reader doesn't need to hover a cell
+                                to learn what each tint means.
+                                Swatches match sovTierStyle exactly
+                                so legend + grid stay in sync. */}
+                            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+                              <span className="inline-flex items-center gap-1.5">
+                                <span
+                                  aria-hidden
+                                  className="inline-block h-3 w-3 rounded-sm"
+                                  style={{
+                                    background:
+                                      "color-mix(in oklab, var(--primary) 55%, transparent)",
+                                    border:
+                                      "1px solid color-mix(in oklab, var(--primary) 75%, transparent)",
+                                  }}
+                                />
+                                Dominant ≥40%
+                              </span>
+                              <span className="inline-flex items-center gap-1.5">
+                                <span
+                                  aria-hidden
+                                  className="inline-block h-3 w-3 rounded-sm"
+                                  style={{
+                                    background:
+                                      "color-mix(in oklab, var(--muted) 75%, transparent)",
+                                  }}
+                                />
+                                Contested 15-40%
+                              </span>
+                              <span className="inline-flex items-center gap-1.5">
+                                <span
+                                  aria-hidden
+                                  className="inline-block h-3 w-3 rounded-sm"
+                                  style={{
+                                    background:
+                                      "color-mix(in oklab, var(--warning) 22%, transparent)",
+                                    border:
+                                      "1px solid color-mix(in oklab, var(--warning) 55%, transparent)",
+                                  }}
+                                />
+                                Marginal &lt;15%
+                              </span>
+                              <span className="inline-flex items-center gap-1.5">
+                                <span
+                                  aria-hidden
+                                  className="inline-block h-3 w-3 rounded-sm"
+                                  style={{
+                                    background:
+                                      "repeating-linear-gradient(45deg, color-mix(in oklab, var(--muted) 25%, transparent), color-mix(in oklab, var(--muted) 25%, transparent) 2px, color-mix(in oklab, var(--muted-foreground) 12%, transparent) 2px, color-mix(in oklab, var(--muted-foreground) 12%, transparent) 4px)",
+                                    border:
+                                      "1px dashed color-mix(in oklab, var(--muted-foreground) 45%, transparent)",
+                                  }}
+                                />
+                                No data
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </Card>
+              </section>
+
+              {/* ── 03. TREND — "Which way is it moving?" ─────────── */}
               {hasTrend && (
                 <section id="trend" className="scroll-mt-28">
                   <SectionTitle
@@ -1815,312 +2194,6 @@ export default async function CompetitionPage({
                   </Card>
                 </section>
               )}
-              {/* ── 02. LANDSCAPE ─────────────────────────────────── */}
-              <section id="landscape" className="scroll-mt-28">
-                <SectionTitle
-                  eyebrow="Landscape"
-                  title="Competitive Visibility Landscape"
-                  description={(() => {
-                    const parts: string[] = [];
-                    if (prominenceTopic) {
-                      parts.push(`scoped to ${prominenceTopic}`);
-                    }
-                    if (scopedLandscapePlatformName) {
-                      parts.push(`on ${scopedLandscapePlatformName}`);
-                    }
-                    if (parts.length === 0) {
-                      return "Who dominates AI answers, and whether they appear early or late in the response.";
-                    }
-                    return `Who dominates AI answers ${parts.join(", ")}, and whether they appear early or late in the response.`;
-                  })()}
-                />
-                {landscapeFellBackFromCombo && scopedLandscapePlatformName && (
-                  <div className="mb-4 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[12.5px] leading-relaxed text-muted-foreground">
-                    <span className="font-semibold text-foreground/85">
-                      No responses
-                    </span>{" "}
-                    for this topic on{" "}
-                    {scopedLandscapePlatformName} in the latest snapshot
-                    — showing{" "}
-                    {scopedLandscapePlatformName}{" "}
-                    totals across all topics.
-                  </div>
-                )}
-                {/* Single Card wraps both sub-views, split by an
-                    internal divider (vertical at lg+, horizontal
-                    below) instead of two stacked bordered surfaces.
-                    Same pattern as the Trend chart + What-changed
-                    footer share — one card, one internal divider,
-                    less visual heaviness when the two sub-views
-                    really are one section's content. */}
-                <Card className="p-6 border-border/60">
-                  <div className="grid gap-6 lg:grid-cols-2 lg:divide-x divide-border/60">
-                    <div className="lg:pr-6">
-                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
-                        Competitive Share of Voice
-                      </div>
-                      <p className="mb-4 text-[12.5px] text-muted-foreground">
-                        Share of AI answers mentioning each entity in
-                        the selected comparison set.
-                      </p>
-                      <CompetitorBarsFromData
-                        data={landscapeEntities.map((c) => ({
-                          name: c.name,
-                          sov: c.sov,
-                          is_subject: c.is_subject,
-                        }))}
-                        colorByName={entityColorByName}
-                        height={280}
-                      />
-                    </div>
-                    <div className="lg:pl-6 border-t lg:border-t-0 border-border/60 pt-6 lg:pt-0">
-                      <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55">
-                        Position vs Share
-                      </div>
-                      <CompetitiveScatter
-                        entities={landscapeEntities.map((c) => ({
-                          name: c.name,
-                          sov: c.sov,
-                          avg_rank: c.avg_rank,
-                          is_subject: c.is_subject,
-                        }))}
-                        colorByName={entityColorByName}
-                      />
-                    </div>
-                  </div>
-                </Card>
-              </section>
-
-              {/* ── 03. RANKING TABLE ───────────────────────────── */}
-              <section id="ranking-table" className="scroll-mt-28">
-                <SectionTitle
-                  eyebrow="Ranking"
-                  title="Competitive Ranking Table"
-                  description="Competitive prominence combines visibility, average answer position, and first-mention rate into a single comparison score."
-                  className="mb-5"
-                />
-                <Card className="p-6 border-border/60">
-                  {/* No `overflow-x-auto` wrapper — the table already
-                      fits at common card widths after the column
-                      headers were tightened to short labels (Avg.
-                      Position, 1st Mention). Removing the scroll
-                      wrapper drops the gray scrollbar that was
-                      otherwise pinned to the bottom of the card.
-                      The text-wrap on the Entity column absorbs the
-                      occasional narrow-viewport squeeze without
-                      data being clipped. */}
-                  <div>
-                    {(() => {
-                      // Row source is the section-level canonical
-                      // `landscapeEntities` — already reflects the
-                      // active (platform, topic) scope, so the table
-                      // doesn't have to recompute it. Sort desc by
-                      // Share of Voice (the table's leading metric
-                      // column) since the composite Prominence Score
-                      // column was retired.
-                      const rows = [...landscapeEntities].sort(
-                        (a, b) => b.sov - a.sov,
-                      );
-                      // Leader = entity with the highest SoV in the
-                      // current scope. Used by `currentPosition` to
-                      // compute Challenger / Mid-tier / Low-visibility
-                      // thresholds as a fraction of the leader.
-                      const leaderRow = [...landscapeEntities].sort(
-                        (a, b) => b.sov - a.sov,
-                      )[0];
-                      const leaderName = leaderRow?.name ?? null;
-                      const leaderSov = leaderRow?.sov ?? null;
-                      return (
-                        <table className="w-full text-left">
-                          <thead>
-                            <tr className="border-b border-border/60 text-[10.5px] uppercase tracking-[0.06em] text-foreground/65">
-                              <th className="py-3 pr-4 font-semibold">
-                                <span className="inline-flex items-center gap-1">
-                                  Entity
-                                  <KpiTooltipIcon
-                                    text="The subject (highlighted with a Selected pill) plus the top competitor entities AI surfaced alongside them in this snapshot. Names come from the competitors_mentioned extraction; name variants are not deduped."
-                                    align="left"
-                                    direction="below"
-                                  />
-                                </span>
-                              </th>
-                              <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
-                                <span className="inline-flex items-center justify-end gap-1">
-                                  Share of Voice
-                                  <KpiTooltipIcon
-                                    text="Share of Voice — fraction of unnamed-layer responses where this entity appeared. Same definition for every row, so each entity's value is comparable to every other."
-                                    align="right"
-                                    direction="below"
-                                  />
-                                </span>
-                              </th>
-                              <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
-                                <span className="inline-flex items-center justify-end gap-1">
-                                  Avg. Position
-                                  <KpiTooltipIcon
-                                    text="Average answer position when this entity was mentioned. Lower is better; 1.0 means always listed first. Renders an em-dash when the entity was never measured at a known rank in this snapshot."
-                                    align="right"
-                                    direction="below"
-                                  />
-                                </span>
-                              </th>
-                              <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
-                                <span className="inline-flex items-center justify-end gap-1">
-                                  First Mention Rate
-                                  <KpiTooltipIcon
-                                    text="Share of responses where this entity was AI's first-named entity (rank #1). Pole-position visibility — different from Share, which counts any mention regardless of rank."
-                                    align="right"
-                                    direction="below"
-                                  />
-                                </span>
-                              </th>
-                              <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
-                                <span className="inline-flex items-center justify-end gap-1">
-                                  {trendWindowKey === "all"
-                                    ? "Change vs all"
-                                    : `Change vs ${trendWindowKey}`}
-                                  <KpiTooltipIcon
-                                    text={`Mention-rate change across the selected ${trendWindowKey === "all" ? "all-time" : trendWindowKey} trend window (first vs latest measured snapshot for this entity), in percentage points. Renders an em-dash when there's fewer than two measured snapshots, or when scoped to a single topic (per-topic per-entity trajectories aren't tracked yet).`}
-                                    align="right"
-                                    direction="below"
-                                  />
-                                </span>
-                              </th>
-                              <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
-                                <span className="inline-flex items-center justify-end gap-1">
-                                  Current Position
-                                  <KpiTooltipIcon
-                                    text="Where this entity sits in the comparison set today, by share of voice. Leader = highest share. Challenger ≥60% of the leader's share. Mid-tier ≥25%. Low visibility below that."
-                                    align="right"
-                                    direction="below"
-                                  />
-                                </span>
-                              </th>
-                              <th className="py-3 pl-3 text-right font-semibold whitespace-nowrap">
-                                <span className="inline-flex items-center justify-end gap-1">
-                                  Trend
-                                  <KpiTooltipIcon
-                                    text="Direction across the tracked window: Rising = +10 pts or more, Declining = -10 pts or worse, Stable = within ±10 pts, Insufficient data = fewer than two measured snapshots."
-                                    align="right"
-                                    direction="below"
-                                  />
-                                </span>
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rows.map((c) => {
-                              // Change column: pull from the
-                              // window-aware trajectories — subject
-                              // uses ai_recall, everyone else looks
-                              // up by name. When the section is
-                              // scoped to a topic OR a platform,
-                              // skip the change calc entirely (no
-                              // per-(scope × entity) trajectories
-                              // exist) so we don't show a misleading
-                              // all-topics / all-platforms delta in
-                              // a scoped table.
-                              const change =
-                                prominenceTopic || landscapePlatform
-                                  ? null
-                                  : c.is_subject
-                                    ? changeFromTrajectory(
-                                        data.trajectory.ai_recall,
-                                      )
-                                    : changeFromTrajectory(
-                                        data.competitor_trajectories.find(
-                                          (ct) => ct.name === c.name,
-                                        )?.mention_rate,
-                                    );
-                              const position = currentPosition({
-                                mention_rate: c.sov,
-                                is_subject: c.is_subject,
-                                is_leader: c.name === leaderName,
-                                leader_mention_rate: leaderSov,
-                              });
-                              const trend = trendVerdict(change);
-                              return (
-                                <tr
-                                  key={c.name}
-                                  // Subject row gets a stronger
-                                  // emphasis stack so the eye lands
-                                  // on it first: doubled background
-                                  // tint, left accent border (primary
-                                  // tone, 2px), and a bolder font
-                                  // weight on the entity name itself.
-                                  // The earlier subtle bg-primary/[0.04]
-                                  // alone disappeared into the row
-                                  // stripe alternation and was easy to
-                                  // miss at a glance.
-                                  className={`border-b border-border/30 last:border-0 text-[14px] ${c.is_subject ? "bg-primary/[0.08] border-l-2 border-l-primary/50" : ""}`}
-                                >
-                                  <td className="py-3.5 pr-4 font-medium text-foreground">
-                                    <span className="inline-flex items-center gap-2">
-                                      <span
-                                        className={
-                                          c.is_subject
-                                            ? "font-semibold"
-                                            : undefined
-                                        }
-                                      >
-                                        {c.name}
-                                      </span>
-                                      {c.is_subject && (
-                                        <Pill tone="primary">Selected</Pill>
-                                      )}
-                                    </span>
-                                  </td>
-                                  <td className="py-3.5 px-3 text-right tabular-nums text-foreground/85">
-                                    {Math.round(c.sov * 100)}%
-                                  </td>
-                                  {/* Avg position renders plain —
-                                      the red-warning-triangle
-                                      treatment for ranks ≥5 made
-                                      ordinary later-rank values
-                                      read as errors. Lower rank
-                                      is just less-prominent, not a
-                                      data-quality issue. */}
-                                  <td className="py-3.5 px-3 text-right tabular-nums text-foreground/85">
-                                    {c.avg_rank === null
-                                      ? "—"
-                                      : c.avg_rank.toFixed(1)}
-                                  </td>
-                                  <td className="py-3.5 px-3 text-right tabular-nums text-foreground/85">
-                                    {Math.round(c.first_mention_rate * 100)}%
-                                  </td>
-                                  <td className="py-3.5 px-3 text-right tabular-nums">
-                                    {change === null ? (
-                                      <span className="text-muted-foreground">
-                                        —
-                                      </span>
-                                    ) : (
-                                      <span
-                                        className={`font-semibold ${deltaToneClass(change)}`}
-                                      >
-                                        {formatSignedPpRaw(change)}
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="py-3.5 px-3 text-right whitespace-nowrap">
-                                    <Pill tone={position.tone}>
-                                      {position.label}
-                                    </Pill>
-                                  </td>
-                                  <td className="py-3.5 pl-3 text-right whitespace-nowrap">
-                                    <Pill tone={trend.tone}>
-                                      {trend.label}
-                                    </Pill>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      );
-                    })()}
-                  </div>
-                </Card>
-              </section>
 
               {/* ── 04. COMPETITIVE WINS & LOSSES ────────────────── */}
               {/* Head-to-head comparisons. Hidden from the public
@@ -2143,7 +2216,7 @@ export default async function CompetitionPage({
                 </section>
               )}
 
-              {/* ── 05. CO-MENTIONS ──────────────────────────────── */}
+              {/* ── 04. CO-MENTIONS — "Who shares the stage?" ─────── */}
               <section id="co-mentions" className="scroll-mt-28">
                 <SectionTitle
                   eyebrow="Co-Mentions"
