@@ -1437,6 +1437,80 @@ function PlatformBreakdownStrip({
   );
 }
 
+// Monotone cubic interpolation (Fritsch-Carlson) → cubic-Bezier SVG
+// path. Used by MiniSpark to draw smooth-but-monotone curves between
+// snapshots. Why this curve type:
+//   - cardinal / Catmull-Rom splines look smoother but can overshoot
+//     local extremes, which on a 0..100% rate sparkline produces a
+//     curve briefly dipping below 0 or peaking above 100 — wrong
+//     even though the dataset can't reach those values.
+//   - monotone cubic guarantees the curve passes through every data
+//     point AND never overshoots — slopes at each point are clipped
+//     when they'd cause a local max or min to be violated.
+//
+// Algorithm:
+//   1. Slopes between adjacent points: k[i] = (y[i+1]−y[i])/(x[i+1]−x[i])
+//   2. Initial tangents: average of neighboring slopes (interior)
+//      and one-sided slopes at endpoints. Set to 0 when adjacent
+//      slopes have opposite signs (extremum point).
+//   3. Fritsch-Carlson constraint: if the unit-circle-like measure
+//      a²+b² > 9 (where a, b are tangent/slope ratios), scale the
+//      pair down by τ = 3/√(a²+b²) so monotonicity is preserved.
+//   4. Convert each tangent pair to cubic Bezier control points
+//      one-third of the way along each segment.
+//
+// Returns "" for empty input, "M x,y" for a single point, a linear
+// path for two points (a cubic spline needs ≥3 points to compute
+// neighbor-aware tangents).
+function buildMonoCubicPath(points: { x: number; y: number }[]): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) {
+    return `M${points[0].x},${points[0].y}`;
+  }
+  if (points.length === 2) {
+    return `M${points[0].x},${points[0].y}L${points[1].x},${points[1].y}`;
+  }
+  const n = points.length;
+  const dx: number[] = new Array(n - 1);
+  const k: number[] = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) {
+    dx[i] = points[i + 1].x - points[i].x;
+    k[i] = (points[i + 1].y - points[i].y) / (dx[i] || 1);
+  }
+  const m: number[] = new Array(n);
+  m[0] = k[0];
+  m[n - 1] = k[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    m[i] = k[i - 1] * k[i] <= 0 ? 0 : (k[i - 1] + k[i]) / 2;
+  }
+  // Fritsch-Carlson monotone clamp.
+  for (let i = 0; i < n - 1; i++) {
+    if (k[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / k[i];
+    const b = m[i + 1] / k[i];
+    const h = a * a + b * b;
+    if (h > 9) {
+      const tau = 3 / Math.sqrt(h);
+      m[i] = tau * a * k[i];
+      m[i + 1] = tau * b * k[i];
+    }
+  }
+  let d = `M${points[0].x},${points[0].y}`;
+  for (let i = 0; i < n - 1; i++) {
+    const t = dx[i] / 3;
+    const x1 = points[i].x + t;
+    const y1 = points[i].y + m[i] * t;
+    const x2 = points[i + 1].x - t;
+    const y2 = points[i + 1].y - m[i + 1] * t;
+    d += ` C${x1},${y1} ${x2},${y2} ${points[i + 1].x},${points[i + 1].y}`;
+  }
+  return d;
+}
+
 function MiniSpark({
   values,
   isHistorical,
@@ -1505,26 +1579,34 @@ function MiniSpark({
   const yFor = (v: number | null) =>
     v === null ? null : h - pad - ((v - plotMin) / range) * (h - pad * 2);
 
-  // Build path; emit M (move) instead of L (line-to) after a null
-  // so the line breaks at gaps. Prior implementation only skipped
-  // nulls — which connected the surrounding non-null points
-  // directly, visually drawing a line THROUGH points that should
-  // be gaps (e.g., a snapshot whose analyzer crashed and produced
-  // a null reading). The break makes "no measurement here" read
-  // as discontinuity.
-  const path: string[] = [];
-  let lastWasNull = false;
+  // Build path with monotone cubic interpolation (Fritsch-Carlson) so
+  // the line reads as a smooth curve between snapshots instead of
+  // straight zigzag segments. Monotone cubic was picked over a
+  // standard cardinal spline because it GUARANTEES the curve never
+  // overshoots local minima or maxima — important for rate metrics
+  // (0..100%) where a cardinal-curve dip below 0 or rise above 100
+  // would look wrong even though the dataset can't actually take
+  // those values.
+  //
+  // Null-gap handling is preserved: contiguous runs of measured
+  // values are smoothed independently and joined by SVG `M` moves
+  // so a null still reads as a discontinuity (snapshot whose
+  // analyzer crashed shouldn't appear connected to its neighbors).
+  const measuredRuns: { x: number; y: number }[][] = [];
+  let currentRun: { x: number; y: number }[] = [];
   values.forEach((v, i) => {
     const y = yFor(v);
     if (y === null) {
-      lastWasNull = true;
+      if (currentRun.length > 0) {
+        measuredRuns.push(currentRun);
+        currentRun = [];
+      }
       return;
     }
-    const x = pad + i * step;
-    const needsMove = path.length === 0 || lastWasNull;
-    path.push(needsMove ? `M${x},${y}` : `L${x},${y}`);
-    lastWasNull = false;
+    currentRun.push({ x: pad + i * step, y });
   });
+  if (currentRun.length > 0) measuredRuns.push(currentRun);
+  const path: string[] = measuredRuns.map(buildMonoCubicPath);
 
   // Axis labels live as HTML overlays (not SVG <text>) because the
   // SVG uses preserveAspectRatio="none" to stretch the line full
