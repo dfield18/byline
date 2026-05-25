@@ -1529,6 +1529,31 @@ export default async function CompetitionPage({
                         </p>
                       );
                     })()}
+                    {/* Filter-not-applied advisory — the snapshot-diff
+                        chip strip below + the KPI sparkline/delta
+                        treatments both read from the full unfiltered
+                        trajectory feed (no per-(topic × entity) or
+                        per-(platform × entity) trajectory data is
+                        shipped today). When the user has scoped to a
+                        topic or platform, the snapshot diff and the
+                        KPI deltas describe all-snapshot motion, not
+                        the scoped slice. Surfacing the warning here
+                        matches the same advisory pattern used by
+                        the Trend chart (~L2337) and Co-Mentions
+                        (~L2491) so the user can tell scoped sections
+                        from unscoped ones at a glance instead of
+                        silently reading filtered framing across
+                        unfiltered numbers. */}
+                    {hasAnyFilter && (
+                      <div className="mt-3 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[12.5px] leading-relaxed text-muted-foreground">
+                        <span className="font-semibold text-foreground/85">
+                          Filters not applied:
+                        </span>{" "}
+                        Trajectory deltas + sparklines below aren&apos;t
+                        yet broken down by ({filterAdvisoryText}) —
+                        showing the all-snapshot view.
+                      </div>
+                    )}
                     {/* Snapshot-diff strip — surfaces ≥5pp movers since
                         the start of the trajectory window so a reader
                         sees the action layer ("Vance +8 pts · Rubio
