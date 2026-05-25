@@ -1305,14 +1305,15 @@ export default async function VisibilityPage({
                   <div className="mt-8 border-t border-border/50 pt-6">
                     <div className="mb-3">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/55 inline-flex items-center gap-1">
-                        Current Platform Snapshot
+                        Mention rate by platform AND topic
                         <KpiTooltipIcon
-                          text="Mention rate for each AI platform on each tracked topic — share of that platform's monitored prompts in this topic area where the subject was mentioned. Amber cells flag gaps (<30%); calm cells are at strong coverage (≥60%)."
+                          text="Each cell = % of that platform's monitored prompts ON THAT TOPIC where the subject was mentioned. Amber cells flag gaps (<30%); calm cells are at strong coverage (≥60%). The Platform Change Detail table below aggregates these cells per platform across ALL topics — that's why the same platform can read 50% on a single topic here and 80% overall below."
                           align="left"
                         />
                       </div>
                       <p className="mt-1 text-[12.5px] text-muted-foreground">
-                        Current mention rate by platform and topic.
+                        Each cell = % of answers <span className="font-medium text-foreground/75">on that topic</span> (per platform) that mention {data.subject_name}.
+                        The all-topics rollup lives in the table below.
                       </p>
                     </div>
                     <div className="overflow-x-auto">
@@ -1648,9 +1649,16 @@ export default async function VisibilityPage({
                             </th>
                             <th className="py-2.5 px-3 text-right font-semibold">
                               <span className="inline-flex items-center justify-end gap-1">
-                                Mention Rate
+                                Mention Rate{" "}
+                                <span className="font-normal lowercase text-foreground/55">
+                                  {topic ? "(on this topic)" : "(all topics)"}
+                                </span>
                                 <KpiTooltipIcon
-                                  text="Share of this platform's monitored prompts where the subject was mentioned."
+                                  text={
+                                    topic
+                                      ? "Share of this platform's monitored prompts ON THE SELECTED TOPIC where the subject was mentioned."
+                                      : "Overall mention rate across ALL tracked topics, per platform. The Current Platform Snapshot heatmap above breaks this down by topic — the all-topics number here aggregates those cells per platform (so a per-topic 50% cell and an all-topics 80% row for the same platform are different granularities, not a conflict)."
+                                  }
                                   align="right"
                                   direction="below"
                                 />
