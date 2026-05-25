@@ -48,35 +48,24 @@ def _latest_per_column_sql(col: str) -> str:
 # ─── subject + refresh queries ─────────────────────────────────────────
 
 
-def _is_operator_org(org_id: str | None) -> bool:
-    """True when the caller's Clerk org_id matches BYLINE_OPERATOR_ORG_ID
-    in the environment. Operator orgs get a relaxed scope on the read
-    paths: they can see NULL-org subjects (seed/operator-owned content)
-    in addition to their own org's subjects. Single-tenant for now —
-    one operator org per deployment, configured via env."""
-    import os
-    if not org_id:
-        return False
-    configured = os.environ.get("BYLINE_OPERATOR_ORG_ID", "").strip()
-    return bool(configured) and org_id == configured
-
-
 def list_subjects(org_id: str | None = None) -> list[dict[str, Any]]:
     """All subjects with category, refresh count, latest refresh metadata,
     and a couple of cross-analyzer signals for the index view.
 
     Multi-tenancy:
-      - org_id=None: no scoping. Operator path used by Streamlit.
-      - org_id is the operator's: relaxed scope — own org + NULL-org
-        seed subjects all visible (Option A: operator-bypass).
-      - org_id is any other customer's: strict scope to that org only.
+      - org_id=None: no scoping. Operator/Streamlit path — sees every
+        org's subjects. Bypasses tenancy entirely; only used by the
+        internal Streamlit dashboard and the worker's precompute step.
+      - org_id is set: strict scope to that org's subjects only.
+
+    Migration 012 made `subjects.org_id NOT NULL`, so the prior
+    operator-bypass-via-NULL-org branch (relaxed scope that mixed in
+    seed/operator-owned content) is removed — there are no NULL-org
+    rows to mix in anymore.
     """
     if org_id is None:
         where_clause = ""
         params: tuple = ()
-    elif _is_operator_org(org_id):
-        where_clause = "WHERE (s.org_id = %s OR s.org_id IS NULL)"
-        params = (org_id,)
     else:
         where_clause = "WHERE s.org_id = %s"
         params = (org_id,)
@@ -121,10 +110,9 @@ def get_subject(
 ) -> dict[str, Any] | None:
     """Subject + setup_inputs + all refreshes for it.
 
-    Multi-tenancy (same three cases as list_subjects):
+    Multi-tenancy (same two cases as list_subjects):
       - org_id=None: no scoping (operator/Streamlit path).
-      - org_id is the operator's: own org + NULL-org seed subjects.
-      - any other org: strict scope, returns None for foreign subjects.
+      - org_id is set: strict scope, returns None for foreign subjects.
     """
     with get_cursor(commit=False) as cur:
         if org_id is None:
@@ -134,13 +122,6 @@ def get_subject(
                 JOIN categories c ON c.id = s.category_id
                 WHERE s.id = %s
             """, (subject_id,))
-        elif _is_operator_org(org_id):
-            cur.execute("""
-                SELECT s.id, s.name, c.slug, s.setup_inputs, s.created_at
-                FROM subjects s
-                JOIN categories c ON c.id = s.category_id
-                WHERE s.id = %s AND (s.org_id = %s OR s.org_id IS NULL)
-            """, (subject_id, org_id))
         else:
             cur.execute("""
                 SELECT s.id, s.name, c.slug, s.setup_inputs, s.created_at
@@ -2663,16 +2644,12 @@ def get_subject_overview(
     org_id filter: if set, returns None when the subject doesn't belong
     to that org. If None, no scoping (operator mode).
     """
-    # Three-case scoping, mirroring get_subject:
-    #   org_id None      → no filter (Streamlit path)
-    #   operator org     → own org + NULL-org seed subjects
-    #   any other org    → strict to that org
+    # Two-case scoping, mirroring get_subject:
+    #   org_id None  → no filter (Streamlit / operator path)
+    #   org_id set   → strict to that org
     if org_id is None:
         where_subject_org = "WHERE s.id = %s"
         subject_params: tuple = (subject_id,)
-    elif _is_operator_org(org_id):
-        where_subject_org = "WHERE s.id = %s AND (s.org_id = %s OR s.org_id IS NULL)"
-        subject_params = (subject_id, org_id)
     else:
         where_subject_org = "WHERE s.id = %s AND s.org_id = %s"
         subject_params = (subject_id, org_id)
@@ -3174,19 +3151,11 @@ def get_prompt_responses_for_subject(
     """
     with get_cursor(commit=False) as cur:
         # Verify the subject exists and is visible to this caller.
-        # Mirrors get_subject's three-case org check.
+        # Mirrors get_subject's two-case org check.
         if org_id is None:
             cur.execute(
                 "SELECT id FROM subjects WHERE id = %s",
                 (subject_id,),
-            )
-        elif _is_operator_org(org_id):
-            cur.execute(
-                """
-                SELECT id FROM subjects
-                WHERE id = %s AND (org_id = %s OR org_id IS NULL)
-                """,
-                (subject_id, org_id),
             )
         else:
             cur.execute(
