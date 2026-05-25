@@ -15,7 +15,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
-import { Card, SectionTitle, Pill, KpiGauge } from "@/components/dashboard/ui";
+import { Card, SectionTitle, KpiGauge } from "@/components/dashboard/ui";
 import { CompetitiveScatter } from "./CompetitiveScatter";
 import { TopicProminenceFilter } from "./TopicProminenceFilter";
 import { LandscapePlatformFilter } from "./LandscapePlatformFilter";
@@ -134,49 +134,7 @@ function deltaToneClass(v: number | null | undefined): string {
   return v > 0 ? "text-success" : "text-warning";
 }
 
-// Status-pill semantics mirrored from the Visibility spoke's
-// `platformStatus` helper so the Strong / Mixed / Weak verdict
-// reads the same across both tables.
-//
-// Revised in this round to surface six descriptive states (Dominant,
-// Strong visibility, Visible but late, Low visibility, Emerging,
-// Declining) instead of the prior Strong / Mixed / Weak. The earlier
-// scheme rendered "Mixed" for almost every row at this competitive
-// snapshot, so the column carried no information. The new states
-// combine SoV + first-mention + avg position + temporal change so
-// each row reads as a distinct verdict.
-// Replaced the prior single-column `entityStatus` (which mixed
-// position-based verdicts with temporal ones) with two orthogonal
-// columns: Current Position and Trend. Splitting them keeps the
-// table honest — a Leader can be Declining, a Mid-tier entity can
-// be Rising. Conflating the two into one verdict hid the cross-
-// product.
 type StatusTone = "success" | "warning" | "primary" | "neutral";
-function currentPosition(row: {
-  mention_rate: number | null;
-  is_subject?: boolean;
-  is_leader: boolean;
-  leader_mention_rate: number | null;
-}): { label: string; tone: StatusTone } {
-  if (row.mention_rate === null) {
-    return { label: "Insufficient data", tone: "neutral" };
-  }
-  if (row.is_leader) {
-    return { label: "Leader", tone: "success" };
-  }
-  const leader = row.leader_mention_rate;
-  if (leader === null || leader <= 0) {
-    return { label: "Mid-tier", tone: "primary" };
-  }
-  const ratio = row.mention_rate / leader;
-  if (ratio >= 0.6) {
-    return { label: "Challenger", tone: "primary" };
-  }
-  if (ratio >= 0.25) {
-    return { label: "Mid-tier", tone: "primary" };
-  }
-  return { label: "Low visibility", tone: "warning" };
-}
 
 function trendVerdict(deltaPp: number | null | undefined): {
   label: string;
@@ -218,6 +176,56 @@ function changeFromTrajectory(arr: (number | null)[] | undefined): number | null
   const pri = arr[endpoints[0]];
   if (cur === null || pri === null) return null;
   return (cur - pri) * 100;
+}
+
+// Inline SVG sparkline sized to fit the bottom of a KPI tile. Matches
+// the Overview Vitals TinySpark visually (~22px tall, asymmetric pad
+// 40/15 so flat lines don't graze the floor). Connects only adjacent
+// finite points and renders nothing when fewer than two finite values
+// exist — preserves vertical rhythm via the parent's reserved slot.
+function TinySpark({
+  values,
+  color = "var(--primary)",
+}: {
+  values: (number | null)[];
+  color?: string;
+}) {
+  const numeric = values.filter(
+    (v): v is number => v !== null && Number.isFinite(v),
+  );
+  if (numeric.length < 2) return null;
+  const dataMin = Math.min(...numeric);
+  const dataMax = Math.max(...numeric);
+  const rawRange = dataMax - dataMin || 1;
+  const plotMin = dataMin - rawRange * 0.4;
+  const plotMax = dataMax + rawRange * 0.15;
+  const range = plotMax - plotMin || 1;
+  const w = 120;
+  const h = 22;
+  const pad = 2;
+  const step = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
+  const path: string[] = [];
+  let lastWasNull = false;
+  values.forEach((v, i) => {
+    if (v === null || !Number.isFinite(v)) {
+      lastWasNull = true;
+      return;
+    }
+    const x = pad + i * step;
+    const y = h - pad - ((v - plotMin) / range) * (h - pad * 2);
+    path.push(path.length === 0 || lastWasNull ? `M${x},${y}` : `L${x},${y}`);
+    lastWasNull = false;
+  });
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      className="w-full h-[22px]"
+      aria-hidden
+    >
+      <path d={path.join(" ")} fill="none" stroke={color} strokeWidth={1.5} />
+    </svg>
+  );
 }
 
 type WhatChangedDelta = {
@@ -1061,7 +1069,60 @@ export default async function CompetitionPage({
     gaugeBenchmark: number | null;
     caption: string | null;
     anchor?: string;
+    // Pp change between the first and last measured value in the
+    // KPI's trajectory. Null when no trajectory or fewer than two
+    // measured points. Polarity determines tone (success/warning).
+    deltaPp?: number | null;
+    // Sparkline values aligned to data.trajectory.weeks. Null = no
+    // sparkline (skipped slot still consumes the same vertical space
+    // via the mt-auto footer so baselines align across tiles).
+    sparkValues?: (number | null)[] | null;
   };
+
+  // Trajectory + delta inputs for the four Standing KPI tiles.
+  // Card 1 (Competitive Rank): subject's SoV trajectory — the
+  // underlying metric the rank is computed from. Rank trajectories
+  // invert the y-axis ("lower = better") and read backwards in a
+  // sparkline; showing SoV directly keeps the read intuitive
+  // (sparkline rising = subject gaining share = rank likely
+  // improving).
+  const competitiveRankSpark = data.trajectory.share_of_voice;
+  const competitiveRankDelta = changeFromTrajectory(competitiveRankSpark);
+  // Card 2 (Top Competitor): gap = subject SoV − current top
+  // competitor's SoV, pinned to whoever holds top-competitor today.
+  // Trajectory is per-week so a reader can see whether the gap to
+  // their CURRENT nearest rival is closing or widening — different
+  // question from "who was nearest in the past" (the name itself
+  // could have changed snapshot to snapshot).
+  const topCompetitorTrajectory =
+    topCompetitorName !== null
+      ? data.competitor_trajectories.find((c) => c.name === topCompetitorName)
+          ?.share_of_voice ?? null
+      : null;
+  const topCompetitorGapSpark: (number | null)[] | null = topCompetitorTrajectory
+    ? data.trajectory.share_of_voice.map((sv, i) => {
+        const rv = topCompetitorTrajectory[i];
+        if (sv === null || rv === null || rv === undefined) return null;
+        return sv - rv;
+      })
+    : null;
+  const topCompetitorGapDelta = changeFromTrajectory(
+    topCompetitorGapSpark ?? undefined,
+  );
+  // Card 4 (Strongest Topic): mention-rate trajectory for whichever
+  // topic is strongest TODAY (pinned by label, so a reader sees how
+  // that topic has trended — distinct from "what was my strongest
+  // topic last week"). Null when the topic isn't present in
+  // topic_trajectories (e.g. newly-added topic).
+  const strongestTopicSpark = strongestTopic
+    ? data.topic_trajectories.find(
+        (t) => t.label === strongestTopic.topic_label,
+      )?.mention_rate ?? null
+    : null;
+  const strongestTopicDelta = changeFromTrajectory(
+    strongestTopicSpark ?? undefined,
+  );
+
   const competitionKpis: CompetitionKpi[] = [
     {
       label: "Competitive Rank",
@@ -1085,9 +1146,14 @@ export default async function CompetitionPage({
           ? `${Math.round((subjectEntity?.sov ?? 0) * 100)}% Share of Voice`
           : null,
       anchor: "ranking-table",
+      // SoV-based read for the rank tile: rising SoV is success,
+      // falling is warning — matches the polarity ("lower rank
+      // better" is the headline, but the spark visualizes SoV).
+      deltaPp: competitiveRankDelta,
+      sparkValues: competitiveRankSpark,
     },
     {
-      label: "Top Competitor",
+      label: "Closest Rival",
       value: topCompetitorName ?? "—",
       // Caption framed from the SUBJECT'S perspective ("Newsom
       // leads by N", "Newsom trails by N") so it lines up with the
@@ -1138,6 +1204,10 @@ export default async function CompetitionPage({
           : `${data.subject_name} trails by ${Math.abs(topCompetitorGapPp)} SoV pts`;
       })(),
       anchor: "landscape",
+      // Gap trajectory: positive delta = subject pulling away from
+      // the rival (success); negative = rival closing in (warning).
+      deltaPp: topCompetitorGapDelta,
+      sparkValues: topCompetitorGapSpark,
     },
     {
       label: "Topic Win Rate",
@@ -1204,6 +1274,10 @@ export default async function CompetitionPage({
       gaugeBenchmark: null,
       caption: null,
       anchor: "landscape",
+      // Trajectory pinned to the CURRENT strongest topic's label
+      // (so the spark answers "how has this topic been trending?").
+      deltaPp: strongestTopicDelta,
+      sparkValues: strongestTopicSpark,
     },
   ];
 
@@ -1228,6 +1302,32 @@ export default async function CompetitionPage({
       ? capitalizeFirst(prominenceTopic).toLowerCase()
       : null,
   });
+
+  // Snapshot-diff strip data for the Standing band. Reuses the same
+  // composer the Trend section uses, but with SoV trajectories swapped
+  // in (the composer is field-agnostic, it just reads `mention_rate`
+  // off each competitor row). SoV is the right axis here because the
+  // Standing band is anchored on the SoV-sorted ranking table; using
+  // mention-rate would surface a different mover set than the table.
+  // Full-trajectory window (not the user-selected trend slice) so the
+  // strip describes "across recorded history" — matches the
+  // Visibility spoke's What-Changed sidebar convention.
+  const competitorSovTrajectories = data.competitor_trajectories.map(
+    (c) => ({ ...c, mention_rate: c.share_of_voice }),
+  );
+  const snapshotDiff = composeCompetitionWhatChanged({
+    trajectoryWeeks: data.trajectory.weeks,
+    aiRecall: data.trajectory.share_of_voice,
+    competitorTrajectories: competitorSovTrajectories,
+  });
+  // Relabel the "Overall mention rate" entry to the subject's name +
+  // SoV framing — clearer in the Standing context than the generic
+  // overall label the Trend section uses.
+  const snapshotDiffDeltas = snapshotDiff.deltas.map((d) =>
+    d.kind === "overall"
+      ? { ...d, label: `${data.subject_name} SoV` }
+      : d,
+  );
 
   // Inline advisory used on sections that genuinely CAN'T scope on
   // the active filters (Trend chart's competitor lines, Co-Mentions
@@ -1393,6 +1493,74 @@ export default async function CompetitionPage({
                         </p>
                       );
                     })()}
+                    {/* Snapshot-diff strip — surfaces ≥5pp movers since
+                        the start of the trajectory window so a reader
+                        sees the action layer ("Vance +8 pts · Rubio
+                        −5 pts") right under the Bottom Line. Hidden
+                        when the composer found no movers (≥5pp filter
+                        applies, so micro-jitter doesn't leak in) and
+                        no overall delta cleared the 1pp floor either —
+                        rendering an empty "What changed" eyebrow would
+                        read as a UI bug, not a "nothing changed"
+                        signal. */}
+                    {snapshotDiffDeltas.length > 0 && (() => {
+                      const fmt = (iso: string | null): string | null => {
+                        if (!iso) return null;
+                        const d = new Date(iso);
+                        return Number.isNaN(d.getTime())
+                          ? null
+                          : d.toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                            });
+                      };
+                      const priorStr = fmt(snapshotDiff.priorDate);
+                      const latestStr = fmt(snapshotDiff.latestDate);
+                      const eyebrow =
+                        priorStr && latestStr
+                          ? `What changed · ${priorStr} → ${latestStr}`
+                          : latestStr
+                            ? `What changed · since ${latestStr}`
+                            : "What changed";
+                      return (
+                        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+                          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-muted-foreground/80">
+                            {eyebrow}
+                          </span>
+                          {snapshotDiffDeltas.map((d, idx) => {
+                            const up = d.deltaPp > 0;
+                            const down = d.deltaPp < 0;
+                            // Tone uniform across kinds (subject + competitor):
+                            // positive delta = success, negative = warning. SoV
+                            // is a "higher is better" metric for any tracked
+                            // entity from THAT entity's perspective, so we paint
+                            // raw direction. The Bottom Line sentence carries
+                            // any from-the-subject's-perspective framing.
+                            const tone = up
+                              ? "text-success bg-success/[0.08] border-success/30"
+                              : down
+                                ? "text-warning bg-warning/[0.08] border-warning/30"
+                                : "text-muted-foreground bg-muted/40 border-border/40";
+                            return (
+                              <span
+                                key={`${d.kind}-${d.label}-${idx}`}
+                                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11.5px] tabular-nums ${tone}`}
+                              >
+                                <span aria-hidden>
+                                  {up ? "↑" : down ? "↓" : "·"}
+                                </span>
+                                <span className="font-medium text-foreground/85">
+                                  {d.label}
+                                </span>
+                                <span className="font-semibold">
+                                  {formatSignedPpRaw(d.deltaPp)}
+                                </span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="relative mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
                     {competitionKpis.map((k) => {
@@ -1432,6 +1600,32 @@ export default async function CompetitionPage({
                                 {k.valueSuffix}
                               </span>
                             )}
+                            {/* Pp delta vs first measured point in
+                                the trajectory window. All three
+                                metrics carried here (subject SoV,
+                                gap-to-rival, topic mention rate)
+                                share the convention positive=better,
+                                so the tone rule is uniform across
+                                tiles without per-tile polarity
+                                inversion. */}
+                            {k.deltaPp !== null &&
+                              k.deltaPp !== undefined &&
+                              Number.isFinite(k.deltaPp) && (
+                                <span
+                                  className={`text-[12px] font-medium tabular-nums ${
+                                    k.deltaPp > 0
+                                      ? "text-success"
+                                      : k.deltaPp < 0
+                                        ? "text-warning"
+                                        : "text-muted-foreground"
+                                  }`}
+                                  aria-label={`Change vs start of window: ${k.deltaPp > 0 ? "up" : k.deltaPp < 0 ? "down" : "no change"} ${Math.abs(Math.round(k.deltaPp))} points`}
+                                  title="vs start of trend window"
+                                >
+                                  {k.deltaPp > 0 ? "↑" : k.deltaPp < 0 ? "↓" : ""}
+                                  {Math.abs(Math.round(k.deltaPp))} pts
+                                </span>
+                              )}
                           </div>
                           {k.gaugeValue !== null &&
                             Number.isFinite(k.gaugeValue) && (
@@ -1445,14 +1639,34 @@ export default async function CompetitionPage({
                               </div>
                             )}
                           {/* Standalone caption only when the gauge
-                              isn't consuming it (no-gauge tiles like
-                              Top Competitor / Strongest Topic). */}
-                          {k.caption && k.gaugeValue === null && (
-                            <div
-                              className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug line-clamp-2"
-                              title={k.caption}
-                            >
-                              {k.caption}
+                              isn't consuming it AND no sparkline is
+                              showing in the footer (sparkline takes
+                              priority on no-gauge tiles since the
+                              spark already conveys magnitude over
+                              time; the caption would then duplicate
+                              the headline + caption pair already
+                              above the spark). */}
+                          {k.caption &&
+                            k.gaugeValue === null &&
+                            !(k.sparkValues && k.sparkValues.length > 0) && (
+                              <div
+                                className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug line-clamp-2"
+                                title={k.caption}
+                              >
+                                {k.caption}
+                              </div>
+                            )}
+                          {/* Sparkline footer — mt-auto pushes it to
+                              the tile floor so baselines align across
+                              all four tiles (matches Overview Vitals).
+                              Color matches the gauge fill / value tone
+                              when set, falling back to primary. */}
+                          {k.sparkValues && k.sparkValues.length > 0 && (
+                            <div className="mt-auto pt-3">
+                              <TinySpark
+                                values={k.sparkValues}
+                                color={gaugeFill}
+                              />
                             </div>
                           )}
                         </>
@@ -1530,14 +1744,6 @@ export default async function CompetitionPage({
                               data.trajectory.ai_recall,
                             )
                           : null;
-                      const subjectPosition = subjectRow
-                        ? currentPosition({
-                            mention_rate: subjectRow.sov,
-                            is_subject: true,
-                            is_leader: subjectRow.name === leaderName,
-                            leader_mention_rate: leaderSov,
-                          })
-                        : null;
                       const peerRows = sortedAll.filter(
                         (r) => !r.is_subject,
                       );
@@ -1587,11 +1793,10 @@ export default async function CompetitionPage({
                                 lets the col widths govern instead
                                 of auto-layout. */}
                             <colgroup>
-                              <col style={{ width: "26%" }} />
-                              <col style={{ width: "32%" }} />
-                              <col style={{ width: "12%" }} />
-                              <col style={{ width: "16%" }} />
+                              <col style={{ width: "30%" }} />
+                              <col style={{ width: "36%" }} />
                               <col style={{ width: "14%" }} />
+                              <col style={{ width: "20%" }} />
                             </colgroup>
                             <thead>
                               <tr className="border-b border-border/60 text-[10.5px] uppercase tracking-[0.06em] text-foreground/65">
@@ -1625,21 +1830,11 @@ export default async function CompetitionPage({
                                     />
                                   </span>
                                 </th>
-                                <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">
+                                <th className="py-3 pl-3 text-right font-semibold whitespace-nowrap">
                                   <span className="inline-flex items-center justify-end gap-1">
                                     First Mention Rate
                                     <KpiTooltipIcon
                                       text="Share of responses where this entity was AI's first-named entity (rank #1). Pole-position visibility — different from Share, which counts any mention regardless of rank."
-                                      align="right"
-                                      direction="below"
-                                    />
-                                  </span>
-                                </th>
-                                <th className="py-3 pl-3 text-right font-semibold whitespace-nowrap">
-                                  <span className="inline-flex items-center justify-end gap-1">
-                                    Status
-                                    <KpiTooltipIcon
-                                      text="Where this entity sits in the comparison set today, by share of voice. Leader = highest share. Challenger ≥60% of the leader's share. Mid-tier ≥25%. Low visibility below that."
                                       align="right"
                                       direction="below"
                                     />
@@ -1659,7 +1854,7 @@ export default async function CompetitionPage({
                                   aligns vertically — a reader can
                                   drop straight down from the
                                   subject's value to any peer's. */}
-                              {subjectRow && subjectPosition && (
+                              {subjectRow && (
                                 <tr className="border-b border-border/30 text-[14px] text-foreground bg-primary/[0.08] border-l-2 border-l-primary/50">
                                   <td className="py-3.5 pr-4 font-semibold">
                                     {subjectRow.name}
@@ -1700,13 +1895,8 @@ export default async function CompetitionPage({
                                       ? "—"
                                       : subjectRow.avg_rank.toFixed(1)}
                                   </td>
-                                  <td className="py-3.5 px-3 text-right tabular-nums font-medium">
+                                  <td className="py-3.5 pl-3 text-right tabular-nums font-medium">
                                     {Math.round(subjectRow.first_mention_rate * 100)}%
-                                  </td>
-                                  <td className="py-3.5 pl-3 text-right whitespace-nowrap">
-                                    <Pill tone={subjectPosition.tone}>
-                                      {subjectPosition.label}
-                                    </Pill>
                                   </td>
                                 </tr>
                               )}
@@ -1719,12 +1909,6 @@ export default async function CompetitionPage({
                                           (ct) => ct.name === c.name,
                                         )?.mention_rate,
                                       );
-                                const position = currentPosition({
-                                  mention_rate: c.sov,
-                                  is_subject: false,
-                                  is_leader: c.name === leaderName,
-                                  leader_mention_rate: leaderSov,
-                                });
                                 return (
                                   <tr
                                     key={c.name}
@@ -1782,13 +1966,8 @@ export default async function CompetitionPage({
                                         ? "—"
                                         : c.avg_rank.toFixed(1)}
                                     </td>
-                                    <td className="py-3.5 px-3 text-right tabular-nums">
+                                    <td className="py-3.5 pl-3 text-right tabular-nums">
                                       {Math.round(c.first_mention_rate * 100)}%
-                                    </td>
-                                    <td className="py-3.5 pl-3 text-right whitespace-nowrap">
-                                      <Pill tone={position.tone}>
-                                        {position.label}
-                                      </Pill>
                                     </td>
                                   </tr>
                                 );
