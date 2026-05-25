@@ -154,6 +154,49 @@ function KpiTooltipIcon({
 // genuinely warrant attention rather than as a default for "risk"
 // metrics (the prior behavior, which painted Risk Frame Rate orange
 // even at 0%).
+
+// ─── Named strength thresholds ──────────────────────────────────────
+//
+// The KPI tile color rule is: the big VALUE is colored by absolute
+// strength tier (success / neutral / warning); the ↑/↓ DELTA below
+// it is colored by direction. A strong value that's slipping reads
+// as green-number + red-arrow ("strong but losing ground") — and
+// that's the intended signal. Without this split, a steep decline
+// (e.g. a 50pt drop) hides behind a green number when the absolute
+// level is still high, and comms readers scan past the trend.
+//
+// Constants here are the SOURCE OF TRUTH for "strong / moderate /
+// weak" on the Overview spoke. For `mention_rate`, values match
+// the Visibility spoke's `STATUS_STRONG_MENTION_RATE` /
+// `STATUS_WEAK_MENTION_RATE` (visibility/page.tsx:183-185) so the
+// product is internally consistent — "strong" on the Visibility
+// platform pills means the same thing as "strong" on the Overview
+// KPI tile.
+
+// Mention rate — 0..1, higher better. Mirrors Visibility status
+// pills exactly. A 50% Vance-style mention rate now lands NEUTRAL,
+// not success — refuses to celebrate "half the time" as a win.
+const KPI_STRONG_MENTION_RATE = 0.6;
+const KPI_WEAK_MENTION_RATE = 0.3;
+
+// Top-result rate — 0..1, higher better. Real-world range caps
+// lower than mention rate (top-of-mind first-rank share tops out
+// ~30-40% even for dominant subjects), so the strong floor sits
+// lower while still being aspirational, and the weak floor sits
+// higher than the old <5% so a 10% rate reads as weak (it is).
+const KPI_STRONG_TOP_RESULT_RATE = 0.5;
+const KPI_WEAK_TOP_RESULT_RATE = 0.2;
+
+// Average sentiment / favorability — −1..+1, treat SYMMETRICALLY
+// around zero (this metric is NOT a 0..1 rate; positive can be
+// "strong" in either direction relative to zero). ±10% neutral
+// band absorbs snapshot-to-snapshot noise so a -7% reading doesn't
+// fire the warning tone while a +4 pts improvement is happening
+// — the value is still inside the neutral band, the delta arrow
+// carries the directional story.
+const KPI_STRONG_AVG_TONE = 0.10;
+const KPI_WEAK_AVG_TONE = -0.10;
+
 function getKpiValueColor(
   kind:
     | "mention_rate"
@@ -168,27 +211,27 @@ function getKpiValueColor(
   if (value === null) return "text-foreground";
   switch (kind) {
     case "mention_rate":
-      // 0..1 — higher is better
-      if (value >= 0.5) return "text-success";
-      if (value < 0.2) return "text-warning";
+      // 0..1 — higher is better. Thresholds aligned with Visibility's
+      // STATUS_STRONG_MENTION_RATE (0.6) / STATUS_WEAK_MENTION_RATE
+      // (0.3) via KPI_STRONG_MENTION_RATE / KPI_WEAK_MENTION_RATE
+      // above. The 30-60% band reads as NEUTRAL — visibility that
+      // could go either way — not as success. Prior ≥50% cutoff
+      // celebrated a "half the time" mention rate as a win, which
+      // hid Vance-style steep declines (50% after a -50pt drop
+      // showed up as green).
+      if (value >= KPI_STRONG_MENTION_RATE) return "text-success";
+      if (value < KPI_WEAK_MENTION_RATE) return "text-warning";
       return "text-foreground";
     case "avg_tone":
-      // −1..+1 — positive is better, negative is worse. Color mirrors
-      // the text label produced by formatTonePct: anything called
-      // "positive" goes green, "negative" goes orange, only "Neutral"
-      // (|value| < 0.005, i.e. < 0.5% absolute) stays foreground. Prior
-      // ±0.2 threshold left mild-negative values like −13% reading as
-      // neutral-black while the change indicator next to them already
-      // showed warning orange — visually inconsistent.
-      //
-      // Inclusive ≥/≤ at the 0.005 boundary so the color flips at the
-      // exact same threshold formatTonePct uses (`Math.abs(pct) < 0.5`
-      // → "Neutral", anything else is "positive"/"negative"). With
-      // strict > the boundary value of 0.005 displayed as "+1%
-      // positive" but kept the neutral color — minor inconsistency
-      // but real.
-      if (value >= 0.005) return "text-success";
-      if (value <= -0.005) return "text-warning";
+      // −1..+1 — treated SYMMETRICALLY around zero (this metric is
+      // NOT a 0..1 rate). ±10% neutral band so mild-negative readings
+      // like -7% (within snapshot noise) don't fire warning while
+      // their +4 pts delta arrow is already carrying the directional
+      // story. Prior ±0.5% band collapsed too tight — any tiny shift
+      // across zero flipped the value's color, conflicting with the
+      // delta arrow that's already direction-coded.
+      if (value >= KPI_STRONG_AVG_TONE) return "text-success";
+      if (value <= KPI_WEAK_AVG_TONE) return "text-warning";
       return "text-foreground";
     case "risk_frame_rate":
       // 0..1 — lower is better
@@ -229,14 +272,15 @@ function getKpiValueColor(
       if (value < 0) return "text-warning";
       return "text-foreground";
     case "top_result_rate":
-      // 0..1 — higher is better. Real-world range is lower than
-      // overall mention rate: top-of-mind first-rank share usually
-      // tops out around 30-40% even for dominant entities, since
-      // most answers list multiple peers. Softer ladder than
-      // mention_rate: green at ≥25% (strong top-of-mind), warning
-      // when AI essentially never leads with the subject (<5%).
-      if (value >= 0.25) return "text-success";
-      if (value < 0.05) return "text-warning";
+      // 0..1 — higher is better. Real-world range caps lower than
+      // overall mention rate (30-40% even for dominant subjects),
+      // so the strong floor sits at 50% (KPI_STRONG_TOP_RESULT_RATE)
+      // and weak at 20% (KPI_WEAK_TOP_RESULT_RATE) — tighter than
+      // the old 25%/5% which let a 10% rate read as neutral. A
+      // subject AI picks as the first entity only 1-in-10 times
+      // is structurally weak, not neutral, on this dimension.
+      if (value >= KPI_STRONG_TOP_RESULT_RATE) return "text-success";
+      if (value < KPI_WEAK_TOP_RESULT_RATE) return "text-warning";
       return "text-foreground";
   }
 }
@@ -975,7 +1019,7 @@ type CompetitivePositionStats = {
   rankIsTied: boolean;
 };
 // 0..1 float epsilon retained for pickTopWithSubject (where the
-// chart-side check happens BEFORE rounding to pp, since the bar
+// chart-side check happens BEFORE rounding to pts, since the bar
 // chart's visual indicator of "subject has SoV worth showing"
 // should not depend on display-precision rounding). Tie detection
 // inside deriveCompetitivePosition uses a per-call rounded check
@@ -1301,7 +1345,7 @@ function PlatformBreakdownStrip({
   platforms: SubjectOverview["platform_recall"];
 }) {
   if (!platforms || platforms.length <= 1) return null;
-  // Pre-compute spread (max - min in pp) so we can call it out
+  // Pre-compute spread (max - min in pts) so we can call it out
   // explicitly when the disparity is large. The earlier inline-chip
   // treatment ("Gemini 80% · ChatGPT 20%") buried a 60pp gap in
   // small text — a reader scanning the Vitals card missed the most
@@ -1333,7 +1377,7 @@ function PlatformBreakdownStrip({
             className="text-[10.5px] text-warning tabular-nums"
             title="Difference between the highest and lowest platform mention rates. A wide spread means AI surfaces this subject far more often on one platform than another — worth investigating per-platform tactics."
           >
-            {spread}pp spread
+            {spread} pts spread
           </span>
         )}
       </div>
@@ -2645,25 +2689,28 @@ export default async function SubjectOverviewPage({
                             />
                           )}
 
-                        {/* Renamed from "Share-of-voice trend" to
-                            disambiguate from the bar chart on the
-                            left. Two different definitions both
-                            colloquially called "share of voice":
-                              - Chart bars = competitive[].sov =
-                                subject_mentions / total_responses
-                                (a mention RATE).
-                              - This trend = trajectory.share_of_voice
-                                = subject_mentions / (subject +
-                                competitor mentions) (a pie SLICE of
-                                the tracked entities).
-                            Calling them both "share of voice" let a
-                            careful reader compute the bar's value
-                            and find it doesn't match this delta.
-                            "Entity-mix share" makes the denominator
-                            explicit in the label. */}
+                        {/* Plain-language relabel — was
+                            "Entity-mix share trend" with a jargon
+                            sub-line "subject's slice of all
+                            tracked-entity mentions" that comms
+                            readers stumbled on. The previous label
+                            was chosen to disambiguate from the bar
+                            chart on the left (which is labeled
+                            "Share of voice" but is actually mention
+                            rate per competitive[].sov, NOT
+                            trajectory.share_of_voice). That cross-
+                            card ambiguity is now a documented
+                            backend-coordinated rename — see
+                            memory/byline_metric_naming.md. For now,
+                            this card honors the user's clearer
+                            language even though it shares a name
+                            with the (mislabeled) bar chart. The
+                            underlying metric here is genuine pie-
+                            share (subject's mentions / sum of all
+                            tracked-entity mentions). */}
                         {trendCardEligible && (
                           <StatCard
-                            label="Entity-mix share trend"
+                            label="Share-of-voice change"
                             value={
                               sovDeltaPp === null
                                 ? "—"
@@ -2681,7 +2728,15 @@ export default async function SubjectOverviewPage({
                                     : "neutral"
                             }
                             spark={<TinySpark values={sovSeries} />}
-                            sub={`vs prior snapshot · subject's slice of all tracked-entity mentions`}
+                            sub={
+                              sovDeltaPp === null
+                                ? null
+                                : `${
+                                    sovDeltaPp > 0
+                                      ? `+${sovDeltaPp}`
+                                      : sovDeltaPp
+                                  } pts vs last snapshot`
+                            }
                           />
                         )}
                       </div>
