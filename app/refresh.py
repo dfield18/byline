@@ -1,16 +1,28 @@
 """CLI entry point: run a refresh on a subject.
 
 Usage:
-    python -m app.refresh "Bernie Sanders"
+    BYLINE_DEFAULT_ORG=org_internal python -m app.refresh "Bernie Sanders"
+    python -m app.refresh "Bernie Sanders" --org-id org_internal
 
 If the subject doesn't already exist, you'll be prompted to pick a category
 and fill in the setup inputs for it. The script then runs all active prompts
 across all active models for that subject and stores the responses.
+
+Multi-tenancy: every subject row carries an org_id (matching the customer-
+facing API's tenant scope). The CLI bypasses the auth layer and writes
+directly to the DB, so it MUST be told which org it's operating against —
+otherwise a name lookup like "J.D. Vance" can collide with subjects in
+other orgs (and historically did, before this gate was added). The org
+id can come from `--org-id` (preferred for ad-hoc runs) or the
+`BYLINE_DEFAULT_ORG` env var (preferred for scripted use). The CLI
+refuses to run without one of them; subjects.org_id is never written
+NULL by this path.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -30,9 +42,31 @@ _RECENT_NEWS_MAX_AGE = timedelta(days=7)
 PROMPTS_DIR = Path("prompts")
 
 
-def _find_subject_by_name(name: str) -> Optional[int]:
+def _resolve_org_id(cli_org: str | None) -> str:
+    """Pick the org_id this CLI invocation operates against. Precedence:
+    explicit `--org-id` flag, then `BYLINE_DEFAULT_ORG` env var. Fails
+    loudly if neither is set — the CLI must never operate org-blind
+    (see module docstring for the why).
+    """
+    org = cli_org or os.environ.get("BYLINE_DEFAULT_ORG")
+    if not org:
+        typer.echo(
+            "error: no org_id provided. Pass --org-id <id> or set "
+            "BYLINE_DEFAULT_ORG in your environment. The CLI cannot "
+            "look up subjects by name across orgs — name collisions "
+            "would silently target the wrong tenant.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    return org
+
+
+def _find_subject_by_name(name: str, org_id: str) -> Optional[int]:
     with get_cursor(commit=False) as cur:
-        cur.execute("SELECT id FROM subjects WHERE name = %s", (name,))
+        cur.execute(
+            "SELECT id FROM subjects WHERE name = %s AND org_id = %s",
+            (name, org_id),
+        )
         row = cur.fetchone()
         return row[0] if row else None
 
@@ -140,15 +174,20 @@ def _prompt_for_setup_inputs(setup_inputs_def: list[dict], name: str) -> dict:
     return values
 
 
-def _create_subject(category_id: int, name: str, setup_inputs: dict) -> int:
+def _create_subject(
+    category_id: int, name: str, setup_inputs: dict, org_id: str
+) -> int:
+    """Insert a new subject scoped to the given org. org_id is required —
+    legacy NULL-org rows (pre-tenancy data) are no longer created by
+    this CLI path."""
     with get_cursor() as cur:
         cur.execute(
             """
-            INSERT INTO subjects (category_id, name, setup_inputs)
-            VALUES (%s, %s, %s::jsonb)
+            INSERT INTO subjects (category_id, name, setup_inputs, org_id)
+            VALUES (%s, %s, %s::jsonb, %s)
             RETURNING id
             """,
-            (category_id, name, json.dumps(setup_inputs)),
+            (category_id, name, json.dumps(setup_inputs), org_id),
         )
         return cur.fetchone()[0]
 
@@ -295,6 +334,16 @@ def _summarize(refresh_run_id: int):
 
 def main(
     name: str = typer.Argument(..., help="Subject name (e.g. 'Bernie Sanders')"),
+    org_id: str | None = typer.Option(
+        None,
+        "--org-id",
+        help=(
+            "Org tenant this run targets (e.g. 'org_internal'). Falls back to "
+            "the BYLINE_DEFAULT_ORG env var. Required — the CLI refuses to "
+            "operate org-blind because name lookups can collide across "
+            "tenants and silently target the wrong subject."
+        ),
+    ),
     max_concurrency: int = typer.Option(
         26,
         "--max-concurrency",
@@ -315,6 +364,8 @@ def main(
 ) -> None:
     from datetime import date as _date
 
+    resolved_org_id = _resolve_org_id(org_id)
+
     historical_date: _date | None = None
     if historical_as_of is not None:
         try:
@@ -326,22 +377,31 @@ def main(
             )
             raise typer.Exit(code=1)
 
-    subject_id = _find_subject_by_name(name)
+    subject_id = _find_subject_by_name(name, resolved_org_id)
     if subject_id is None:
         if historical_date is not None:
             typer.echo(
-                f"error: subject '{name}' not found. Historical refreshes "
-                f"require an existing subject (create it first via a live "
-                f"refresh or the web UI).",
+                f"error: subject '{name}' not found in org "
+                f"'{resolved_org_id}'. Historical refreshes require an "
+                f"existing subject (create it first via a live refresh or "
+                f"the web UI).",
                 err=True,
             )
             raise typer.Exit(code=1)
-        typer.echo(f"\nNo subject named '{name}' found. Let's create one.")
+        typer.echo(
+            f"\nNo subject named '{name}' found in org "
+            f"'{resolved_org_id}'. Let's create one."
+        )
         category_id, slug = _pick_category()
         setup_inputs_def = _load_setup_inputs_def(slug)
         setup_inputs = _prompt_for_setup_inputs(setup_inputs_def, name)
-        subject_id = _create_subject(category_id, name, setup_inputs)
-        typer.echo(f"\nCreated subject id={subject_id}: {name}")
+        subject_id = _create_subject(
+            category_id, name, setup_inputs, resolved_org_id
+        )
+        typer.echo(
+            f"\nCreated subject id={subject_id} in org "
+            f"'{resolved_org_id}': {name}"
+        )
     else:
         typer.echo(f"\nFound existing subject id={subject_id}: {name}")
         if historical_date is None:
