@@ -13,7 +13,7 @@
  * Trend" section. Pairs with a "What changed" insight card to the
  * right (rendered by the page, not this component).
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -183,6 +183,7 @@ export function TrendOverTime({
   height = 320,
   subjectOnlyAxis = false,
   showEndLabels = false,
+  defaultVisibleOverlays,
 }: {
   subjectName: string;
   trajectoryWeeks: SubjectOverview["trajectory"]["weeks"];
@@ -229,12 +230,56 @@ export function TrendOverTime({
   // Hover-to-isolate: when the user hovers a legend chip (or a line),
   // drop the opacity of every non-hovered series so the chosen one
   // pops. `hoveredName === null` = no isolation; default rendering.
-  // Both subject and overlay lines react to this so the user can
-  // focus on a single series even when four overlays + the subject
-  // line are crowding the chart.
   const [hoveredName, setHoveredName] = useState<string | null>(null);
-  const opacityFor = (name: string, base: number): number =>
-    hoveredName === null || hoveredName === name ? base : 0.12;
+  // Click-to-toggle: each overlay can be opted in/out via the legend.
+  // Subject is always visible (not toggleable) so the chart always
+  // anchors on the focal series. When `defaultVisibleOverlays` is
+  // passed, only those overlays start visible (used by Competition's
+  // dense chart to default-show subject + top 2-3 rivals out of 6+
+  // entities); when undefined, every overlay starts visible (used by
+  // Visibility's tighter per-platform chart). Hidden chips stay in
+  // the legend with a muted/strikethrough treatment so the reader
+  // can opt them back in without losing their existence as context.
+  const visibleByDefault: Set<string> = useMemo(() => {
+    if (!defaultVisibleOverlays) {
+      return new Set(overlays.map((o) => o.name));
+    }
+    return new Set(defaultVisibleOverlays);
+  }, [defaultVisibleOverlays, overlays]);
+  const [visibleOverlays, setVisibleOverlays] = useState<Set<string>>(
+    visibleByDefault,
+  );
+  // Reset visible set when the underlying defaults change (e.g.
+  // snapshot refreshes the top-N rival list). Without this, the
+  // toggle state would silently keep showing the OLD top-N after
+  // a Regenerate, even though the chart is now meant to default to
+  // the NEW set. Identity-by-string-key (sorted) so a same-set re-
+  // render doesn't pointlessly reset user-toggled state.
+  const defaultsKey = useMemo(
+    () => Array.from(visibleByDefault).sort().join("|"),
+    [visibleByDefault],
+  );
+  const [prevDefaultsKey, setPrevDefaultsKey] = useState(defaultsKey);
+  if (defaultsKey !== prevDefaultsKey) {
+    setPrevDefaultsKey(defaultsKey);
+    setVisibleOverlays(new Set(visibleByDefault));
+  }
+  const toggleOverlay = (name: string) => {
+    setVisibleOverlays((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+  const isOverlayVisible = (name: string) => visibleOverlays.has(name);
+  // Hidden overlays drop to opacity 0 on the canvas (still in the
+  // DOM so the toggle round-trips smoothly); hover-isolate still
+  // dims OTHER visible series when hovering a visible one.
+  const opacityFor = (name: string, base: number): number => {
+    if (name !== subjectName && !isOverlayVisible(name)) return 0;
+    return hoveredName === null || hoveredName === name ? base : 0.12;
+  };
   // Wide-format chart data: one row per week, one column per entity.
   type Row = { w: string; rawWeek: string } & Record<
     string,
@@ -624,41 +669,83 @@ export function TrendOverTime({
             lines. */}
         {overlays.map((o) => {
           const Icon = o.iconSlug ? PLATFORM_ICON[o.iconSlug] : undefined;
+          // Visible chips render with their entity color + full text;
+          // hidden chips fade to muted-foreground, strike through the
+          // color swatch (it's "off"), and still hover-isolate the
+          // line on canvas if the user opts the entity back in via
+          // click. Click toggles visibility; hover (without click)
+          // just isolates, same as before.
+          const visible = isOverlayVisible(o.name);
           return (
             <button
               key={o.name}
               type="button"
+              onClick={() => toggleOverlay(o.name)}
               onMouseEnter={() => setHoveredName(o.name)}
               onMouseLeave={() => setHoveredName(null)}
               onFocus={() => setHoveredName(o.name)}
               onBlur={() => setHoveredName(null)}
-              className="inline-flex items-center gap-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              aria-pressed={visible}
+              title={
+                visible
+                  ? `${o.name} — click to hide from chart`
+                  : `${o.name} — click to show on chart`
+              }
+              className={`inline-flex items-center gap-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                visible ? "" : "opacity-50 hover:opacity-75"
+              }`}
             >
               <span
-                className="h-[2px] w-4 rounded-full"
+                className="h-[2px] w-4 rounded-full transition-opacity"
                 style={{
-                  background: o.color,
-                  opacity: opacityFor(o.name, overlayOpacity),
+                  background: visible ? o.color : "var(--muted-foreground)",
+                  opacity: visible ? overlayOpacity : 0.6,
                 }}
                 aria-hidden
               />
               {Icon && (
                 <Icon
-                  className="h-3 w-3 text-foreground/65 shrink-0 transition-opacity"
-                  style={{ opacity: opacityFor(o.name, 1) }}
+                  className="h-3 w-3 shrink-0 transition-opacity"
+                  style={{ color: "var(--foreground)", opacity: visible ? 0.65 : 0.4 }}
                   aria-hidden
                 />
               )}
               <span
-                className="max-w-[220px] truncate text-foreground/70 transition-opacity"
+                className={`max-w-[220px] truncate transition-opacity ${
+                  visible ? "text-foreground/70" : "text-foreground/45 line-through decoration-foreground/30"
+                }`}
                 title={o.name}
-                style={{ opacity: opacityFor(o.name, 1) }}
               >
                 {o.name}
               </span>
             </button>
           );
         })}
+        {/* Show-all / hide-all shortcut — appears only when a default
+            visibility filter is in play (i.e. when the caller passed
+            defaultVisibleOverlays). When all overlays are already
+            shown, the button reads "Reset" and restores the default
+            subset; otherwise "Show all" turns every overlay on. */}
+        {defaultVisibleOverlays && overlays.length > visibleByDefault.size && (
+          <button
+            type="button"
+            onClick={() => {
+              const allVisible = overlays.every((o) =>
+                visibleOverlays.has(o.name),
+              );
+              setVisibleOverlays(
+                allVisible
+                  ? new Set(visibleByDefault)
+                  : new Set(overlays.map((o) => o.name)),
+              );
+            }}
+            className="text-[11px] font-medium text-primary hover:text-primary/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded px-1"
+          >
+            {overlays.every((o) => visibleOverlays.has(o.name))
+              ? "Reset"
+              : "Show all"}
+          </button>
+        )}
       </div>
       {helperText && (
         <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">

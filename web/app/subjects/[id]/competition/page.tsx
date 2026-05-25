@@ -30,6 +30,7 @@ import {
   type SubjectOverview,
   type SubjectDetail,
 } from "@/lib/api";
+import { getKpiValueColor } from "@/lib/kpiThresholds";
 import { RefreshButton } from "../refresh-button";
 
 export const dynamic = "force-dynamic";
@@ -103,31 +104,11 @@ function formatSignedPpRaw(v: number | null | undefined): string {
   return `${pts > 0 ? "+" : ""}${pts} pts`;
 }
 
-// KPI polarity + tone helper. Mirrors the Visibility spoke's
-// `toneByThreshold` so the briefing tiles on both spokes paint
-// using the same success/warning/neutral semantics; kept module-
-// local rather than imported because the Visibility spoke's
-// version is declared inside its page-function scope.
+// KPI polarity is documentation-only after the shared
+// getKpiValueColor resolver from @/lib/kpiThresholds replaced the
+// local toneByThreshold helper. Kept on the KPI config shape so
+// new metrics can still declare their direction-of-better intent.
 type KpiPolarity = "higher_better" | "lower_better";
-function toneByThreshold(
-  value: number | null | undefined,
-  polarity: KpiPolarity,
-  good: number,
-  bad: number,
-): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return "text-foreground";
-  }
-  if (polarity === "higher_better") {
-    if (value >= good) return "text-success";
-    if (value <= bad) return "text-warning";
-    return "text-foreground";
-  }
-  // lower_better
-  if (value <= good) return "text-success";
-  if (value >= bad) return "text-warning";
-  return "text-foreground";
-}
 
 function deltaToneClass(v: number | null | undefined): string {
   if (v === null || v === undefined || v === 0) return "text-muted-foreground";
@@ -1173,7 +1154,11 @@ export default async function CompetitionPage({
       helper: "Subject's rank in the comparison set by Share of Voice.",
       tooltip:
         "Where the subject sits among the comparison-set entities when sorted by Share of Voice (1 = highest share). The same set powers the Landscape and Ranking sections below.",
-      valueColor: toneByThreshold(competitiveRank, "lower_better", 2, 5),
+      // Rank is not a 0..100 strength value — coloring "#3" green or
+      // amber misleads readers ("is third place good?"). Keep neutral
+      // and let the "↓N pts" delta below carry direction. Matches
+      // Visibility's Avg Mention Position policy on a non-rate metric.
+      valueColor: "text-foreground",
       polarity: "lower_better",
       // Gauge fills to the subject's SoV (a 0..1 fraction) — gives a
       // visual sense of "how much of the comparison-set voice does
@@ -1258,12 +1243,14 @@ export default async function CompetitionPage({
       helper: "Topics where the subject ranks #1 in the comparison set.",
       tooltip:
         "Counts topics in the topic leaderboard where the subject is the leading entity. Pairs with the AI-platform view to give a where-you-win read across both axes.",
-      valueColor: toneByThreshold(
-        topicWinRateFrac,
-        "higher_better",
-        0.5,
-        0.25,
-      ),
+      // Routed through the shared mention_rate tier (strong ≥0.6,
+      // weak <0.3) so "Topic Win Rate 25%" reads warning here the
+      // same way "Mention Rate 25%" reads warning on Overview /
+      // Visibility. The metric is a share over a small denominator
+      // (topics-led / topics-tracked) so the mention-rate tier — a
+      // share over a small denominator (subject-mentions / responses)
+      // — is the right semantic fit.
+      valueColor: getKpiValueColor("mention_rate", topicWinRateFrac),
       polarity: "higher_better",
       // Gauge fills to the topic-win fraction — a true 0..1 scale.
       gaugeValue: topicWinRateFrac,
@@ -1296,15 +1283,14 @@ export default async function CompetitionPage({
       helper: "Topic where the subject's mention rate is highest.",
       tooltip:
         "Tracked topic where the subject's mention rate is highest in this snapshot. The headline shows the rate; the topic name follows as a smaller qualifier (or 'Tied across N topics' when the rate is uniform). Useful as a positive anchor when the rest of the briefing skews negative.",
-      // Tone reflects the strongest topic's absolute mention rate
-      // — even the "best" topic is worth flagging if it's still
-      // below 40%. Mirrors the thresholds the Visibility spoke
-      // uses for AI Mention Rate.
-      valueColor: toneByThreshold(
+      // Routed through the shared mention_rate tier so a 100%
+      // strongest topic reads success here the same way "Mention
+      // Rate 100%" reads success on Overview/Visibility. Replaces
+      // local 0.7/0.4 thresholds that diverged from the shared
+      // 0.6/0.3 by ~10pp.
+      valueColor: getKpiValueColor(
+        "mention_rate",
         strongestTopic?.subject_rate ?? null,
-        "higher_better",
-        0.7,
-        0.4,
       ),
       polarity: "higher_better",
       // Name-anchored tile (the topic name carries the read) — skip
@@ -1554,92 +1540,18 @@ export default async function CompetitionPage({
                         showing the all-snapshot view.
                       </div>
                     )}
-                    {/* Snapshot-diff strip — surfaces ≥5pp movers since
-                        the start of the trajectory window so a reader
-                        sees the action layer ("Vance +8 pts · Rubio
-                        −5 pts") right under the Bottom Line. Hidden
-                        when the composer found no movers (≥5pp filter
-                        applies, so micro-jitter doesn't leak in) and
-                        no overall delta cleared the 1pp floor either —
-                        rendering an empty "What changed" eyebrow would
-                        read as a UI bug, not a "nothing changed"
-                        signal. */}
-                    {/* Stable-state fallback — when there ARE ≥2
-                        snapshots but no entity cleared the ≥5pp
-                        mover threshold AND the overall subject
-                        delta didn't clear 1pp, the composer returns
-                        `deltas: []` plus a `fallbackCopy` ("mostly
-                        stable…"). Earlier we silently hid the whole
-                        strip in that case, which read as a UI bug
-                        on the next visit. Render the fallback as a
-                        small muted line so the operator can tell
-                        "the data was checked but nothing notable
-                        moved" apart from "the strip is broken." */}
-                    {snapshotDiffDeltas.length === 0 &&
-                      snapshotDiff.fallbackCopy &&
-                      data.trajectory.weeks.length >= 2 && (
-                        <p className="mt-4 text-[11px] text-muted-foreground/75 italic leading-relaxed">
-                          {snapshotDiff.fallbackCopy}
-                        </p>
-                      )}
-                    {snapshotDiffDeltas.length > 0 && (() => {
-                      const fmt = (iso: string | null): string | null => {
-                        if (!iso) return null;
-                        const d = new Date(iso);
-                        return Number.isNaN(d.getTime())
-                          ? null
-                          : d.toLocaleDateString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                            });
-                      };
-                      const priorStr = fmt(snapshotDiff.priorDate);
-                      const latestStr = fmt(snapshotDiff.latestDate);
-                      const eyebrow =
-                        priorStr && latestStr
-                          ? `What changed · ${priorStr} → ${latestStr}`
-                          : latestStr
-                            ? `What changed · since ${latestStr}`
-                            : "What changed";
-                      return (
-                        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-                          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-muted-foreground/80">
-                            {eyebrow}
-                          </span>
-                          {snapshotDiffDeltas.map((d, idx) => {
-                            const up = d.deltaPp > 0;
-                            const down = d.deltaPp < 0;
-                            // Tone uniform across kinds (subject + competitor):
-                            // positive delta = success, negative = warning. SoV
-                            // is a "higher is better" metric for any tracked
-                            // entity from THAT entity's perspective, so we paint
-                            // raw direction. The Bottom Line sentence carries
-                            // any from-the-subject's-perspective framing.
-                            const tone = up
-                              ? "text-success bg-success/[0.08] border-success/30"
-                              : down
-                                ? "text-warning bg-warning/[0.08] border-warning/30"
-                                : "text-muted-foreground bg-muted/40 border-border/40";
-                            return (
-                              <span
-                                key={`${d.kind}-${d.label}-${idx}`}
-                                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11.5px] tabular-nums ${tone}`}
-                              >
-                                <span aria-hidden>
-                                  {up ? "↑" : down ? "↓" : "·"}
-                                </span>
-                                <span className="font-medium text-foreground/85">
-                                  {d.label}
-                                </span>
-                                <span className="font-semibold">
-                                  {formatSignedPpRaw(d.deltaPp)}
-                                </span>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
+                    {/* Top-of-band movers pill row removed — it
+                        duplicated the "What changed · prior → latest"
+                        chip strip that already lives at the bottom of
+                        the Trend chart further down the page. The
+                        Trend footer wins because it sits next to the
+                        lines themselves AND covers entities hidden
+                        from the default chart view (top 3 + subject),
+                        so a hidden entity's delta still surfaces in
+                        text there. Snapshot diff data is still
+                        composed once at the page level (no change to
+                        composeCompetitionWhatChanged) — only this
+                        duplicate render is gone. */}
                   </div>
                   <div className="relative mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
                     {competitionKpis.map((k) => {
@@ -1774,17 +1686,16 @@ export default async function CompetitionPage({
                       );
                     })}
                   </div>
-                </Card>
-                {/* Competitive Ranking Card — second piece of the
-                    Standing band, sibling to the Vitals card above.
-                    The standalone Competitive Share of Voice bar
-                    chart that used to live in the Landscape band
-                    was redundant with this table's SoV column; the
-                    bar moved INLINE into each row's SoV cell so the
-                    bar + percent sit together. mt-6 spaces this
-                    card from the Vitals card without the larger
-                    inter-section gap used between bands. */}
-                <Card className="mt-6 p-6 border-border/60">
+                {/* Ranking table is now folded INTO the same Card as
+                    the KPI strip above, separated by a hairline top
+                    border, so the Standing band reads as one
+                    continuous surface ("Vitals → ranking") instead
+                    of two detached cards. Before this fold, mt-6
+                    between two bordered cards made the table feel
+                    like a sibling Competition section rather than
+                    a tier-2 view of the KPI ranking right above
+                    it. */}
+                <div className="mt-6 pt-6 border-t border-border/40">
                   {/* No `overflow-x-auto` wrapper — the table already
                       fits at common card widths after the column
                       headers were tightened to short labels (Avg.
@@ -2104,6 +2015,7 @@ export default async function CompetitionPage({
                       );
                     })()}
                   </div>
+                </div>
                 </Card>
               </section>
 
@@ -2406,18 +2318,39 @@ export default async function CompetitionPage({
                       trajectoryWeeks={trendWeeks}
                       subjectValues={trendSubjectValues}
                       overlays={trendOverlays}
-                      helperText="Mention rate shows the share of AI answers that mentioned each entity in the tracked prompt set."
+                      helperText="Mention rate shows the share of AI answers that mentioned each entity in the tracked prompt set. Click any rival's chip to add or remove its line."
                       overlayOpacity={0.5}
                       height={340}
-                      // Axis fits all series (subject + competitor
-                      // overlays) — same algorithm Visibility uses.
-                      // Subject-only fitting was attempted but the
-                      // axis collapsed to the subject's narrow band
-                      // and clipped competitor lines at the chart
-                      // floor; honest all-series fit + the 25-point
-                      // MIN_AXIS_SPAN floor in TrendOverTime keeps
-                      // every line on-canvas while still giving
-                      // Newsom's variation visible territory.
+                      // Default-visible set: top 3 rivals by current
+                      // SoV (the same ranking that drives the
+                      // ranking table's subject + top-N peer
+                      // selection). Trend rendered all 7 entities by
+                      // default produced an unreadable 7-line
+                      // spaghetti chart, especially for non-technical
+                      // readers; the new default surfaces the focal
+                      // subject + the 3 most-mentioned rivals,
+                      // anyone else opts in via the legend chips
+                      // below. Hidden chips still render in the
+                      // legend (muted + strikethrough) so the reader
+                      // sees who's available to toggle on.
+                      defaultVisibleOverlays={trendOverlays
+                        .slice()
+                        .sort((a, b) => {
+                          // Use the latest-snapshot trajectory value
+                          // as the "current SoV" proxy. Fall back to
+                          // 0 when an overlay has no final-snapshot
+                          // measurement (preserves the original
+                          // order for tied/missing cases via the
+                          // stable sort).
+                          const latest = (vals: (number | null)[]) =>
+                            vals[vals.length - 1] ?? 0;
+                          return (
+                            latest(b.values) -
+                            latest(a.values)
+                          );
+                        })
+                        .slice(0, 3)
+                        .map((o) => o.name)}
                     />
                     {(() => {
                       const result = composeCompetitionWhatChanged({
