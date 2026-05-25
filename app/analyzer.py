@@ -1976,7 +1976,44 @@ async def _cli_main() -> None:
             "columns stay NULL on the resulting response_extractions rows."
         ),
     )
+    parser.add_argument(
+        "--expect-org", type=str, default=None, metavar="ORG_ID",
+        help=(
+            "Optional safety check: verify the refresh_run's subject belongs "
+            "to this org_id before running. Refuses to run on a refresh from "
+            "another tenant. Recommended when running ad-hoc against a "
+            "specific refresh_run id you got from a customer ticket."
+        ),
+    )
     args = parser.parse_args()
+
+    # --expect-org guard. Runs against subjects.org_id via the refresh_run
+    # → subject join. Refuses to proceed if the join target's org_id
+    # doesn't match what the operator asserted — defense against typo'd
+    # refresh_run ids leaking compute onto another tenant's data.
+    if args.expect_org is not None:
+        from app.db import get_cursor as _gc
+        with _gc(commit=False) as cur:
+            cur.execute(
+                """
+                SELECT s.org_id, s.name
+                FROM refresh_runs rr JOIN subjects s ON rr.subject_id = s.id
+                WHERE rr.id = %s
+                """,
+                (args.refresh_run_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            raise SystemExit(
+                f"--expect-org check: refresh_run {args.refresh_run_id} not found."
+            )
+        actual_org, subj_name = row
+        if actual_org != args.expect_org:
+            raise SystemExit(
+                f"--expect-org check FAILED: refresh_run {args.refresh_run_id} "
+                f"belongs to subject '{subj_name}' in org '{actual_org}', "
+                f"not '{args.expect_org}'. Refusing to run."
+            )
 
     source_type_ids = _fetch_source_type_ids()
     if args.combined:

@@ -66,7 +66,14 @@ logger = logging.getLogger("app.worker")
 
 def _claim_next_job() -> dict[str, Any] | None:
     """Atomically claim the oldest queued job and flip it to running.
-    Uses FOR UPDATE SKIP LOCKED so multiple workers don't fight."""
+    Uses FOR UPDATE SKIP LOCKED so multiple workers don't fight.
+
+    Also returns subjects.org_id alongside the job's recorded org_id
+    so the caller can defense-in-depth-assert they match before
+    executing — see _assert_job_tenancy below. The check belongs at
+    claim time, not at enqueue time, because a tenancy mismatch
+    introduced by a future bug in the enqueue path would otherwise
+    silently process a cross-org refresh."""
     with psycopg.connect(get_database_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -81,7 +88,8 @@ def _claim_next_job() -> dict[str, Any] | None:
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                 )
-                RETURNING id, subject_id, org_id, kind
+                RETURNING id, subject_id, org_id, kind,
+                    (SELECT org_id FROM subjects WHERE id = jobs.subject_id) AS subject_org_id
                 """
             )
             row = cur.fetchone()
@@ -93,7 +101,31 @@ def _claim_next_job() -> dict[str, Any] | None:
         "subject_id": row[1],
         "org_id": row[2],
         "kind": row[3],
+        "subject_org_id": row[4],
     }
+
+
+def _assert_job_tenancy(job: dict[str, Any]) -> str | None:
+    """Returns an error string when the claimed job's org_id doesn't
+    match the subject's org_id (tenancy mismatch — should never
+    happen under any current enqueue path, but checked here as a
+    backstop so a future enqueue bug can't leak a refresh across
+    orgs). Returns None when the job is consistent."""
+    if job.get("subject_org_id") is None:
+        # Subject vanished between enqueue and claim. Treat as
+        # tenancy-fail so we don't run the chain against a deleted
+        # subject.
+        return (
+            f"tenancy: subject {job['subject_id']} not found "
+            f"(deleted between enqueue and claim?)"
+        )
+    if job["org_id"] != job["subject_org_id"]:
+        return (
+            f"tenancy mismatch: job.org_id={job['org_id']!r} but "
+            f"subject {job['subject_id']}.org_id={job['subject_org_id']!r}. "
+            f"Refusing to execute — would have leaked across tenants."
+        )
+    return None
 
 
 def _mark_succeeded(
@@ -339,6 +371,16 @@ async def _main(poll_seconds: float) -> None:
             "Claimed job %s (kind=%s, subject_id=%s, org_id=%s)",
             job["id"], job["kind"], job["subject_id"], job["org_id"],
         )
+
+        # Defense in depth: a future bug in any enqueue path that wrote
+        # `jobs.org_id` ≠ `subjects.org_id` would silently process a
+        # cross-org refresh today. Catch it at execution time and fail
+        # the job loudly so monitoring sees it.
+        tenancy_err = _assert_job_tenancy(job)
+        if tenancy_err is not None:
+            logger.error("Job %s rejected: %s", job["id"], tenancy_err)
+            _mark_failed(job["id"], tenancy_err)
+            continue
 
         try:
             if job["kind"] == "refresh":

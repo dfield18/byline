@@ -1783,7 +1783,42 @@ def _cli_main() -> None:
         help="Specific analysis_run id whose extractions feed the cross-analyzer. "
              "Default: latest completed analysis_run for the refresh.",
     )
+    p.add_argument(
+        "--expect-org", type=str, default=None, metavar="ORG_ID",
+        help=(
+            "Optional safety check: verify the refresh_run's subject belongs "
+            "to this org_id before running. Refuses if the actual subject "
+            "is in a different tenant. Same guard pattern as `app.analyzer`."
+        ),
+    )
     args = p.parse_args()
+
+    # --expect-org guard (mirrors app.analyzer's implementation). Refuses
+    # to run when the refresh_run id resolves to a subject in a different
+    # org than the operator asserted. Cheap defense against typo'd ids.
+    if args.expect_org is not None:
+        from app.db import get_cursor as _gc
+        with _gc(commit=False) as cur:
+            cur.execute(
+                """
+                SELECT s.org_id, s.name
+                FROM refresh_runs rr JOIN subjects s ON rr.subject_id = s.id
+                WHERE rr.id = %s
+                """,
+                (args.refresh_run_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            raise SystemExit(
+                f"--expect-org check: refresh_run {args.refresh_run_id} not found."
+            )
+        actual_org, subj_name = row
+        if actual_org != args.expect_org:
+            raise SystemExit(
+                f"--expect-org check FAILED: refresh_run {args.refresh_run_id} "
+                f"belongs to subject '{subj_name}' in org '{actual_org}', "
+                f"not '{args.expect_org}'. Refusing to run."
+            )
 
     analyzers: list[CrossAnalyzer] = [
         AsymmetryAnalyzer(),

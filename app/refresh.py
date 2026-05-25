@@ -389,6 +389,69 @@ def main(
                 err=True,
             )
             raise typer.Exit(code=1)
+    # Historical date sanity. With a known subject_id and date in
+    # hand, refuse three pathological inputs that the bare ISO-format
+    # check above doesn't catch:
+    #
+    #   (a) future dates  — the `before:` search filter would constrain
+    #       results to a date that hasn't happened, producing a refresh
+    #       indistinguishable from "live" but stamped at a future
+    #       point in the trajectory.
+    #   (b) dates before the subject was created — semantically OK
+    #       (the LLM can reason about a person before their subject
+    #       row existed), but accidentally common when running a 52-week
+    #       backfill against a recently-created subject. Warn rather
+    #       than refuse since some operators legitimately want the
+    #       deep historical estimate.
+    #   (c) duplicate (subject_id, historical_as_of) — two completed
+    #       historical runs at the same date double-count in the
+    #       trajectory and produce visible spikes. Refuse outright.
+    if historical_date is not None and subject_id is not None:
+        from datetime import date as _date2
+        today = _date2.today()
+        if historical_date > today:
+            typer.echo(
+                f"error: --historical-as-of {historical_date.isoformat()} "
+                f"is in the future. Backfills must use a past date.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        with get_cursor(commit=False) as _cur:
+            _cur.execute(
+                "SELECT created_at::date FROM subjects WHERE id = %s",
+                (subject_id,),
+            )
+            row = _cur.fetchone()
+            created_at_date = row[0] if row else None
+            _cur.execute(
+                """
+                SELECT id, status FROM refresh_runs
+                WHERE subject_id = %s
+                  AND is_historical_estimate = TRUE
+                  AND historical_as_of = %s
+                """,
+                (subject_id, historical_date),
+            )
+            dup_rows = _cur.fetchall()
+        if dup_rows:
+            existing = ", ".join(f"id={r[0]} status={r[1]}" for r in dup_rows)
+            typer.echo(
+                f"error: refresh_runs already exist for subject {subject_id} "
+                f"at historical_as_of={historical_date.isoformat()} "
+                f"({existing}). Delete the prior run or pick a different "
+                f"date — duplicate historical runs at the same date double-"
+                f"count in the trajectory.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        if created_at_date is not None and historical_date < created_at_date:
+            # Soft warning, not an exit — see comment (b) above.
+            typer.echo(
+                f"warning: --historical-as-of {historical_date.isoformat()} "
+                f"is before this subject was created ({created_at_date}). "
+                f"The LLM will still respond, but the estimate predates "
+                f"any prompt-text tuning you've done. Continuing.",
+            )
         typer.echo(
             f"\nNo subject named '{name}' found in org "
             f"'{resolved_org_id}'. Let's create one."

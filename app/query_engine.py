@@ -370,6 +370,15 @@ async def run_refresh(
             completion_state["count"] += 1
             n = completion_state["count"]
 
+            # pre_render_failed = True when the prompt never reached a
+            # provider call (response is None — config error caught
+            # during render or an unexpected exception in the provider
+            # dispatch block). Threaded through to the aggregator so
+            # the operator can distinguish "12/12 LLM calls succeeded
+            # but 2 prompts were skipped due to a setup_inputs typo"
+            # from "10/12 LLM calls succeeded, 2 failed at the
+            # provider".
+            pre_render_failed = response is None
             if response is not None:
                 success = response.success
                 cost = response.cost_usd
@@ -391,24 +400,57 @@ async def run_refresh(
                     line += f" — {err}"
                 print(line)
 
-            return success, cost
+            return success, cost, pre_render_failed
 
         # 4. Dispatch concurrently. return_exceptions=True keeps gather alive
         # even if one task crashes hard (shouldn't happen — run_one catches all).
         tasks = [run_one(p, m) for p in prompts for m in models]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # 5. Aggregate.
+        # 5. Aggregate. Three buckets so the operator can tell a config
+        # problem from a provider problem:
+        #   - successful: response.success == True
+        #   - provider_failed: response built but response.success == False
+        #     (HTTP errors, content-policy refusals, timeouts, etc.)
+        #   - pre_render_failed: response is None — the prompt never made
+        #     it to a provider call. Almost always a setup_inputs
+        #     misconfiguration. The user can't fix this by retrying;
+        #     they need to fix the subject's prompt config.
+        #
+        # `successful_queries` keeps its existing semantics (count of
+        # true LLM successes) so the dashboard's metrics don't shift.
+        # But the status decision now treats pre-render failures
+        # separately: a refresh that produced N good responses + K
+        # pre-render skips is still "partial" (something is wrong),
+        # but the logger surfaces the K count loudly so the operator
+        # knows where to look.
         successful = 0
+        provider_failed = 0
+        pre_render_failed_count = 0
         total_cost = Decimal(0)
         for r in results:
             if isinstance(r, BaseException):
-                # run_one shouldn't raise, but if it did, treat as failure.
+                # run_one shouldn't raise, but if it did, treat as a
+                # provider failure (closest match: the chain crashed
+                # somewhere after pre-render).
+                provider_failed += 1
                 continue
-            success, cost = r
+            success, cost, pre_render_failed = r
             if success:
                 successful += 1
+            elif pre_render_failed:
+                pre_render_failed_count += 1
+            else:
+                provider_failed += 1
             total_cost += cost
+
+        if pre_render_failed_count > 0:
+            print(
+                f"⚠ {pre_render_failed_count}/{total_queries} prompts failed before "
+                f"reaching a provider (config / setup_inputs issue, NOT a "
+                f"provider failure). These don't retry — fix the subject's "
+                f"setup_inputs or prompt template."
+            )
 
         if successful == total_queries:
             status = "completed"

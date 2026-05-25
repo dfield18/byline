@@ -1,11 +1,15 @@
 """Seed 5 plausible 2028 GOP presidential candidates as person subjects.
 
 Run from the repo root:
-    python -m scripts.seed_2028_gop
+    BYLINE_SEED_ORG_ID=org_internal python -m scripts.seed_2028_gop
+    python -m scripts.seed_2028_gop --org-id org_internal
 
-Creates subjects under org_id='org_internal' (the dev/operator org —
-matches what the auth dep falls back to when no Clerk session is
-present, so the dashboard at /subjects will list these immediately).
+The target org id is read from `BYLINE_SEED_ORG_ID` (or `--org-id`),
+defaulting to 'org_internal' — the dev/operator org that matches what
+the auth dep falls back to when no Clerk session is present, so the
+dashboard at /subjects will list these immediately. Two operators
+seeding the same env need to set the same id; staging vs dev with
+different org ids should each set their own.
 
 Idempotent: a duplicate (org_id, name) raises ValueError from
 create_subject, which we catch and treat as a skip. Re-running the
@@ -14,17 +18,20 @@ script after a partial failure will only insert the missing rows.
 This script does NOT trigger snapshots — that would cost real
 OpenAI + Google tokens per subject. After it runs, kick off a
 snapshot per subject from the dashboard "Take snapshot" button, or
-via `python -m app.refresh "<name>"` from the CLI.
+via `python -m app.refresh "<name>" --org-id <id>` from the CLI.
 """
 
 from __future__ import annotations
 
+import argparse
+import os
+import sys
 from typing import Any
 
 from dashboard.lib.queries import create_subject
 
 
-_ORG_ID = "org_internal"
+_DEFAULT_ORG_ID = "org_internal"
 
 # Each entry is the per-subject setup_inputs dict that drives prompt
 # rendering. The full schema for `person` lives in prompts/person.yaml
@@ -115,7 +122,34 @@ _CANDIDATES: list[dict[str, Any]] = [
 ]
 
 
+def _resolve_org_id(cli_org: str | None) -> str:
+    """CLI flag wins, then env, then the documented default. Surfaces
+    the resolved id in stdout so an operator running across two envs
+    can verify they're seeding the right tenant before the inserts
+    fire."""
+    return cli_org or os.environ.get("BYLINE_SEED_ORG_ID") or _DEFAULT_ORG_ID
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Seed 5 GOP candidate subjects under the chosen org id."
+        ),
+    )
+    parser.add_argument(
+        "--org-id",
+        default=None,
+        help=(
+            "Org tenant id to seed under. Overrides BYLINE_SEED_ORG_ID. "
+            f"Default: {_DEFAULT_ORG_ID}"
+        ),
+    )
+    args = parser.parse_args()
+    org_id = _resolve_org_id(args.org_id)
+
+    print(f"Seeding under org_id='{org_id}'")
+    print()
+
     created: list[tuple[int, str]] = []
     skipped: list[str] = []
     failed: list[tuple[str, str]] = []
@@ -124,7 +158,7 @@ def main() -> None:
         name = entry["name"]
         try:
             row = create_subject(
-                org_id=_ORG_ID,
+                org_id=org_id,
                 category_slug="person",
                 name=name,
                 setup_inputs=entry,
@@ -149,7 +183,9 @@ def main() -> None:
         print("Next: trigger a snapshot for each new subject from the dashboard")
         print('  ("Take snapshot" button) or via the CLI:')
         for _, name in created:
-            print(f'    python -m app.refresh "{name}"')
+            print(f'    python -m app.refresh "{name}" --org-id {org_id}')
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
