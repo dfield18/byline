@@ -1,6 +1,6 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-23**
+> A pulse-check of where the project sits **as of 2026-05-25**
 > — three new spokes (Narrative, Sources, Prompts) stood up
 > from scratch, then a full Overview-spoke restructure into a
 > five-band narrative layout with horizontal sub-nav, then a
@@ -1065,6 +1065,69 @@ run_full_refresh_pipeline(subject_id, name, *, max_concurrency, historical_as_of
 - **Migration runner**: no `schema_migrations` tracking table; migrations applied by hand. The 008/009 gap (renumber accident) is hidden by manual application.
 - **Heartbeat-based reaper**: a `last_heartbeat_at` column on `jobs` / `refresh_runs` would let the reaper kick faster (e.g. 90s after last beat) without false positives on legitimately-long jobs. Today's threshold is a generous 10 min; fine for v1.
 - **Multi-snapshot data for non-Vance subjects**: Vance now has 13 snapshots; Rubio / DeSantis / Ramaswamy / Youngkin still single-snapshot, so their Trend sections still hide (`hasTrend = weeks.length > 1`). If the trend story matters for them, run historical backfills via the (now full-pipeline-capable) CLI.
+
+---
+
+## Follow-up session #6 (2026-05-25, evening) — Overview/Visibility design parity round 2 + cross-spoke declutter
+
+Fifteen commits on `main`. Picked up immediately after session #5 wrapped and ran as a long iterative design pass — Overview Vitals first (six commits walking the "By platform" subline through three placements before settling), then a cross-spoke parity pass that extracted three new shared components, then a Visibility declutter sweep that removed redundant mention-rate surfaces, then small targeted polish on Trend + Sources.
+
+### Overview Vitals iteration (commits 1-6)
+
+Six commits in sequence on the three Overview KPI tiles (AI Mention Rate · First Result Mentioned · Net Favorability). The "By platform" subline (Mention Rate by platform mini-bar) went through a deliberate walk before landing:
+
+- **`369bd76`** — Fold the standalone "Mention rate by platform" strip into the AI Mention Rate KPI tile (kill the sibling section so there's no redundancy with the tile that now owns the breakdown).
+- **`cfcd480`** — Add the same by-platform subline to the other two KPI tiles. Reorder so First Result Mentioned sits between Mention Rate + Net Favorability (matches the "did we appear → did we appear first → how were we framed" mental progression).
+- **`d0bba34`** — Drop the `KpiGauge` bar from all three tiles. Benchmark caption stays as plain text (`"Subject-set avg: 35%"`). Gauge was repeating the headline value at half the resolution; numeric benchmark caption carries the same compare without the visual weight.
+- **`4d17ef3`** — Move the by-platform subline BELOW the sparkline (was above). Chart leads, breakdown follows. Reads as supporting detail rather than competing with the value.
+- **`f98ef91`** — Keep the by-platform subline only on AI Mention Rate; drop from First Result + Net Favorability. The first-result and favorability breakdowns weren't pulling weight relative to the visual density they added — Mention Rate is the canonical platform-split metric.
+
+End state on the Vitals row: three tiles with consistent value + delta + sparkline + benchmark caption, plus an AI-Mention-Rate-only by-platform mini-bar that anchors the "who's seeing me where" read without forcing it on tiles whose answer isn't in their per-platform splits.
+
+### Cross-spoke shared components — extracted in this session
+
+Three new shared modules in `web/components/dashboard/` + `web/lib/`. Pulled out because the parity sweep (next section) was about to copy-paste the same logic into Visibility, and prior copy-paste between Overview and Visibility had already drifted (KPI color thresholds at 0.7/0.4 on Visibility vs 0.6/0.3 on Overview):
+
+- **`web/components/dashboard/KpiVitalsTile.tsx`** — Shared KPI tile (label + value + delta + sparkline + benchmark caption + platform-breakdown subline). `hasSpark = sparkValues !== undefined && sparkValues.length > 0` so callers can omit the spark slot entirely (not just hide it) — `items-stretch` rows then equalize to the shorter height.
+- **`web/components/dashboard/Sparklines.tsx`** — Shared `MiniSpark` + `TinySpark` + `buildMonoCubicPath` (Fritsch-Carlson monotone cubic SVG paths). MiniSpark renders a `"1 of N snapshots scored so far"` placeholder when `< 2` data points; this placeholder is later why Weakest Topic loses its spark on Visibility.
+- **`web/components/dashboard/BottomLineBlock.tsx`** — Shared bottom-line hero (text + `bodyTone?: "warning" | "neutral"`). Used by both Overview's verdict card and Visibility's vitals briefing — replaces two near-identical parallel implementations.
+- **`web/lib/kpiThresholds.ts`** — Single-source-of-truth color thresholds for `mention_rate` / `top_result_rate` / `avg_rank` / `avg_tone` / `weakest_topic_recall` / `risk_frame_rate` / `citation_rate` / `net_sentiment`. Exports `getKpiValueColor(kind, value)` resolver. The color rule everywhere: **value's color reflects absolute strength tier; delta is colored by direction independently** — a strong-but-slipping value reads as green number + amber down-arrow intentionally. Polarity differs per metric (rate metrics higher-better, avg_rank lower-better inverse-tier, avg_tone signed symmetric).
+
+### Visibility ↔ Overview parity pass (commits 7-8)
+
+- **`4047759`** — Consistency pass: shared `BottomLineBlock` lifted out of Overview and reused on Visibility, threshold alignment via `kpiThresholds`, `pp` → `pts` unit sweep, pluralization fixes ("1 platforms" → "1 platform"), `KpiGauge` removal where the numeric caption already carried the compare. 7 files.
+- **`69e1b1e`** — Full KPI parity via `KpiVitalsTile` shared component + `kpiThresholds` shared module. Bar / spark / delta restored on both spokes from the same primitive. Eliminates the "Visibility colored 0.7/0.4, Overview colored 0.6/0.3" drift that this session inherited.
+
+### Visibility declutter (commits 9, 11, 12)
+
+- **`9e456eb`** — Disambiguate per-topic snapshot vs all-topics table. **Step 0 confirmed Case A — granularity, not bug**: Platform Snapshot showed per-topic readings while Platform Change Detail aggregated across all topics, so the same platform reading two different numbers on the same page was confusing but correct. Relabeled both sections so the granularity is explicit in the section titles + helper copy.
+- **`ba3566d`** — Drop the duplicate Mention Rate column from the Platforms table + drop the AI Mention Rate KPI sparkline (the full Trend chart sits directly below, making the per-tile spark redundant). Two overlapping views collapsed into one.
+- **`7f23e97`** — Drop the remaining KPI sparklines (First Mention Share, Weakest Topic Visibility). `items-stretch` was equalizing all 4 tiles to the tallest two (the ones still with sparks), leaving the others padded with whitespace. With the Trend chart owning the time-series story, per-tile sparks were redundant; tiles now share the compact anatomy.
+
+### Competition spoke (commit 10)
+
+- **`30c0782`** — Shared `kpiThresholds` adopted on Standing tiles (was using local constants), Trend chart legend chips made click-toggleable via new `defaultVisibleOverlays?: string[]` prop on `TrendOverTime`, duplicate movers removed from the snapshot-diff strip (subject was being counted in both the subject row and the field-wide consolidation line), Standing KPI band merged into the same Card as the ranking table (was two stacked Cards with the same data, the gap between them broke the visual tie).
+
+### Trend chart polish (commits 13, 14)
+
+- **`6185dda`** — Lighter heatmap legend (dropped Healthy/Mid/Gap tier swatches; the section tooltip + cell hover already explain the tiers, and the auto-summary line below the grid carries the gap count explicitly so colorblind readers still get the read). Per-platform Trend overlays recede further behind the subject's "Overall" line — new `overlayStrokeWidth?: number` prop on `TrendOverTime` (default 2, matches Competition); Visibility passes `overlayOpacity={0.35}` + `overlayStrokeWidth={1.25}` so the four LLM lines sit as reference context, not co-equal series. Competition's heavier styling (0.5 / 2) unchanged so its 6-competitor chart stays legible.
+- **`61d9cf7`** — Move the chart's `helperText` from below the chart to above. Was sitting below the legend chips and the "What changed" delta line, which made the lower half of the card busy and pushed the deltas (the actual takeaway) into the middle of the read. Visibility's `SectionTitle` description dropped at the same time — the helperText now sits directly above the chart and says the same thing in more specific terms (names the subject, defines mention rate). Both spokes inherit the move since `TrendOverTime` is shared.
+
+### Sources zebra stripe (commit 15)
+
+- **`f3b3a55`** — Overview Sources list: `bg-muted/40` on rows 2 + 4 + … (idx % 2 === 1) for horizontal scan tracking. Hover state still wins via the more-saturated `accent/60` background.
+
+### Cross-spoke session arc
+
+The unifying thread: Overview and Visibility had the same shape but different implementations of half a dozen primitives (KPI tiles, sparklines, bottom-line cards, color thresholds). Every drift this session caught — color tier mismatches, two parallel `MiniSpark` implementations, copy/paste `BottomLineBlock` markup with subtle padding differences — came from the parallel-implementation pattern. Three shared modules + one shared lib later, both spokes consume the same primitives and a future "change the KPI color rule" or "tighten the BottomLine font" lands in one file.
+
+### Open follow-ups (still owed)
+
+- **Narrative + Sources spokes** still on pre-treatment chrome (pre-session-#4 list item — no progress this session).
+- **Visibility / Competition page-file size** still ~2200 / ~2700 lines. The new shared components let some sections extract more cleanly now.
+- **`heatTier` / `sovTier`** still duplicated between Visibility and Competition (carried over from session #4's open follow-up — same pattern as today's `kpiThresholds` lift, just not done yet).
+- **Metric rename** (`competitive[].sov` → `competitive[].mention_rate`) — session #5 follow-up, still open. Today didn't touch the backend.
+- **Recurring "params is async" validation hook noise** — fired on every Edit this session on a pre-existing line 590 of `visibility/page.tsx` unrelated to any edit. Worth filing if the hook can be taught to scope its check.
 
 ---
 
