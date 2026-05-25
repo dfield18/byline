@@ -894,17 +894,6 @@ export default async function VisibilityPage({
     }
     return Math.round(((latest as number) - (prior as number)) * 100);
   };
-  // Weakest-topic sparkline pinned to the CURRENT weakest topic
-  // (the topic identity can change snapshot-to-snapshot; the spark
-  // shows how THIS topic — whichever one is weakest today — has
-  // trended over time). Null when no topic_trajectories row matches
-  // (newly-added topic) or no weakest topic identified.
-  const weakestTopicSparkValues =
-    weakestTopic && data.topic_trajectories
-      ? data.topic_trajectories.find(
-          (t) => t.label === weakestTopic.label,
-        )?.mention_rate ?? null
-      : null;
   const kpis: KpiCard[] = [
     {
       label: "AI Mention Rate",
@@ -969,13 +958,17 @@ export default async function VisibilityPage({
       gaugeBenchmark: bm.first_mention_rate_avg,
       caption: bmCaption(bm.first_mention_rate_avg, (v) => formatPct(v)),
       anchor: "position",
-      // trajectory.top_result_rate uses the same definition as the
-      // backend's first_mention_rate per the api.ts type comment —
-      // both are "share of unnamed-layer responses where the
-      // subject ranks first." Spark + delta align with the headline.
+      // Delta still rendered as ↑/↓ N pts beside the value — single
+      // number, not a duplicate of any chart.
       deltaPp: deltaFromSeries(data.trajectory.top_result_rate),
-      sparkValues: data.trajectory.top_result_rate,
-      sparkFormat: (v) => formatPct(v),
+      // Sparkline intentionally omitted on this tab — paired with the
+      // AI Mention Rate spark drop (commit ba3566d) so all four
+      // Visibility KPI cards share the same compact anatomy and the
+      // vitals row equalizes at the shorter height. The full Trend
+      // chart below covers any per-metric trend story a reader
+      // wants; per-card sparklines duplicate that scroll-adjacent
+      // surface. Overview keeps its sparklines because Overview has
+      // no on-tab Trend chart to defer to.
     },
     (() => {
       // Reformed to mirror the Overview spoke's "Weakest topic
@@ -1041,12 +1034,16 @@ export default async function VisibilityPage({
               ? "No material gap across tracked topics"
               : "No tracked topics",
         anchor: "topics",
-        // Spark pinned to whichever topic is weakest TODAY — so a
-        // reader sees how this topic has trended over time, not a
-        // moving-target series across different topics.
-        sparkValues: weakestTopicSparkValues ?? undefined,
-        sparkFormat: (v) => formatPct(v),
-        deltaPp: deltaFromSeries(weakestTopicSparkValues ?? undefined),
+        // Sparkline + delta intentionally omitted — paired with the
+        // First Mention Share + AI Mention Rate spark drops so the
+        // four Visibility KPI cards share the same compact anatomy
+        // (value + suffix + standaloneCaption only here, since this
+        // tile has no benchmark gauge either). The MiniSpark also
+        // routinely fell back to its "1 of N snapshots scored so
+        // far" placeholder when the weakest topic had only one
+        // measured point — that placeholder was the visible
+        // symptom of the missing data, not useful information for
+        // the reader.
       };
     })(),
   ];
