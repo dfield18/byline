@@ -463,48 +463,99 @@ function TopicBarRow({
 }
 
 // Top narrative clusters list for the Band 2 Top Narratives card.
-// Surfaces the AI's RECURRING FRAMINGS — e.g. "MAGA Alignment",
-// "Foreign Policy Critique" — and how often each appears across
-// responses. Plain-text treatment per design: cluster name on the
-// left, share % on the right, no dots / no color tinting. The
-// sibling Visibility-by-topic tile up in the Vitals row carries
-// the bar visualization; this card stays uniformly text to
-// differentiate the two surfaces.
+// Editorial treatment: a prose lead sentence names the dominant
+// AI framing (with a sentiment qualifier when meaningful), then
+// a smaller supporting list surfaces the next few clusters.
+// Earlier the card was a flat 4-row list of name + %, which read
+// as data even though the underlying signal — "what story is AI
+// telling about this subject?" — is editorial. The Visibility-by-
+// topic tile up in the Vitals row carries the bar visualization;
+// this card stays text-led to differentiate the two surfaces and
+// to give the dominant framing actual prose weight.
 function TopNarrativesList({
   clusters,
+  subjectName,
 }: {
   clusters: SubjectOverview["narrative_clusters"];
+  subjectName: string;
 }) {
+  const safePct = (share: number): number => {
+    // Defensive: finite-check first (Math.min/max propagate NaN,
+    // so a backend regression producing NaN share would render
+    // "NaN%" without this guard), then clamp to [0,1].
+    const f = Number.isFinite(share)
+      ? Math.max(0, Math.min(1, share))
+      : 0;
+    return Math.round(f * 100);
+  };
   const sorted = clusters
     .slice()
     .sort((a, b) => b.share - a.share)
     .slice(0, 4);
   if (sorted.length === 0) return null;
+  const top = sorted[0];
+  const rest = sorted.slice(1);
+  // Sentiment qualifier — uses the same ±0.1 inclusive thresholds
+  // the backend uses for net_sentiment classification, so the
+  // word ("favorable" / "critical" / "neutral") agrees with how
+  // the analyzer scored the cluster's responses. Null sentiment_
+  // mean leaves the qualifier off entirely rather than guessing.
+  const toneWord =
+    top.sentiment_mean === null
+      ? null
+      : top.sentiment_mean >= 0.1
+        ? "favorable"
+        : top.sentiment_mean <= -0.1
+          ? "critical"
+          : "neutral";
+  const toneClass =
+    toneWord === "favorable"
+      ? "text-success"
+      : toneWord === "critical"
+        ? "text-warning"
+        : "text-foreground";
   return (
-    <ul className="mt-4 space-y-2">
-      {sorted.map((c) => {
-        // Defensive: clamp share to [0,1] after a finite check
-        // (Math.min/max propagate NaN, so backend regression
-        // producing NaN share would land as a "NaN%" without the
-        // explicit guard).
-        const safeShare = Number.isFinite(c.share)
-          ? Math.max(0, Math.min(1, c.share))
-          : 0;
-        return (
-          <li
-            key={c.name}
-            className="flex items-baseline gap-3 text-[13px] leading-snug"
-          >
-            <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-              {c.name}
-            </span>
-            <span className="tabular-nums font-semibold text-foreground">
-              {Math.round(safeShare * 100)}%
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+    <div className="mt-3">
+      {/* Editorial lead — names the dominant framing in prose, with
+          the cluster name and sentiment tone visually emphasized so
+          the eye lands on the finding, not the percentage. */}
+      <p className="text-[14px] leading-relaxed text-foreground">
+        AI&apos;s most common framing of {subjectName} is{" "}
+        <span className="font-semibold">{top.name}</span>
+        {toneWord !== null && (
+          <>
+            {" — a "}
+            <span className={`font-medium ${toneClass}`}>{toneWord}</span>
+            {" angle"}
+          </>
+        )}
+        {", appearing in "}
+        <span className="font-semibold tabular-nums">
+          {safePct(top.share)}%
+        </span>
+        {" of responses."}
+      </p>
+      {rest.length > 0 && (
+        <>
+          <p className="mt-4 text-[11px] uppercase tracking-wider text-muted-foreground">
+            Also surfacing
+          </p>
+          <ul className="mt-2 space-y-2">
+            {rest.map((c) => (
+              <li
+                key={c.name}
+                className="flex items-baseline gap-3 text-[12.5px] leading-snug text-foreground/85"
+              >
+                <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                <span className="tabular-nums font-medium text-foreground/70">
+                  {safePct(c.share)}%
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1705,7 +1756,10 @@ export default async function SubjectOverviewPage({
                         <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-primary mb-3">
                           Top narratives
                         </div>
-                        <TopNarrativesList clusters={data.narrative_clusters} />
+                        <TopNarrativesList
+                          clusters={data.narrative_clusters}
+                          subjectName={data.subject_name}
+                        />
                         <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
                           Shares can overlap · values don&apos;t sum to 100%
                         </p>
