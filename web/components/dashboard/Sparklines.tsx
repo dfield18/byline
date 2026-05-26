@@ -131,6 +131,7 @@ export function MiniSpark({
   labels,
   format,
   color = "var(--primary)",
+  ariaLabel,
 }: {
   values: (number | null)[];
   isHistorical: boolean[];
@@ -140,6 +141,14 @@ export function MiniSpark({
   // "0.75", tone shows "+12% positive" not "0.12", etc.).
   format: (v: number | null) => string;
   color?: string;
+  // Accessible label for the SVG. The sparkline is the primary
+  // visual of the KPI tile but conveys no information to AT users
+  // without this label. KpiVitalsTile passes the metric name so a
+  // screen reader announces e.g. "AI Mention Rate trend, latest
+  // 50%, 13 snapshots". Callers without a meaningful label (e.g.
+  // decorative usage) can leave undefined and the SVG goes
+  // aria-hidden.
+  ariaLabel?: string;
 }) {
   const numericValues = values.filter((v): v is number => v !== null);
   if (values.length > 0 && numericValues.length === 0) {
@@ -234,6 +243,9 @@ export function MiniSpark({
           viewBox={`0 0 ${w} ${h}`}
           preserveAspectRatio="none"
           className="h-full w-full"
+          role={ariaLabel ? "img" : undefined}
+          aria-label={ariaLabel}
+          aria-hidden={ariaLabel ? undefined : true}
         >
           <line
             x1={pad}

@@ -82,7 +82,15 @@
   --ring: oklch(0.5 0.13 245);
 
   --gold: oklch(0.65 0.13 75);
-  --warning: oklch(0.6 0.16 50);
+  /* Darkened from L=0.6 → L=0.5 to hit WCAG AA 4.5:1 on the white
+     card background. The prior L=0.6 amber landed at ~3.0:1, which
+     fails AA for normal-weight body text — used in the BottomLine
+     body emphasis, "critical" sentiment word in Top Narratives,
+     warning-toned delta arrows, and "Weak" status pills. Hue and
+     chroma kept the same so warning-toned bars + 15-22% tinted
+     backgrounds (heatmap "gap" cells, etc.) read consistently
+     with the prior amber. */
+  --warning: oklch(0.5 0.16 50);
   --success: oklch(0.55 0.13 155);
 
   --chart-1: oklch(0.5 0.13 245);

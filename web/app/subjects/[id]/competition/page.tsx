@@ -20,7 +20,26 @@ import { CompetitiveScatter } from "./CompetitiveScatter";
 import { TopicProminenceFilter } from "./TopicProminenceFilter";
 import { LandscapePlatformFilter } from "./LandscapePlatformFilter";
 import { OverviewSubNav } from "../OverviewSubNav";
-import { TrendOverTime } from "../visibility/TrendOverTime";
+// Aliased as `nextDynamic` because this page also exports the
+// route-segment config `export const dynamic = "force-dynamic"`
+// (further down). Importing the next/dynamic helper under its
+// own name would collide on the identifier.
+import nextDynamic from "next/dynamic";
+
+// TrendOverTime pulls in recharts (~390 KB shared chunk). Dynamic-
+// importing splits the recharts dependency off this spoke's
+// initial First Load JS so the chunk fetches in parallel with
+// hydration instead of blocking it. Loading placeholder matches
+// Competition's larger 340 px chart height to prevent layout
+// shift on first paint.
+const TrendOverTime = nextDynamic(
+  () => import("../visibility/TrendOverTime").then((m) => m.TrendOverTime),
+  {
+    loading: () => (
+      <div className="h-[340px] w-full rounded-md bg-muted/20" />
+    ),
+  },
+);
 import { TrendWindowToggle } from "../visibility/TrendWindowToggle";
 import {
   getSubject,

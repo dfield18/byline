@@ -38,7 +38,29 @@ import {
   KPI_WEAK_MENTION_RATE,
   getKpiValueColor,
 } from "@/lib/kpiThresholds";
-import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
+// Aliased as `nextDynamic` because this page also exports the
+// route-segment config `export const dynamic = "force-dynamic"`
+// (further down). Importing the next/dynamic helper under its
+// own name would collide on the identifier.
+import nextDynamic from "next/dynamic";
+
+// CompetitorBarsFromData pulls in recharts via the shared Charts
+// barrel (~390 KB). Dynamic-importing splits the recharts chunk
+// off Overview's initial First Load JS — the SoV bar list lands
+// in the lower-middle of the page, so a loading placeholder
+// matching the chart's typical 280 px height avoids layout shift
+// while the chunk fetches.
+const CompetitorBarsFromData = nextDynamic(
+  () =>
+    import("@/components/dashboard/Charts").then(
+      (m) => m.CompetitorBarsFromData,
+    ),
+  {
+    loading: () => (
+      <div className="h-[280px] w-full rounded-md bg-muted/20" />
+    ),
+  },
+);
 import {
   getSubject,
   getSubjectOverview,
@@ -138,11 +160,22 @@ function KpiTooltipIcon({
     align === "right" ? "right-0"
     : align === "left" ? "left-0"
     : "left-1/2 -translate-x-1/2";
+  // Wrapping span is `tabIndex={0}` + `role="button"` + aria-label so
+  // a keyboard / SR user reaches the tooltip via Tab and hears the
+  // text — the hover-only reveal used previously was unreachable
+  // without a pointer. `group-focus-within` mirrors the hover reveal
+  // so the popover appears on focus too, with a visible focus ring.
   return (
-    <span className="group relative inline-flex">
-      <Info className="h-3 w-3 opacity-50 hover:opacity-100 transition-opacity cursor-help" />
+    <span
+      tabIndex={0}
+      role="button"
+      aria-label={text}
+      className="group relative inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+    >
+      <Info className="h-3 w-3 opacity-50 hover:opacity-100 group-focus-within:opacity-100 transition-opacity cursor-help" />
       <span
-        className={`pointer-events-none absolute ${pos} bottom-full mb-2 w-56 rounded-md border border-border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground opacity-0 group-hover:opacity-100 transition-opacity z-30 shadow-lg`}
+        aria-hidden
+        className={`pointer-events-none absolute ${pos} bottom-full mb-2 w-56 rounded-md border border-border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity z-30 shadow-lg`}
       >
         {text}
       </span>

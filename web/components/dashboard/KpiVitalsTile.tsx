@@ -123,11 +123,17 @@ function deltaToneClass(deltaPp: number): string {
 
 // Tooltip icon component lifted inline so the tile doesn't have a
 // cross-page dependency on either spoke's local KpiTooltipIcon. Same
-// shape: small "i" glyph with hover-revealed text box.
+// shape: small "i" glyph with hover-revealed text box. Keyboard-
+// focusable + role="button" + visible focus ring so a tabbing user
+// reaches the tooltip via the SR-announced aria-label; pure-hover
+// reveal was an a11y regression vs the Visibility/Competition page-
+// local implementations.
 function KpiTooltipIcon({ text }: { text: string }) {
   return (
     <span
-      className="inline-flex h-3.5 w-3.5 flex-shrink-0 cursor-help items-center justify-center rounded-full text-[9px] font-bold text-muted-foreground/70 ring-1 ring-inset ring-muted-foreground/30 hover:text-foreground/80 hover:ring-foreground/40 transition-colors"
+      tabIndex={0}
+      role="button"
+      className="inline-flex h-3.5 w-3.5 flex-shrink-0 cursor-help items-center justify-center rounded-full text-[9px] font-bold text-muted-foreground/70 ring-1 ring-inset ring-muted-foreground/30 hover:text-foreground/80 hover:ring-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:text-foreground/80 transition-colors"
       title={text}
       aria-label={text}
     >
@@ -288,6 +294,7 @@ export function KpiVitalsTile(props: KpiVitalsTileProps) {
             labels={sparkLabels ?? new Array(sparkValues!.length).fill("")}
             format={sparkFormat ?? ((v) => (v === null ? "—" : String(v)))}
             color={fillColor}
+            ariaLabel={`${label} trend, ${sparkValues!.length} snapshot${sparkValues!.length === 1 ? "" : "s"}`}
           />
           {platformBreakdown &&
             (() => {

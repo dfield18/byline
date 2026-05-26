@@ -32,7 +32,26 @@ import {
   KPI_WEAK_MENTION_RATE,
   getKpiValueColor,
 } from "@/lib/kpiThresholds";
-import { TrendOverTime } from "./TrendOverTime";
+// Aliased as `nextDynamic` because this page also exports the
+// route-segment config `export const dynamic = "force-dynamic"`
+// (further down). Importing the next/dynamic helper under its
+// own name would collide on the identifier.
+import nextDynamic from "next/dynamic";
+
+// TrendOverTime is a "use client" component that pulls in recharts
+// (~390 KB shared chunk). Dynamic-importing it splits the recharts
+// dependency off the page's initial First Load JS so the chunk
+// fetches in parallel with hydration instead of blocking it. The
+// loading placeholder reserves the chart's 320 px height to
+// prevent layout shift when the real chart mounts.
+const TrendOverTime = nextDynamic(
+  () => import("./TrendOverTime").then((m) => m.TrendOverTime),
+  {
+    loading: () => (
+      <div className="h-[320px] w-full rounded-md bg-muted/20" />
+    ),
+  },
+);
 import { OverviewSubNav } from "../OverviewSubNav";
 import { VisibilityTopicFilter } from "./VisibilityTopicFilter";
 import { VisibilityPlatformFilter } from "./VisibilityPlatformFilter";
