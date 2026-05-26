@@ -34,6 +34,8 @@ import { TinySpark } from "@/components/dashboard/Sparklines";
 import { KpiVitalsTile } from "@/components/dashboard/KpiVitalsTile";
 import {
   KPI_PLATFORM_SPREAD_LOPSIDED,
+  KPI_STRONG_MENTION_RATE,
+  KPI_WEAK_MENTION_RATE,
   getKpiValueColor,
 } from "@/lib/kpiThresholds";
 import { CompetitorBarsFromData } from "@/components/dashboard/Charts";
@@ -160,9 +162,10 @@ function _hasFiniteRecall(
   // n_responses > 0 is the load-bearing check: the backend can
   // return topic rows with {n_responses: 0, ai_recall: 0} when a
   // topic is configured but no responses have scored it yet. A
-  // finite ai_recall isn't enough — a 0% bar in the Gap card
-  // reads as "AI never mentions this topic" when the truth is "we
-  // haven't measured this topic yet". Both conditions must hold.
+  // finite ai_recall isn't enough — a 0% bar in the Visibility-by-
+  // topic tile reads as "AI never mentions this topic" when the
+  // truth is "we haven't measured this topic yet". Both conditions
+  // must hold.
   return (
     t.n_responses > 0 &&
     t.ai_recall !== null &&
@@ -349,13 +352,13 @@ function formatComparator(labels: string[]): string {
 // the bars reinforce the sentence without claiming a separate
 // section. Same color tiers + weakest-topic warning treatment as the
 // old TopicRecallChart so visual semantics carry over.
-// Shared "is there actually a gap to surface?" check — true only
-// when there are 2+ topics with finite recall AND at least one
-// differs from the strongest by more than the tie epsilon. Used
-// by both the Band 2 card label (when present) and the Vitals
-// row's Visibility-by-topic tile (skip warning tone when there's
-// no real spread). Single source of truth so the two surfaces
-// can never disagree about whether a gap exists.
+// Float-equality epsilon for tie detection across both topic-
+// coverage gaps (hasRealVisibilityGap) and SoV ranking ties
+// (deriveCompetitivePosition). One module-level constant so the
+// two surfaces can never disagree about what "tied" means at the
+// precision boundary. Earlier this file had a separate
+// SOV_TIE_EPSILON with the same value (0.001) — consolidated
+// here to remove the duplicate.
 const TIE_EPSILON = 0.001;
 function hasRealVisibilityGap(
   topics: SubjectOverview["topic_coverage"],
@@ -372,15 +375,17 @@ function hasRealVisibilityGap(
   );
 }
 
-// Shared row used by the Band 2 Top Narratives card
-// (TopNarrativesList). Generic so a future caller can reuse the
-// same label/bar/percent treatment; sort direction, highlight
-// override, and bar tone are caller-supplied.
+// Shared row used by the Vitals Visibility-by-topic tile and
+// (previously) the Band 2 Top Narratives card. Generic so a
+// future caller can reuse the same label/bar/percent treatment;
+// sort direction, highlight override, and bar tone are caller-
+// supplied.
 //
 // `highlight` semantics:
-//   "weakest" → force warning tone at higher opacity (Gap card)
-//   "strongest" → force success tone at higher opacity (Asset card)
-//   null → use natural tier color (success ≥70 / primary ≥40 / warning)
+//   "weakest" → force warning tone at higher opacity
+//   "strongest" → force success tone at higher opacity
+//   null → use natural tier color (success ≥ KPI_STRONG_MENTION_RATE
+//          / primary ≥ KPI_WEAK_MENTION_RATE / warning)
 function TopicBarRow({
   label,
   pct,
@@ -391,17 +396,27 @@ function TopicBarRow({
   pct: number;
   highlight: "weakest" | "strongest" | null;
   // Optional explicit semantic tone for the bar — takes precedence
-  // over `highlight` when set. Used by the Top Narratives card
-  // where each cluster's bar should reflect its mean SENTIMENT
-  // (favorable / critical / neutral), not its position in the
-  // sort. Leave undefined for the Gap card to keep the existing
-  // highlight + tier-color behavior.
+  // over `highlight` when set. Previously used by the Band 2 Top
+  // Narratives card to reflect each cluster's mean SENTIMENT
+  // (favorable / critical / neutral) rather than its sort position;
+  // that card is now text-only so this prop has no consumer today,
+  // but the API is retained for a future caller that wants the
+  // sentiment-tinted bar treatment.
   tone?: "success" | "warning" | "neutral";
 }) {
+  // Tier color reads from the shared kpiThresholds mention-rate
+  // ladder (KPI_STRONG = 60, KPI_WEAK = 30) so the SAME rate
+  // colors identically here and on the sibling KpiVitalsTile that
+  // sits in the same Vitals row. Earlier this used a hand-rolled
+  // 70/40 ladder, which meant a 65% mention rate read green here
+  // and neutral on the AI Mention Rate tile next to it — a real
+  // cross-tile incoherence the shared thresholds module was
+  // extracted to prevent.
+  const pctFraction = pct / 100;
   const tierColor =
-    pct >= 70
+    pctFraction >= KPI_STRONG_MENTION_RATE
       ? "var(--success)"
-      : pct >= 40
+      : pctFraction >= KPI_WEAK_MENTION_RATE
         ? "var(--primary)"
         : "var(--warning)";
   const toneColor =
@@ -433,8 +448,9 @@ function TopicBarRow({
         <div className="flex items-center gap-1.5 text-[12px] text-foreground/80 mb-1">
           {/* Sentiment dot — colorblind-friendly tone indicator
               that pairs with the bar color. Only rendered when an
-              explicit tone is set (i.e. narrative-cluster context),
-              so the Gap card rows aren't visually crowded. */}
+              explicit tone is set (narrative-cluster context),
+              so the Visibility-by-topic rows aren't visually
+              crowded. */}
           {toneColor && (
             <span
               aria-hidden
@@ -581,7 +597,7 @@ function pickTopWithSubject(
   // Don't displace a peer with real data with an empty-bar subject.
   // Epsilon-bound rather than strict > 0 so float round-off can't
   // sneak a "0.0000001 mention" subject into the chart.
-  if (subject.sov < SOV_TIE_EPSILON) return top;
+  if (subject.sov < TIE_EPSILON) return top;
   return [...sorted.slice(0, n - 1), subject];
 }
 
@@ -689,8 +705,8 @@ type CompetitivePositionStats = {
 // should not depend on display-precision rounding). Tie detection
 // inside deriveCompetitivePosition uses a per-call rounded check
 // keyed to the display unit (pp) for consistency with the gap
-// value.
-const SOV_TIE_EPSILON = 0.001;
+// value. The previous SOV_TIE_EPSILON constant (also 0.001) was
+// consolidated into the module-level TIE_EPSILON above.
 function deriveCompetitivePosition(
   rows: SubjectOverview["competitive"],
 ): CompetitivePositionStats {
@@ -775,35 +791,24 @@ function deriveCompetitivePosition(
 
 function TrajectoryStrip({
   trajectory,
-  benchmarks,
   perPlatformKpis,
   topicCoverage,
   subjectName,
 }: {
   trajectory: SubjectOverview["trajectory"];
-  benchmarks: SubjectOverview["subject_set_benchmarks"];
   // Per-platform breakdown for the trajectory KPI tiles. The
   // payload ships mention_rate, avg_sentiment, and
   // first_mention_rate per platform on a single per_platform_kpis
   // array; each metric pulls the field it needs.
   perPlatformKpis: SubjectOverview["per_platform_kpis"];
   // Topic-coverage feeds the rightmost "Visibility by topic" tile
-  // as a snapshot-only KPI (value = weakest topic's mention rate,
-  // suffix = topic name). The full per-topic bar list lives on
-  // the Band 2 Top Narratives card's companion, the Visibility
-  // deep-dive, and (previously) the Band 2 Gap card — this tile
-  // is the at-a-glance summary.
+  // — a per-topic bar list (top 4 sorted desc) with the weakest
+  // row warning-toned. The Visibility deep-dive's per-topic
+  // tables carry the full snapshot detail; this tile is the
+  // at-a-glance summary up in the Vitals row.
   topicCoverage: SubjectOverview["topic_coverage"];
   subjectName: string;
 }) {
-  // Cross-subject benchmark caption — null when there's only one
-  // subject in the set (no peer to compare against) or when the
-  // backend hasn't computed an average for this metric.
-  const bmCaption = (avg: number | null): string | null => {
-    if (avg === null || !Number.isFinite(avg)) return null;
-    if (!benchmarks || benchmarks.n_subjects <= 1) return null;
-    return `vs ${formatPct(avg, 0)} subject-set avg`;
-  };
   const metrics: {
     title: string;
     subtitle?: string;
@@ -1628,7 +1633,6 @@ export default async function SubjectOverviewPage({
                         below. */}
                     <TrajectoryStrip
                       trajectory={data.trajectory}
-                      benchmarks={data.subject_set_benchmarks}
                       perPlatformKpis={data.per_platform_kpis}
                       topicCoverage={data.topic_coverage}
                       subjectName={data.subject_name}

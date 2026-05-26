@@ -150,18 +150,6 @@ function currentPosition(row: {
   return { label: "Low visibility", tone: "warning" };
 }
 
-function trendVerdict(deltaPp: number | null | undefined): {
-  label: string;
-  tone: StatusTone;
-} {
-  if (deltaPp === null || deltaPp === undefined || !Number.isFinite(deltaPp)) {
-    return { label: "Insufficient data", tone: "neutral" };
-  }
-  if (deltaPp >= 10) return { label: "Rising", tone: "success" };
-  if (deltaPp <= -10) return { label: "Declining", tone: "warning" };
-  return { label: "Stable", tone: "primary" };
-}
-
 // First / last measured index in a sparse trajectory — used to
 // compute Change values per-row when the underlying array has
 // nulls (backfill gaps). Same approach as the Visibility spoke.
@@ -1341,16 +1329,6 @@ export default async function CompetitionPage({
     aiRecall: data.trajectory.ai_recall,
     competitorTrajectories: data.competitor_trajectories,
   });
-  // Relabel the "Overall mention rate" entry to the subject's name —
-  // shorter and clearer in the Standing context. The metric is still
-  // mention rate; the chip's value matches the SoV column reading
-  // (which IS mention rate despite the column header's label).
-  const snapshotDiffDeltas = snapshotDiff.deltas.map((d) =>
-    d.kind === "overall"
-      ? { ...d, label: data.subject_name }
-      : d,
-  );
-
   // Inline advisory used on sections that genuinely CAN'T scope on
   // the active filters (Trend chart's competitor lines, Co-Mentions
   // pairings) — surfacing it makes the data-limitation transparent
@@ -2320,6 +2298,14 @@ export default async function CompetitionPage({
                       overlays={trendOverlays}
                       helperText="Mention rate shows the share of AI answers that mentioned each entity in the tracked prompt set. Click any rival's chip to add or remove its line."
                       overlayOpacity={0.5}
+                      // Explicit at 2 (also the TrendOverTime default) so
+                      // a reader comparing this callsite to Visibility's
+                      // (which passes 1.25) sees the stroke-width choice
+                      // side-by-side rather than inferring "no prop =
+                      // default 2". Competition's 6-competitor lines
+                      // need the heavier stroke for legibility; the
+                      // per-platform overlays on Visibility recede.
+                      overlayStrokeWidth={2}
                       height={340}
                       // Default-visible set: top 3 rivals by current
                       // SoV (the same ranking that drives the

@@ -28,6 +28,7 @@ import { BottomLineBlock } from "@/components/dashboard/BottomLineBlock";
 import { KpiVitalsTile } from "@/components/dashboard/KpiVitalsTile";
 import {
   KPI_STRONG_MENTION_RATE,
+  KPI_TOPIC_GAP_MIN_PP,
   KPI_WEAK_MENTION_RATE,
   getKpiValueColor,
 } from "@/lib/kpiThresholds";
@@ -985,13 +986,12 @@ export default async function VisibilityPage({
       // pages sees one consistent framing of this signal. Caption
       // (renders BELOW the value, matching the screenshot's tile-4
       // pattern) names the topic when the gap is materially below
-      // the mean of the other topics (15pp threshold matches the
-      // Overview tile and the backend's Message Gap rule), otherwise
-      // signals that all tracked topics are clustered together so a
-      // reader doesn't chase a non-issue. No gauge — the gap
-      // framing carries the signal, and there's no subject-set
-      // benchmark for "weakest" to compare against.
-      const MIN_GAP_PP = 15;
+      // the mean of the other topics (KPI_TOPIC_GAP_MIN_PP, shared
+      // with the Overview tile and the backend's Message Gap rule),
+      // otherwise signals that all tracked topics are clustered
+      // together so a reader doesn't chase a non-issue. No gauge —
+      // the gap framing carries the signal, and there's no subject-
+      // set benchmark for "weakest" to compare against.
       const withRecall = topicsSortedDesc.filter(
         (t) => t.ai_recall !== null && Number.isFinite(t.ai_recall),
       );
@@ -1004,7 +1004,7 @@ export default async function VisibilityPage({
           others.reduce((s, t) => s + (t.ai_recall ?? 0), 0) /
           others.length;
         const gapPp = (meanOthers - (weakestTopic.ai_recall ?? 0)) * 100;
-        return gapPp >= MIN_GAP_PP;
+        return gapPp >= KPI_TOPIC_GAP_MIN_PP;
       })();
       const weakestRecall = weakestTopic?.ai_recall ?? null;
       // When a meaningful gap exists, append the topic name as a

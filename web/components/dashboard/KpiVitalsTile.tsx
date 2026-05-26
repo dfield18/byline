@@ -31,7 +31,6 @@
 // treatment elsewhere so any cluster of secondary-surface cards on
 // either spoke reads as one visual family.
 
-import type { ReactNode } from "react";
 import { KpiGauge } from "@/components/dashboard/ui";
 import { MiniSpark } from "@/components/dashboard/Sparklines";
 

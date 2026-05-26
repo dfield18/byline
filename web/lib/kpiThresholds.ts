@@ -80,6 +80,16 @@ export const KPI_WEAK_AVG_TONE = -0.10;
 // only; at/above, this metric is single-platform-dependent.
 export const KPI_PLATFORM_SPREAD_LOPSIDED = 40;
 
+// ── Weakest-topic gap (display + framing) ────────────────────────
+
+// Pp threshold for whether the weakest tracked topic is materially
+// behind the OTHER topics' mean. Above this, the topic name is
+// surfaced ("50% Current events"); below, the snapshot's topics
+// are clustered tightly enough that singling out one as "the gap"
+// is misleading. Aligns with the backend's Message Gap rule so
+// the UI framing agrees with the analyzer's classification.
+export const KPI_TOPIC_GAP_MIN_PP = 15;
+
 // ─── Color resolver ──────────────────────────────────────────────
 
 export type KpiColorKind =
