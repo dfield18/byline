@@ -1379,19 +1379,39 @@ export default async function CompetitionPage({
         {hasCompetitive && (
           <OverviewSubNav
             items={[
-              // Four question-driven bands replace the prior 5-item
-              // layout (Vitals + Trend + Landscape + Ranking + Co-
-              // Mentions). Each band answers one question — no
-              // metric is shown twice across sections. Standing
-              // absorbs Vitals + the Ranking table (with inline SoV
-              // bars replacing the prior standalone bar chart);
-              // Positioning absorbs the Position vs Share scatter
-              // + the Platform Ownership matrix (out of Vitals);
-              // Trend + Co-Mentions stay as their own bands.
+              // Question-driven bands — each band answers one
+              // question; no metric is shown twice across sections.
+              // Standing absorbs Vitals + the Ranking table (with
+              // inline SoV bars replacing the prior standalone bar
+              // chart); Positioning absorbs the Position vs Share
+              // scatter + the Platform Ownership matrix; Trend +
+              // Co-Mentions stay as their own bands.
+              //
+              // Wins & Losses is gated on `hasWinsLossesData` (always
+              // false today — see the comment at the flag's
+              // declaration). When the backend builder for per-
+              // (prompt × entity) co-occurrence lands and the flag
+              // flips true, the section renders and gets a nav item;
+              // until then the array shape mirrors what actually
+              // renders so the active-section observer can't land on
+              // an unreachable target.
               { id: "standing", label: "Standing", num: "01" },
               { id: "positioning", label: "Positioning", num: "02" },
               { id: "trend", label: "Trend", num: "03" },
-              { id: "co-mentions", label: "Co-Mentions", num: "04" },
+              ...(hasWinsLossesData
+                ? [
+                    {
+                      id: "wins-losses",
+                      label: "Wins & Losses",
+                      num: "04",
+                    },
+                  ]
+                : []),
+              {
+                id: "co-mentions",
+                label: "Co-Mentions",
+                num: hasWinsLossesData ? "05" : "04",
+              },
             ]}
             right={
               <>
@@ -2003,6 +2023,76 @@ export default async function CompetitionPage({
                         // primary left accent so the eye lands on
                         // it first, matching the Ranking table's
                         // subject row emphasis.
+                        //
+                        // Auto-summary line below the legend mirrors
+                        // Visibility's heatmap summary (lib pattern,
+                        // see visibility/page.tsx:~1355). Frames the
+                        // subject's per-platform performance in one
+                        // sentence so a reader doesn't need to scan
+                        // the whole row to find the standout cell.
+                        // Subject-row only — comparing the subject's
+                        // performance ACROSS platforms is the most
+                        // actionable read; competitors' cells already
+                        // ride the same grid for context.
+                        const subjectName = data.subject_name;
+                        const subjectCells = ownershipCells
+                          .filter((c) => c.entity_name === subjectName)
+                          .map((c) => ({
+                            platformName:
+                              ownershipPlatforms.find(
+                                (p) => p.slug === c.platform_slug,
+                              )?.name ?? c.platform_slug,
+                            sov: c.sov,
+                          }))
+                          .filter(
+                            (c) =>
+                              c.sov !== null && Number.isFinite(c.sov),
+                          ) as { platformName: string; sov: number }[];
+                        const sortedDesc = subjectCells
+                          .slice()
+                          .sort((a, b) => b.sov - a.sov);
+                        const strongest = sortedDesc[0] ?? null;
+                        const weakest =
+                          sortedDesc[sortedDesc.length - 1] ?? null;
+                        const marginalCells = subjectCells.filter(
+                          (c) => c.sov < SOV_TIER_MARGINAL,
+                        );
+                        const ownershipSummary = (() => {
+                          if (subjectCells.length === 0) return null;
+                          const fmt = (sov: number) =>
+                            `${Math.round(sov * 100)}%`;
+                          if (marginalCells.length === 0) {
+                            // All dominant or contested — frame the
+                            // win + the most-contested context.
+                            if (
+                              strongest &&
+                              weakest &&
+                              strongest !== weakest
+                            ) {
+                              return `Strongest on ${strongest.platformName} (${fmt(
+                                strongest.sov,
+                              )}); most contested on ${weakest.platformName} (${fmt(
+                                weakest.sov,
+                              )}).`;
+                            }
+                            if (strongest) {
+                              return `${strongest.platformName}: ${fmt(
+                                strongest.sov,
+                              )} Share of Voice.`;
+                            }
+                            return null;
+                          }
+                          if (marginalCells.length === 1) {
+                            const m = marginalCells[0];
+                            return `One marginal platform: ${m.platformName} (${fmt(m.sov)}).`;
+                          }
+                          // ≥2 marginal — surface the count + the
+                          // weakest one explicitly.
+                          const lowest = marginalCells
+                            .slice()
+                            .sort((a, b) => a.sov - b.sov)[0];
+                          return `${marginalCells.length} marginal platforms — weakest: ${lowest.platformName} (${fmt(lowest.sov)}).`;
+                        })();
                         return (
                           <div>
                             <div className="mb-3">
@@ -2173,6 +2263,21 @@ export default async function CompetitionPage({
                                 No data
                               </span>
                             </div>
+                            {/* Auto-summary line — mirrors the
+                                Visibility heatmap's summary pattern
+                                so a reader doesn't have to scan the
+                                full row to find the subject's
+                                standout / weakest platform. Always
+                                rendered when there's any subject
+                                cell with measured SoV; never empty
+                                so color + text together carry the
+                                read (a colorblind reader gets the
+                                same headline a sighted one does). */}
+                            {ownershipSummary && (
+                              <p className="mt-3 text-[12.5px] leading-relaxed text-foreground/80">
+                                {ownershipSummary}
+                              </p>
+                            )}
                           </div>
                         );
                       })()}
