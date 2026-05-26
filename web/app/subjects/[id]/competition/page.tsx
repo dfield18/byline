@@ -976,32 +976,35 @@ export default async function CompetitionPage({
   const competitiveRank = subjectIdx >= 0 ? subjectIdx + 1 : null;
   const competitiveSetSize = sortedBySovDesc.length;
 
-  // Top Competitor — comparison-set entity whose Share of Voice
-  // sits closest to the subject's. If the subject leads, this is
-  // the nearest threat from below; if the subject trails, this is
-  // the nearest rival from above. Names the specific competitor
-  // to watch in one tile, which is information the abstract
-  // counts/percents elsewhere on the page can't carry.
-  let topCompetitorName: string | null = null;
-  let topCompetitorGapPp: number | null = null;
-  if (subjectEntity) {
-    let nearest: (typeof sortedBySovDesc)[number] | null = null;
-    let nearestDist = Infinity;
-    for (const e of sortedBySovDesc) {
-      if (e.is_subject) continue;
-      const dist = Math.abs(e.sov - subjectEntity.sov);
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = e;
-      }
-    }
-    if (nearest) {
-      topCompetitorName = nearest.name;
-      topCompetitorGapPp = Math.round(
-        (subjectEntity.sov - nearest.sov) * 100,
-      );
-    }
-  }
+  // Standing comparator — aligned with the Bottom Line above (which
+  // uses `referenceEntity = isLeader ? runnerUp : leader`) and with
+  // Overview's deriveCompetitivePosition. Earlier this tile picked
+  // the entity at the smallest absolute SoV distance from the
+  // subject, which created a real cross-spoke (and within-spoke)
+  // incoherence: Bottom Line said "trailing Donald Trump by 40 pts"
+  // while the same band's tile underneath said "Closest Rival
+  // Marco Rubio — Vance trails by 0 SoV pts". Same standing
+  // question, two different comparator names, two different gaps.
+  // Now the tile pins to the same comparator the Bottom Line
+  // names so both surfaces tell one story.
+  const isLeader = competitiveRank === 1;
+  const standingComparator: (typeof sortedBySovDesc)[number] | null =
+    subjectEntity
+      ? isLeader
+        ? sortedBySovDesc[1] ?? null // runner-up
+        : sortedBySovDesc[0] ?? null // leader
+      : null;
+  const standingComparatorName: string | null =
+    standingComparator?.name ?? null;
+  // Positive = subject ahead of comparator (only meaningful when
+  // isLeader); negative = subject behind (the non-leader case).
+  // Rounded to pts so this value can never disagree with the
+  // Bottom Line's "by N pts" gap clause, which uses the same
+  // rounding.
+  const standingGapPp: number | null =
+    subjectEntity && standingComparator
+      ? Math.round((subjectEntity.sov - standingComparator.sov) * 100)
+      : null;
 
   // Topic Win Rate — count of tracked topics where the subject is
   // the leading entity in the comparison set. Uses the same
@@ -1085,26 +1088,29 @@ export default async function CompetitionPage({
   // by Visibility's Trend chart and is intentionally NOT used here.
   const competitiveRankSpark = data.trajectory.ai_recall;
   const competitiveRankDelta = changeFromTrajectory(competitiveRankSpark);
-  // Card 2 (Closest Rival): gap = subject mention rate − current
-  // closest rival's mention rate, pinned to whoever holds the slot
-  // today. Trajectory is per-week so a reader can see whether the
-  // gap to their CURRENT nearest rival is closing or widening —
-  // different question from "who was nearest in the past" (the
-  // name itself could change snapshot to snapshot).
-  const topCompetitorTrajectory =
-    topCompetitorName !== null
-      ? data.competitor_trajectories.find((c) => c.name === topCompetitorName)
-          ?.mention_rate ?? null
+  // Card 2 (Gap to leader / Lead over runner-up): gap = subject
+  // mention rate − standing comparator's mention rate over time.
+  // Comparator is pinned to whoever holds the slot TODAY (leader if
+  // subject isn't #1; runner-up if subject IS #1), so the spark
+  // shows "how is my gap to that specific entity moving?" rather
+  // than "how is my gap to whoever happened to be closest at the
+  // time?". Mirrors the Bottom Line's reference-entity logic.
+  const standingComparatorTrajectory =
+    standingComparatorName !== null
+      ? data.competitor_trajectories.find(
+          (c) => c.name === standingComparatorName,
+        )?.mention_rate ?? null
       : null;
-  const topCompetitorGapSpark: (number | null)[] | null = topCompetitorTrajectory
-    ? data.trajectory.ai_recall.map((sv, i) => {
-        const rv = topCompetitorTrajectory[i];
-        if (sv === null || rv === null || rv === undefined) return null;
-        return sv - rv;
-      })
-    : null;
-  const topCompetitorGapDelta = changeFromTrajectory(
-    topCompetitorGapSpark ?? undefined,
+  const standingGapSpark: (number | null)[] | null =
+    standingComparatorTrajectory
+      ? data.trajectory.ai_recall.map((sv, i) => {
+          const rv = standingComparatorTrajectory[i];
+          if (sv === null || rv === null || rv === undefined) return null;
+          return sv - rv;
+        })
+      : null;
+  const standingGapDelta = changeFromTrajectory(
+    standingGapSpark ?? undefined,
   );
   // Card 4 (Strongest Topic): mention-rate trajectory for whichever
   // topic is strongest TODAY (pinned by label, so a reader sees how
@@ -1154,32 +1160,38 @@ export default async function CompetitionPage({
       sparkValues: competitiveRankSpark,
     },
     {
-      label: "Closest Rival",
-      value: topCompetitorName ?? "—",
-      // Caption framed from the SUBJECT'S perspective ("Newsom
-      // leads by N", "Newsom trails by N") so it lines up with the
-      // Bottom Line sentence above, which also describes the gap
-      // from the subject's perspective ("ahead of Wes Moore by 40
-      // pts"). Earlier framing inverted the perspective to the
-      // competitor's ("Wes Moore is 40 pts behind subject"), which
-      // described the same number twice but from opposite angles
-      // — readers paused to confirm the two lines were saying the
-      // same thing. "SoV pts" identifies the metric inline so the
-      // unit is unambiguous.
+      // Label flips with the comparator: "Lead over runner-up" when
+      // subject is #1 (comparator = the entity at #2), "Gap to
+      // leader" otherwise (comparator = the #1 entity). Matches
+      // Overview's deriveCompetitivePosition labeling exactly so a
+      // reader scanning Overview's Competitive Position card and
+      // Competition's Standing tile sees the same label + same
+      // comparator + same gap.
+      label: isLeader ? "Lead over Runner-up" : "Gap to Leader",
+      value: standingComparatorName ?? "—",
+      // Caption framed from the SUBJECT'S perspective so it lines
+      // up with the Bottom Line sentence above ("ahead of X by N
+      // pts" / "trailing X by N pts"). "SoV pts" identifies the
+      // metric inline so the unit is unambiguous. Same gap value
+      // as the Bottom Line by construction (both use the rounded
+      // subject.sov − comparator.sov).
       subtitle: (() => {
-        if (topCompetitorName === null || topCompetitorGapPp === null) {
+        if (standingComparatorName === null || standingGapPp === null) {
           return undefined;
         }
-        if (topCompetitorGapPp === 0) {
+        if (standingGapPp === 0) {
           return "Tied on Share of Voice";
         }
-        return topCompetitorGapPp > 0
-          ? `${data.subject_name} leads by ${topCompetitorGapPp} SoV pts`
-          : `${data.subject_name} trails by ${Math.abs(topCompetitorGapPp)} SoV pts`;
+        return standingGapPp > 0
+          ? `${data.subject_name} leads by ${standingGapPp} SoV pts`
+          : `${data.subject_name} trails by ${Math.abs(standingGapPp)} SoV pts`;
       })(),
-      helper: "Comparison entity closest to the subject in Share of Voice.",
-      tooltip:
-        "The single entity in the comparison set whose Share of Voice is nearest the subject's. Caption shows the gap in Share-of-Voice percentage points and which side of the subject they sit on. A larger gap = more breathing room from your nearest rival.",
+      helper: isLeader
+        ? "The runner-up — the comparison-set entity nearest to the subject from below."
+        : "The leader — the comparison-set entity with the highest Share of Voice.",
+      tooltip: isLeader
+        ? "The entity ranked #2 in the comparison set — the subject's closest threat from below. Caption shows the subject's Share-of-Voice lead over them in percentage points; a larger lead = more breathing room. Same comparator the Bottom Line above references."
+        : "The leader — the comparison-set entity with the highest Share of Voice. Caption shows the subject's gap behind them in percentage points; a smaller gap = closer to the top. Same comparator the Bottom Line above references.",
       // Neutral color: the value is a competitor's NAME, not a
       // performance metric. Painting the name green/amber by the
       // gap polarity created a visual mismatch — reader sees "Wes
@@ -1194,21 +1206,22 @@ export default async function CompetitionPage({
       gaugeValue: null,
       gaugeBenchmark: null,
       caption: (() => {
-        if (topCompetitorName === null || topCompetitorGapPp === null) {
+        if (standingComparatorName === null || standingGapPp === null) {
           return null;
         }
-        if (topCompetitorGapPp === 0) {
+        if (standingGapPp === 0) {
           return "Tied on Share of Voice";
         }
-        return topCompetitorGapPp > 0
-          ? `${data.subject_name} leads by ${topCompetitorGapPp} SoV pts`
-          : `${data.subject_name} trails by ${Math.abs(topCompetitorGapPp)} SoV pts`;
+        return standingGapPp > 0
+          ? `${data.subject_name} leads by ${standingGapPp} SoV pts`
+          : `${data.subject_name} trails by ${Math.abs(standingGapPp)} SoV pts`;
       })(),
       anchor: "positioning",
       // Gap trajectory: positive delta = subject pulling away from
-      // the rival (success); negative = rival closing in (warning).
-      deltaPp: topCompetitorGapDelta,
-      sparkValues: topCompetitorGapSpark,
+      // the comparator (success); negative = comparator closing in
+      // (warning).
+      deltaPp: standingGapDelta,
+      sparkValues: standingGapSpark,
     },
     {
       label: "Topic Win Rate",
@@ -1556,10 +1569,7 @@ export default async function CompetitionPage({
                             : null
                         }
                         standaloneCaption={
-                          k.gaugeValue === null &&
-                          !(k.sparkValues && k.sparkValues.length > 0)
-                            ? k.caption
-                            : null
+                          k.gaugeValue === null ? k.caption : null
                         }
                         sparkValues={k.sparkValues ?? undefined}
                         sparkVariant="tiny"
