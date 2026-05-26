@@ -1,6 +1,6 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-25**
+> A pulse-check of where the project sits **as of 2026-05-26**
 > — three new spokes (Narrative, Sources, Prompts) stood up
 > from scratch, then a full Overview-spoke restructure into a
 > five-band narrative layout with horizontal sub-nav, then a
@@ -1128,6 +1128,81 @@ The unifying thread: Overview and Visibility had the same shape but different im
 - **`heatTier` / `sovTier`** still duplicated between Visibility and Competition (carried over from session #4's open follow-up — same pattern as today's `kpiThresholds` lift, just not done yet).
 - **Metric rename** (`competitive[].sov` → `competitive[].mention_rate`) — session #5 follow-up, still open. Today didn't touch the backend.
 - **Recurring "params is async" validation hook noise** — fired on every Edit this session on a pre-existing line 590 of `visibility/page.tsx` unrelated to any edit. Worth filing if the hook can be taught to scope its check.
+
+---
+
+## Follow-up session #7 (2026-05-25 → 2026-05-26, overnight) — Overview Band 2 swap-thrash + QA-agent shipping rounds + dev auth bypass
+
+Eighteen commits on `main` in a single sustained session. Three arcs: (a) iterative Overview Band 2 design churn that ended with Top Narratives + Visibility-by-topic swapping homes between the Vitals row and Band 2 — and then morphing shapes (bars / text / editorial prose) within each home; (b) three rounds of parallel QA agents catching real cross-spoke incoherence, accessibility regressions, and perf debt; (c) a dev-only Clerk auth bypass that unblocks future QA work and surfaced a fresh round of sparse-subject copy bugs.
+
+### Overview Band 2 swap-thrash — what landed where
+
+The session opened with the Top Narratives card removed from Band 2 entirely (`3ab2039`) and "Gap card" → "Visibility by topic" rename. Top Narrative then came back as a Vitals row KPI tile (`919dfba`, replacing First Result Mentioned), got reordered (`3b28796`), and the Visibility-by-topic card grew a takeaway header (`32c1c2e`). Then the actual SWAP: Top Narrative moved to Band 2 as a card; Visibility-by-topic moved to the Vitals row as a tile (`16a12af`). Multiple shape iterations followed:
+
+- **Visibility-by-topic in Vitals row**: bars (per-topic mention rate, top 4 desc) with the weakest row warning-toned (`6a0e9d9`); editorial header line "Weakest: Current events 25%" added (matches the bottom-line verdict copy); spacing bumped to space-y-4 + methodology footer added so the tile fills the same vertical space as its sparkline siblings (`d3d92c5`); benchmark gauge stripped from the AI Mention Rate tile (`186ef21`) so all three Vitals tiles share the same anatomy.
+- **Top Narratives in Band 2**: text-only treatment landed in stages — bars-then-no-bars-then-no-tint-then-prose. Final form (`d3179e6`) is an editorial lead sentence ("AI's most common framing of J.D. Vance is **MAGA Alignment and Future Leadership** — a **favorable** angle, appearing in **35%** of responses.") with the cluster name bolded and sentiment word color-coded, plus an "Also surfacing" sub-list of the next 3 clusters in muted text. Methodology line + new "Open Narrative deep-dive →" link to `/subjects/[id]/narrative` (`186ef21`) close the card.
+- **Sub-nav rename**: `02 Gap` → `02 Narratives` (`186ef21`) since Band 2's content is now Top Narratives + The fix; the section id renamed `gap` → `narratives` to match. Eligibility gate also tightened from `narrative_clusters.length > 0 || recommended_actions?.primary` → `narrative_clusters.length > 0` (`4356e03`) so never-refreshed subjects don't show a "Narratives" anchor that lands on a Fix-only band.
+- **Net Favorability tier — Option B confirmation** (`da7bf71`). Already on the shared symmetric-tier resolver (`kpiThresholds.ts` `KPI_STRONG/WEAK_AVG_TONE = ±0.10`); tightened the annotation to flag the ±10 band as a tunable starting value and document the "color reflects level, delta carries direction; amber rare to stay meaningful" rule. The "Weakest: Current events 25%" lead line was dropped from the Visibility-by-topic tile since the same value already appeared 3 times on the Vitals band (bottom-line verdict, panel header, list row).
+
+End state for Band 2 + Vitals: AI Mention Rate (trajectory KPI) · Net Favorability (trajectory KPI) · Visibility by topic (bar list, snapshot-only); Band 2 = Top Narratives (editorial card) · The fix (recommended move).
+
+### QA-agent shipping rounds (7, 8, 9)
+
+Three rounds of parallel agents — frontend cross-spoke consistency, code health + type contracts, runtime/data — each round catching real bugs.
+
+- **Round 7** (`4356e03`): TS contract bug — `TrendOverTime`'s `defaultVisibleOverlays` was destructured but missing from the props type; Competition callsite broke `tsc --noEmit`. Also dropped the dead `CompetitiveSharePanel` (~50 lines, never instantiated after the Overview rewrite), fixed `1 platforms` plural correctness, consolidated `STATUS_STRONG/WEAK_MENTION_RATE` (Visibility-local) with `KPI_STRONG/WEAK_MENTION_RATE` (shared) since they were the same numbers in two places, tightened the Narratives nav gate.
+- **Round 8** (`248e9e7`): Cross-tile color coherence — `TopicBarRow`'s hand-rolled 70/40 ladder swapped to `KPI_STRONG/WEAK_MENTION_RATE` so the Vitals Visibility-by-topic tile and its AI Mention Rate sibling can't render the same 65% mention rate as success on one and neutral on the other (the exact incoherence `kpiThresholds` was extracted to prevent). `MIN_GAP_PP=15` lifted to `KPI_TOPIC_GAP_MIN_PP`, `SOV_TIE_EPSILON` collapsed into the module-level `TIE_EPSILON`. Dead-code sweep: `bmCaption` (orphaned by the benchmark-strip on AI Mention Rate), `trendVerdict` + `snapshotDiffDeltas` (Competition orphans), `ReactNode` import in `KpiVitalsTile`. The `benchmarks` prop on `TrajectoryStrip` also dropped since both metrics now ship null benchmarks.
+- **Round 9** (`c7e9a66`, `b1c4f04`, `dadb74c`): a11y + perf wins from the dedicated a11y/perf audits. (Detailed below.)
+
+### A11y + perf wins
+
+- **`--warning` WCAG contrast** (`c7e9a66`). `oklch(0.6 0.16 50)` → `oklch(0.5 0.16 50)`, lifting contrast against the white card from ~3.0:1 to ≥4.5:1 (AA for normal body text). Every warning-toned body text site (BottomLine emphasis, "critical" sentiment word in Top Narratives lead, delta down-arrows, "Weak" status pills) was failing AA at the prior lightness. Hue + chroma preserved so tinted backgrounds (heatmap "gap" cells, etc.) read consistently.
+- **Focusable tooltip icons** (`c7e9a66` + `dadb74c`). Both the shared `KpiTooltipIcon` in `KpiVitalsTile.tsx` and the Overview-local one in `page.tsx` were hover-only `<span>`s — keyboard / SR users couldn't reach the tooltip text. Both got `tabIndex={0}` + `role="button"` + focus-visible ring + `group-focus-within:opacity-100` on the popover. The Overview-local one is now the canonical pattern; the Visibility + Competition page-local versions had been doing it right all along.
+- **MiniSpark aria-label** (`c7e9a66`). Optional `ariaLabel` prop on the SVG. `KpiVitalsTile` passes `${label} trend, N snapshots` so the primary visual of each KPI tile is no longer invisible to AT users. SVG gets `role="img"` when labeled, `aria-hidden` when undefined.
+- **`<h1>` in Header** (`dadb74c`). Sr-only `<h1>` with the subject name at the top of the sticky header. Earlier the populated pages had no `h1` at all — the subject name lived only in the picker chip's `<span>`, breaking the SR heading ladder.
+- **KpiGauge progressbar** (`dadb74c`). Track wrapped in `role="progressbar"` + `aria-valuemin/max/now/text`. `aria-valuetext` spells out value + benchmark ("62% (subject-set average 45%)") so the value-vs-benchmark comparison — the whole point of the gauge — is reachable from AT.
+- **Non-color weakest/strongest tag on TopicBarRow** (`dadb74c`). Inline "· weakest" / "· strongest" text in the matching tone next to the topic label. Bar color stays as the primary cue for sighted readers; the inline tag is the redundant secondary cue so colorblind readers also get the read.
+- **Deep-dive link focus rings + sub-nav focus management** (`b1c4f04`). `focus-visible:ring-primary/50` on all 6 Overview deep-dive links via `replace_all` on their shared className. `OverviewSubNav` `handleNavClick` programmatically focuses the target section after scroll, with `tabIndex={-1}` lazily set on targets so they can receive programmatic focus without entering the natural tab order.
+- **Recharts dynamic-import** (`c7e9a66`). `TrendOverTime` + `CompetitorBarsFromData` wrapped in `next/dynamic` at all three callsites. Recharts (~380 KB shared chunk per spoke) now splits off the initial First Load JS — confirmed by inspecting the rendered HTML's `<script>` tags post-bypass: the recharts chunks (`0kc11~mi84xuz.js`, `0hgk_tx2husmp.js`) are NOT in the initial eager scripts. Loading placeholders match each chart's natural height (320/340/280 px) to prevent layout shift. **Gotcha caught mid-edit**: bare `import dynamic from "next/dynamic"` collides with the route-segment-config identifier `export const dynamic = "force-dynamic"` each page already exports → tsc errors on the merged declaration; imports aliased to `nextDynamic` to fix.
+- **Lopsided threshold default lift** (`dadb74c`). `KpiVitalsTile.platformBreakdownLopsidedThreshold` default was a hardcoded 40 inline; now reads from `KPI_PLATFORM_SPREAD_LOPSIDED` in the shared module so the constant can be retuned in one place.
+
+### Dev auth bypass (the unblocker)
+
+- **`proxy.ts` BYLINE_AUTH=disabled** (`09771a3`). Until this commit, every QA agent in this session was blind to the rendered DOM — `/subjects/*` redirected to `united-crayfish-78.accounts.dev/sign-in` before reaching the page, so curl returned the Clerk handshake HTML and not the spoke content. Agents had to fall back to static source analysis.
+- The bypass: `process.env.NODE_ENV !== "production" && process.env.BYLINE_AUTH === "disabled"` → skip the Clerk session check on authed routes. **Hard-guarded by NODE_ENV** so the env var cannot leak into a deployed build. Matches the FastAPI backend's existing `BYLINE_AUTH=disabled` flag (one env var for stack-wide auth bypass); pairs with the existing `BYLINE_API_TOKEN` escape hatch in `lib/api.ts:14-17` that bypasses Clerk on the server-side API client.
+- Usage: `BYLINE_AUTH=disabled BYLINE_API_TOKEN=dev-token npm run dev`. After this, curl localhost:3000/subjects/15 reaches the real spoke; future QA agents can structurally verify rendered output.
+- `.env.example` updated with the new var commented out as documentation.
+
+### Post-bypass QA round — real bugs caught (round 10)
+
+With the bypass active, a fresh round of parallel agents (sparse-subject edge cases + cross-spoke data coherence) caught issues the static rounds couldn't see (`0fab86d`):
+
+- **Sparse Visibility "mostly stable" lie**. `composeWhatChanged` returned the hardcoded "Visibility is mostly stable across recent snapshots…" copy when there were < 2 snapshots or no measured `ai_recall` endpoints — i.e. on never-refreshed subjects (16/17/18/19). New `NOT_ENOUGH_DATA_COPY = "Not enough history yet — trend copy lights up once a second snapshot lands."` fires for both early-return paths. `STABLE_COPY` now only fires when "stable" is truthful (2+ measured points, no meaningful deltas).
+- **Sparse Visibility bottom-line grammar bug**. `Snapshot covers ${platformsCovered.join(" and ")}.` rendered as `"Snapshot covers . ChatGPT and Claude and Gemini and Perplexity were not included."` when `platformsCovered` was empty (zero-coverage subjects). Added a zero-covered branch: `"No platform responses recorded yet — X and Y and Z are pending."`
+- **Net Favorability descriptor mismatched its color tier**. `formatTonePct` appended "positive" / "negative" purely on sign, so a -7% value rendered as "−7% negative" even though the symmetric ±10 KPI_WEAK_AVG_TONE / KPI_STRONG_AVG_TONE tier classified it neutral. Descriptor now follows the same threshold — in-band values (-9..+9) render with no descriptor; verified in DOM: -7% / -9% strip the descriptor, -10% / -11% / -12% correctly keep "negative".
+- **Two false positives from agent regexes**: "Overview weakest topic at 50% (should be 25%)" — agent regex picked the wrong adjacent percentage; tile correctly renders "Current events 25% · weakest". "platform s" stray-space pluralization — Next.js `<!-- -->` hydration comments fooled the regex; actual output is `2 platforms` clean.
+
+### Cross-spoke design coherence still owed
+
+- **Competitive-position framing divergence**. Overview's "Competitive position" surfaces "Gap to leader −40 pts behind Donald Trump"; Competition's tile shows "Closest Rival Marco Rubio 0 pts" instead. Both correct in isolation, but a reader scanning the same concept across spokes gets different comparator names + gaps. Worth unifying.
+- **Recommendations spoke** boilerplate references "{subject_name}'s latest snapshot" on zero-snapshot subjects.
+- **Narrative spoke** internal sub-nav (Sentiment Mix / Topic Sentiment / Narrative Clusters / Representative Quotes) doesn't gate on data presence — sections render empty rather than the nav item dropping.
+
+### Open follow-ups still on the deferred list
+
+- **Opacity-attenuated text contrast** (`text-foreground/55`, `/60`, `/65`) at 9-11px sizes fails WCAG AA. Real fix is bumping to `/70`+ or moving smallest captions up to 11-12px. Touches many sites; broad sweep.
+- **Subject picker listbox** (`Header.tsx:145-184`) lacks roving `tabIndex` + arrow-key navigation — listbox a11y standard.
+- **Heatmap cells** use `title` (not reliably announced) → `aria-label`.
+- **Skip-to-main link** — common pattern, low cost, helps power keyboard users skip Sidebar+Header+sub-nav.
+- **`aria-current="true"`** → `"location"` (canonical value; works today but non-spec).
+- **`Charts.tsx` per-type split** — barrel today; importing one bar chart drags in PieChart/AreaChart/LineChart. Marginal win.
+- **`SourcesTypeMix` dynamic-import** (302 lines client, below-fold on Overview).
+- **`heatTier` / `sovTier`** still duplicated between Visibility and Competition (open since session #4).
+- **Metric rename** (`competitive[].sov` → `competitive[].mention_rate`) — still open since session #5.
+
+### Pixel / keyboard / VoiceOver still needs you
+
+Agents can structurally verify markup, but they can't see layout, spacing, color shifts in practice, hover states, focus ring contrast against backgrounds, screen-reader announcement order, mobile breakpoints. The bypass lets future agents reach the DOM but doesn't give them a real rendering engine. The productive next step on the QA side is a manual walk-through with DevTools + VoiceOver + a Lighthouse run to validate the perf win.
 
 ---
 
