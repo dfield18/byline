@@ -698,8 +698,15 @@ export function TrendOverTime({
           // color swatch (it's "off"), and still hover-isolate the
           // line on canvas if the user opts the entity back in via
           // click. Click toggles visibility; hover (without click)
-          // just isolates, same as before.
+          // just isolates, same as before. Hidden overlays are now
+          // omitted from the legend entirely (was: rendered as a
+          // crossed-out muted chip). The "Show all" button below
+          // is the canonical recovery for getting them back —
+          // restoring the old per-chip un-hide flow added visual
+          // weight (line-through chips taking up space) that the
+          // user actively didn't want once a chip was hidden.
           const visible = isOverlayVisible(o.name);
+          if (!visible) return null;
           return (
             <button
               key={o.name}
@@ -710,34 +717,26 @@ export function TrendOverTime({
               onFocus={() => setHoveredName(o.name)}
               onBlur={() => setHoveredName(null)}
               aria-pressed={visible}
-              title={
-                visible
-                  ? `${o.name} — click to hide from chart`
-                  : `${o.name} — click to show on chart`
-              }
-              className={`inline-flex items-center gap-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-                visible ? "" : "opacity-50 hover:opacity-75"
-              }`}
+              title={`${o.name} — click to hide from chart`}
+              className="inline-flex items-center gap-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <span
-                className="h-[2px] w-4 rounded-full transition-opacity"
+                className="h-[2px] w-4 rounded-full"
                 style={{
-                  background: visible ? o.color : "var(--muted-foreground)",
-                  opacity: visible ? overlayOpacity : 0.6,
+                  background: o.color,
+                  opacity: overlayOpacity,
                 }}
                 aria-hidden
               />
               {Icon && (
                 <Icon
-                  className="h-3 w-3 shrink-0 transition-opacity"
-                  style={{ color: "var(--foreground)", opacity: visible ? 0.65 : 0.4 }}
+                  className="h-3 w-3 shrink-0"
+                  style={{ color: "var(--foreground)", opacity: 0.65 }}
                   aria-hidden
                 />
               )}
               <span
-                className={`max-w-[220px] truncate transition-opacity ${
-                  visible ? "text-foreground/70" : "text-foreground/45 line-through decoration-foreground/30"
-                }`}
+                className="max-w-[220px] truncate text-foreground/70"
                 title={o.name}
               >
                 {o.name}
@@ -745,31 +744,49 @@ export function TrendOverTime({
             </button>
           );
         })}
-        {/* Show-all / hide-all shortcut — appears only when a default
-            visibility filter is in play (i.e. when the caller passed
-            defaultVisibleOverlays). When all overlays are already
-            shown, the button reads "Reset" and restores the default
-            subset; otherwise "Show all" turns every overlay on. */}
-        {defaultVisibleOverlays && overlays.length > visibleByDefault.size && (
-          <button
-            type="button"
-            onClick={() => {
-              const allVisible = overlays.every((o) =>
-                visibleOverlays.has(o.name),
-              );
-              setVisibleOverlays(
-                allVisible
-                  ? new Set(visibleByDefault)
-                  : new Set(overlays.map((o) => o.name)),
-              );
-            }}
-            className="text-[11px] font-medium text-primary hover:text-primary/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded px-1"
-          >
-            {overlays.every((o) => visibleOverlays.has(o.name))
-              ? "Reset"
-              : "Show all"}
-          </button>
-        )}
+        {/* Show-all / Reset shortcut. Renders whenever:
+            (a) any overlay is currently hidden — button reads
+                "Show all" and clicking reveals every overlay; OR
+            (b) all overlays are currently visible AND there's a
+                non-trivial default subset to fall back to — button
+                reads "Reset" and clicking restores the default
+                subset (Competition's top-3 case).
+            On Visibility (no `defaultVisibleOverlays` prop), case
+            (b) is skipped, so the button disappears once every
+            overlay is visible. Users still toggle individual
+            overlays by clicking their chip; the button is the
+            recovery path when chips are absent from the legend. */}
+        {(() => {
+          const hasHidden = overlays.some(
+            (o) => !visibleOverlays.has(o.name),
+          );
+          const allVisible = overlays.every((o) =>
+            visibleOverlays.has(o.name),
+          );
+          const showResetMode =
+            !hasHidden &&
+            allVisible &&
+            defaultVisibleOverlays !== undefined &&
+            overlays.length > visibleByDefault.size;
+          if (!hasHidden && !showResetMode) return null;
+          return (
+            <button
+              type="button"
+              onClick={() => {
+                if (hasHidden) {
+                  setVisibleOverlays(
+                    new Set(overlays.map((o) => o.name)),
+                  );
+                } else {
+                  setVisibleOverlays(new Set(visibleByDefault));
+                }
+              }}
+              className="text-[11px] font-medium text-primary hover:text-primary/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded px-1"
+            >
+              {hasHidden ? "Show all" : "Reset"}
+            </button>
+          );
+        })()}
       </div>
     </div>
   );
