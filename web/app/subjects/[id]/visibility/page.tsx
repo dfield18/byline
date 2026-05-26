@@ -32,6 +32,7 @@ import {
   KPI_WEAK_MENTION_RATE,
   getKpiValueColor,
 } from "@/lib/kpiThresholds";
+import { bandTier } from "@/lib/bandTier";
 // Aliased as `nextDynamic` because this page also exports the
 // route-segment config `export const dynamic = "force-dynamic"`
 // (further down). Importing the next/dynamic helper under its
@@ -226,11 +227,17 @@ const STATUS_STRONG_AVG_RANK_MAX = 3;
 // tint for healthy cells so the uniform 100% blocks recede into
 // the background instead of dominating the section.
 type HeatTier = "gap" | "mid" | "healthy" | "none";
+// Local alias around the shared bandTier classifier (lib/bandTier.ts).
+// Renames the generic "high"/"low" to this spoke's semantic names
+// ("healthy"/"gap") so the heatTierStyle switch keeps reading
+// naturally. Threshold-comparison logic centralized; tier-name
+// vocabulary stays local.
 function heatTier(rate: number | null): HeatTier {
-  if (rate === null || !Number.isFinite(rate)) return "none";
-  if (rate < KPI_WEAK_MENTION_RATE) return "gap";
-  if (rate >= KPI_STRONG_MENTION_RATE) return "healthy";
-  return "mid";
+  const t = bandTier(rate, {
+    highMin: KPI_STRONG_MENTION_RATE,
+    lowMax: KPI_WEAK_MENTION_RATE,
+  });
+  return t === "high" ? "healthy" : t === "low" ? "gap" : t;
 }
 function heatTierStyle(tier: HeatTier): {
   background: string;

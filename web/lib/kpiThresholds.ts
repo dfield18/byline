@@ -90,6 +90,23 @@ export const KPI_PLATFORM_SPREAD_LOPSIDED = 40;
 // the UI framing agrees with the analyzer's classification.
 export const KPI_TOPIC_GAP_MIN_PP = 15;
 
+// ── SoV-tier thresholds (Competition Platform Ownership heatmap) ─
+
+// Heatmap cell classification for the Competition spoke's per-
+// platform Share-of-Voice grid. Tunable starting values; see the
+// notes on the mention-rate thresholds above for the same pair-
+// retune-when-distribution-lands principle.
+//
+// ≥ 40% = dominant (subject owns the platform in the comparison
+// set), 15-40% = contested, < 15% = marginal. Lower than the
+// mention-rate thresholds (60/30) because SoV in a 5-competitor
+// field tops out lower — even a dominant subject sits ~25-40%.
+// Lifted here from competition/page.tsx so both Visibility's
+// mention-rate tier (above) and Competition's SoV tier share one
+// home and can't silently drift apart on a future tune.
+export const SOV_TIER_DOMINANT = 0.4;
+export const SOV_TIER_MARGINAL = 0.15;
+
 // ─── Color resolver ──────────────────────────────────────────────
 
 export type KpiColorKind =

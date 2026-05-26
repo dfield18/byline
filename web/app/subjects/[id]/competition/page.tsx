@@ -18,6 +18,11 @@ import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { BottomLineBlock } from "@/components/dashboard/BottomLineBlock";
 import { KpiVitalsTile } from "@/components/dashboard/KpiVitalsTile";
+import { bandTier } from "@/lib/bandTier";
+import {
+  SOV_TIER_DOMINANT,
+  SOV_TIER_MARGINAL,
+} from "@/lib/kpiThresholds";
 import { CompetitiveScatter } from "./CompetitiveScatter";
 import { TopicProminenceFilter } from "./TopicProminenceFilter";
 import { LandscapePlatformFilter } from "./LandscapePlatformFilter";
@@ -361,14 +366,27 @@ function composeCompetitionWhatChanged({
 // consistency (warning amber on the loss cell, calm primary tint on
 // dominance), so a reader who learned the heatmap palette on one
 // spoke reads the other identically.
-const SOV_DOMINANT = 0.4;
-const SOV_MARGINAL = 0.15;
 type SovTier = "dominant" | "contested" | "marginal" | "none";
+// Local alias around the shared bandTier classifier (lib/bandTier.ts).
+// Renames generic "high"/"mid"/"low" to this spoke's semantic names
+// ("dominant"/"contested"/"marginal") so the sovTierStyle switch
+// keeps reading naturally. Thresholds live in kpiThresholds.ts
+// (SOV_TIER_DOMINANT / SOV_TIER_MARGINAL); the local constants
+// `SOV_DOMINANT = 0.4` / `SOV_MARGINAL = 0.15` were removed in
+// favor of the shared module so a future retune lands in one
+// home alongside the mention-rate thresholds.
 function sovTier(sov: number | null): SovTier {
-  if (sov === null || !Number.isFinite(sov)) return "none";
-  if (sov >= SOV_DOMINANT) return "dominant";
-  if (sov < SOV_MARGINAL) return "marginal";
-  return "contested";
+  const t = bandTier(sov, {
+    highMin: SOV_TIER_DOMINANT,
+    lowMax: SOV_TIER_MARGINAL,
+  });
+  return t === "high"
+    ? "dominant"
+    : t === "low"
+      ? "marginal"
+      : t === "mid"
+        ? "contested"
+        : "none";
 }
 function sovTierStyle(tier: SovTier): {
   background: string;
