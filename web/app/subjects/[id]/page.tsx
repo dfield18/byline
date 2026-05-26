@@ -841,8 +841,15 @@ function TrajectoryStrip({
       format: (v) => formatPct(v, 0),
       tooltip: "Share of AI answers that mention this subject on topic-area questions (where the prompt doesn't name them directly), plotted across each weekly snapshot. Higher is better. Rising means AI is more reliably surfacing the subject when asked about their topic areas.",
       colorKind: "mention_rate",
-      benchmark: benchmarks?.ai_mention_rate_avg ?? null,
-      benchmarkCaption: bmCaption(benchmarks?.ai_mention_rate_avg ?? null),
+      // Benchmark gauge + caption dropped from this tile so its
+      // anatomy matches Net Favorability's (sparkline + delta +
+      // platform breakdown only). Earlier the "| vs 70% subject-set
+      // avg" tick rail above the chart made this tile read busier
+      // than its row-mates; the cross-subject avg is a footnote
+      // most readers don't act on and is still surfaced via the
+      // Visibility deep-dive's KPI strip.
+      benchmark: null,
+      benchmarkCaption: null,
       // Per-platform decomposition of THIS metric's value — folded
       // in from the standalone "Mention rate by platform" strip
       // that used to sit below the KPI row. Same pattern (and same
@@ -1407,16 +1414,24 @@ export default async function SubjectOverviewPage({
   // Evidence + Competition require non-empty payloads) — filter the
   // item list to match so the rail can't point at a missing anchor.
   // Five-band narrative layout: Vitals → Gap → Competitive → Sources → Evidence.
-  // Band ids match the section ids below. Conditional bands (Gap needs at least
-  // one finite topic recall; Competitive needs at least one competitor row;
-  // Evidence needs at least one quote) drop out of both the nav and the page
-  // when their data is empty so the rail never points at a missing anchor.
+  // Band ids match the section ids below. Conditional bands
+  // (Narratives needs at least one cluster OR a recommended fix;
+  // Competitive needs at least one competitor row; Evidence needs at
+  // least one quote) drop out of both the nav and the page when
+  // their data is empty so the rail never points at a missing
+  // anchor. The "narratives" id replaced the prior "gap" anchor —
+  // the topic-gap content moved to the Vitals row's Visibility-by-
+  // topic tile, so a sub-nav link labelled "Gap" no longer matched
+  // what it landed on.
   const overviewSectionNavItems: { id: string; label: string; num: string }[] = [];
   overviewSectionNavItems.push({ id: "vitals", label: "Vitals", num: "01" });
-  if (data.topic_coverage.some(_hasFiniteRecall)) {
+  if (
+    data.narrative_clusters.length > 0 ||
+    data.recommended_actions?.primary
+  ) {
     overviewSectionNavItems.push({
-      id: "gap",
-      label: "Gap",
+      id: "narratives",
+      label: "Narratives",
       num: String(overviewSectionNavItems.length + 1).padStart(2, "0"),
     });
   }
@@ -1649,7 +1664,7 @@ export default async function SubjectOverviewPage({
               deep-dive link in the Vitals card. */}
           {(data.narrative_clusters.length > 0 ||
             data.recommended_actions?.primary) && (
-            <section id="gap" className="scroll-mt-28">
+            <section id="narratives" className="scroll-mt-28">
               {(() => {
                 // items-stretch + h-full on each Card equalize the
                 // two cards' heights regardless of content length.
@@ -1682,6 +1697,22 @@ export default async function SubjectOverviewPage({
                         <p className="mt-3 text-[10.5px] text-muted-foreground leading-relaxed">
                           Shares can overlap · values don&apos;t sum to 100%
                         </p>
+                        {/* Deep-dive link, mt-auto pinned to the
+                            bottom so it sits flush with The fix's
+                            "View all N recommendations" link in
+                            the sibling card. Matches the same
+                            link pattern the Vitals + SoV + Sources
+                            cards use to drill into their respective
+                            spokes. */}
+                        <div className="mt-auto pt-4 flex justify-end">
+                          <Link
+                            href={`/subjects/${subjectId}/narrative`}
+                            className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                          >
+                            Open Narrative deep-dive
+                            <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                          </Link>
+                        </div>
                       </Card>
                     )}
 
