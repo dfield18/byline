@@ -131,22 +131,53 @@ function deltaToneClass(deltaPp: number): string {
 }
 
 // Tooltip icon component lifted inline so the tile doesn't have a
-// cross-page dependency on either spoke's local KpiTooltipIcon. Same
-// shape: small "i" glyph with hover-revealed text box. Keyboard-
-// focusable + role="button" + visible focus ring so a tabbing user
-// reaches the tooltip via the SR-announced aria-label; pure-hover
-// reveal was an a11y regression vs the Visibility/Competition page-
-// local implementations.
-function KpiTooltipIcon({ text }: { text: string }) {
+// cross-page dependency on either spoke's local KpiTooltipIcon. Small
+// "i" glyph with hover-AND-focus-revealed styled popover. Earlier this
+// relied only on the browser-native `title` attribute, which renders
+// as a tiny unstyled grey rectangle after ~1s of hover delay — most
+// users perceived that as "the tooltip doesn't work" since every
+// other tooltip in the app is a custom styled popover. Now wraps a
+// focusable group container around the glyph + a popover span so:
+//  - Mouse hover → popover reveals immediately
+//  - Tab focus → popover reveals (group-focus-within)
+//  - SR users → aria-label on the focusable group announces the text
+function KpiTooltipIcon({
+  text,
+  align = "right",
+}: {
+  text: string;
+  // Horizontal alignment of the popover relative to the glyph.
+  // Default "right" suits KPI tiles where the icon sits at the
+  // right edge of the title block — a center-aligned popover
+  // overflows the tile to the right. Override for icons positioned
+  // toward the left of a row.
+  align?: "left" | "center" | "right";
+}) {
+  const pos =
+    align === "right"
+      ? "right-0"
+      : align === "left"
+        ? "left-0"
+        : "left-1/2 -translate-x-1/2";
   return (
     <span
       tabIndex={0}
       role="button"
-      className="inline-flex h-3.5 w-3.5 flex-shrink-0 cursor-help items-center justify-center rounded-full text-[9px] font-bold text-muted-foreground/70 ring-1 ring-inset ring-muted-foreground/30 hover:text-foreground/80 hover:ring-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:text-foreground/80 transition-colors"
-      title={text}
       aria-label={text}
+      className="group relative inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
     >
-      i
+      <span
+        aria-hidden
+        className="inline-flex h-3.5 w-3.5 flex-shrink-0 cursor-help items-center justify-center rounded-full text-[9px] font-bold text-muted-foreground/70 ring-1 ring-inset ring-muted-foreground/30 hover:text-foreground/80 hover:ring-foreground/40 group-focus-within:text-foreground/80 group-focus-within:ring-foreground/40 transition-colors"
+      >
+        i
+      </span>
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute ${pos} bottom-full mb-2 w-56 rounded-md border border-border bg-popover px-3 py-2 text-[11px] font-normal normal-case tracking-normal leading-snug text-popover-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity z-30 shadow-lg`}
+      >
+        {text}
+      </span>
     </span>
   );
 }
