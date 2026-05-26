@@ -1674,7 +1674,7 @@ export default async function SubjectOverviewPage({
                       <div className="mt-4 flex justify-end">
                         <Link
                           href={`/subjects/${subjectId}/visibility`}
-                          className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                          className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm transition-colors"
                         >
                           Open Visibility deep-dive
                           <ArrowRight className="h-3.5 w-3.5" aria-hidden />
@@ -1741,7 +1741,7 @@ export default async function SubjectOverviewPage({
                         <div className="mt-auto pt-4 flex justify-end">
                           <Link
                             href={`/subjects/${subjectId}/narrative`}
-                            className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                            className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm transition-colors"
                           >
                             Open Narrative deep-dive
                             <ArrowRight className="h-3.5 w-3.5" aria-hidden />
@@ -1797,7 +1797,7 @@ export default async function SubjectOverviewPage({
                         {data.recommended_actions.secondary.length > 0 && (
                           <Link
                             href={`/subjects/${subjectId}/recommendations`}
-                            className="mt-auto pt-3 inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                            className="mt-auto pt-3 inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm transition-colors"
                           >
                             View all {1 + data.recommended_actions.secondary.length} recommendations
                             <ArrowRight className="h-3 w-3" aria-hidden />
@@ -2111,7 +2111,7 @@ export default async function SubjectOverviewPage({
                 <div className="mt-5 pt-4 border-t border-border/40 flex justify-end">
                   <Link
                     href={`/subjects/${subjectId}/competition`}
-                    className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                    className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm transition-colors"
                   >
                     Open Competitive Visibility deep-dive
                     <ArrowRight className="h-3.5 w-3.5" aria-hidden />
@@ -2146,7 +2146,7 @@ export default async function SubjectOverviewPage({
             <div className="mt-5 pt-4 border-t border-border/40 flex justify-end">
               <Link
                 href={`/subjects/${subjectId}/sources`}
-                className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm transition-colors"
               >
                 Open Sources deep-dive
                 <ArrowRight className="h-3.5 w-3.5" aria-hidden />
@@ -2183,7 +2183,7 @@ export default async function SubjectOverviewPage({
               <div className="mt-5 pt-4 border-t border-border/40 flex justify-end">
                 <Link
                   href={`/subjects/${subjectId}/prompts`}
-                  className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors"
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm transition-colors"
                 >
                   Open Prompts deep-dive
                   <ArrowRight className="h-3.5 w-3.5" aria-hidden />

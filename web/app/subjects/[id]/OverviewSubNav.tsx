@@ -81,6 +81,28 @@ export function OverviewSubNav({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemsKey]);
 
+  // Focus management on anchor-click. The browser default for
+  // `<a href="#section">` scrolls the viewport but leaves focus on
+  // the nav link, so a keyboard / SR user who tabs into the page
+  // body after clicking lands back at the top of the document
+  // instead of the section they navigated to. Add tabIndex={-1}
+  // to the target if it's not already focusable, then move focus
+  // programmatically (with preventScroll so the browser's anchor
+  // scroll still owns the viewport position). One-time tabIndex
+  // set is harmless — -1 leaves the element out of the natural
+  // tab order, only making it programmatically-focusable.
+  const handleNavClick = (id: string) => {
+    requestAnimationFrame(() => {
+      const el = document.getElementById(id);
+      if (el) {
+        if (!el.hasAttribute("tabindex")) {
+          el.setAttribute("tabindex", "-1");
+        }
+        el.focus({ preventScroll: true });
+      }
+    });
+  };
+
   return (
     <nav
       aria-label="Page sections"
@@ -104,8 +126,9 @@ export function OverviewSubNav({
               <li key={i.id}>
                 <a
                   href={`#${i.id}`}
+                  onClick={() => handleNavClick(i.id)}
                   aria-current={isActive ? "true" : undefined}
-                  className={`group relative inline-flex items-center gap-1.5 h-11 text-[12.5px] transition-colors ${
+                  className={`group relative inline-flex items-center gap-1.5 h-11 text-[12.5px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm transition-colors ${
                     isActive
                       ? "font-semibold text-primary"
                       : "text-foreground/70 hover:text-foreground"
