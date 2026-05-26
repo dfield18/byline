@@ -34,7 +34,9 @@ import { TinySpark } from "@/components/dashboard/Sparklines";
 import { KpiVitalsTile } from "@/components/dashboard/KpiVitalsTile";
 import {
   KPI_PLATFORM_SPREAD_LOPSIDED,
+  KPI_STRONG_AVG_TONE,
   KPI_STRONG_MENTION_RATE,
+  KPI_WEAK_AVG_TONE,
   KPI_WEAK_MENTION_RATE,
   getKpiValueColor,
 } from "@/lib/kpiThresholds";
@@ -141,8 +143,18 @@ function formatTonePct(
   const sign = pct > 0 ? "+" : "−";
   const base = `${sign}${Math.abs(pct).toFixed(digits)}%`;
   if (!includeDirection) return base;
-  const direction = pct > 0 ? "positive" : "negative";
-  return `${base} ${direction}`;
+  // Direction word follows the SAME symmetric ±10 threshold the
+  // value-color tier uses (KPI_STRONG_AVG_TONE / KPI_WEAK_AVG_TONE
+  // in kpiThresholds.ts). Earlier this appended "positive" /
+  // "negative" purely on sign, so a -7% reading rendered as
+  // "−7% negative" even though the color tier classified it
+  // neutral. Now the descriptor agrees with the color: only
+  // emit "positive" / "negative" when the value is clearly in
+  // that tier; mid-band values render with no descriptor so the
+  // numeric sign carries the (mild) direction signal alone.
+  if (pct >= KPI_STRONG_AVG_TONE * 100) return `${base} positive`;
+  if (pct <= KPI_WEAK_AVG_TONE * 100) return `${base} negative`;
+  return base;
 }
 function KpiTooltipIcon({
   text,

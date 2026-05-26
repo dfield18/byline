@@ -340,6 +340,16 @@ function composeBriefingSummary({
 const STABLE_COPY =
   "Visibility is mostly stable across recent snapshots, with some topic-level variation.";
 
+// "Not enough data" — distinct from STABLE_COPY. Fired when there's
+// only 0–1 snapshot OR when no measured ai_recall endpoints exist
+// to compute a delta against. Earlier we returned STABLE_COPY in
+// these cases, which read as a confident "visibility is steady"
+// finding on subjects that hadn't even been refreshed once — a
+// false positive on the empty-state path that hardcoded confidence
+// where none was warranted.
+const NOT_ENOUGH_DATA_COPY =
+  "Not enough history yet — trend copy lights up once a second snapshot lands.";
+
 // "What changed" returns a list of structured deltas + endpoint
 // dates, so the sidebar can render multiple ranked rows (overall
 // mention rate + top topic movers) instead of one cramped sentence.
@@ -376,7 +386,7 @@ function composeWhatChanged({
   if (len < 2) {
     return {
       deltas: [],
-      fallbackCopy: STABLE_COPY,
+      fallbackCopy: NOT_ENOUGH_DATA_COPY,
       latestDate: trajectoryWeeks[len - 1] ?? null,
       priorDate: null,
     };
@@ -402,7 +412,7 @@ function composeWhatChanged({
   if (!overallEndpoints) {
     return {
       deltas: [],
-      fallbackCopy: STABLE_COPY,
+      fallbackCopy: NOT_ENOUGH_DATA_COPY,
       latestDate: trajectoryWeeks[len - 1] ?? null,
       priorDate: trajectoryWeeks[0] ?? null,
     };
@@ -1181,11 +1191,29 @@ export default async function VisibilityPage({
                   on the Platform Change Detail table. */}
               {platformsNotIncluded.length > 0 && (
                 <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
-                  Snapshot covers {platformsCovered.join(" and ")}.
-                  {" "}
-                  {platformsNotIncluded.join(" and ")}{" "}
-                  {platformsNotIncluded.length === 1 ? "was" : "were"}{" "}
-                  not included.
+                  {/* Three branches: (a) some-covered + some-missing
+                      (the "Snapshot covers X. Y was not included."
+                      flow); (b) zero-covered + all-missing (empty-
+                      state subject — no responses recorded yet;
+                      avoids rendering "Snapshot covers ."); (c) the
+                      not-applicable case is gated by the outer
+                      length-check so doesn't fire here. */}
+                  {platformsCovered.length === 0 ? (
+                    <>
+                      No platform responses recorded yet —{" "}
+                      {platformsNotIncluded.join(" and ")}{" "}
+                      {platformsNotIncluded.length === 1 ? "is" : "are"}{" "}
+                      pending.
+                    </>
+                  ) : (
+                    <>
+                      Snapshot covers {platformsCovered.join(" and ")}.
+                      {" "}
+                      {platformsNotIncluded.join(" and ")}{" "}
+                      {platformsNotIncluded.length === 1 ? "was" : "were"}{" "}
+                      not included.
+                    </>
+                  )}
                 </p>
               )}
 
