@@ -233,11 +233,23 @@ function composeCompetitionWhatChanged({
 } {
   const STABLE_COPY =
     "The comparison set is mostly stable across recent snapshots.";
+  // Distinct from STABLE_COPY — fired when there's only 0–1 snapshot
+  // OR when no measured ai_recall endpoints exist to compute a delta
+  // against. Mirrors Visibility's NOT_ENOUGH_DATA_COPY (round 10) so
+  // a future refactor that removes the outer `hasTrend` gate on this
+  // function's consumer (line ~2245) can't accidentally surface
+  // STABLE_COPY's confident "stable" finding on a never-refreshed
+  // subject. Currently latent: the only live consumer is inside the
+  // `hasTrend && ...` section, so this code path is unreachable on
+  // sparse subjects today. Defense-in-depth fix; same shape as the
+  // Visibility fix.
+  const NOT_ENOUGH_DATA_COPY =
+    "Not enough history yet — trend copy lights up once a second snapshot lands.";
   const len = trajectoryWeeks.length;
   if (len < 2) {
     return {
       deltas: [],
-      fallbackCopy: STABLE_COPY,
+      fallbackCopy: NOT_ENOUGH_DATA_COPY,
       latestDate: trajectoryWeeks[len - 1] ?? null,
       priorDate: null,
     };
@@ -247,7 +259,7 @@ function composeCompetitionWhatChanged({
   if (!overallEndpoints) {
     return {
       deltas: [],
-      fallbackCopy: STABLE_COPY,
+      fallbackCopy: NOT_ENOUGH_DATA_COPY,
       latestDate: trajectoryWeeks[len - 1] ?? null,
       priorDate: trajectoryWeeks[0] ?? null,
     };
@@ -1293,19 +1305,6 @@ export default async function CompetitionPage({
       : null,
   });
 
-  // Snapshot-diff strip data for the Standing band. Reuses the same
-  // composer the Trend section uses, on the same mention-rate metric
-  // the ranking table column actually shows (see the metric-choice
-  // comment above). Earlier this strip pulled `trajectory.share_of_voice`
-  // (pie-share) — that surfaced a different mover set and the chip
-  // values disagreed numerically with the table column they sat
-  // under. Full-trajectory window (not the user-selected trend slice)
-  // so the strip describes "across recorded history."
-  const snapshotDiff = composeCompetitionWhatChanged({
-    trajectoryWeeks: data.trajectory.weeks,
-    aiRecall: data.trajectory.ai_recall,
-    competitorTrajectories: data.competitor_trajectories,
-  });
   // Inline advisory used on sections that genuinely CAN'T scope on
   // the active filters (Trend chart's competitor lines, Co-Mentions
   // pairings) — surfacing it makes the data-limitation transparent
