@@ -938,30 +938,22 @@ function TrajectoryStrip({
     },
   ];
 
-  // Weakest topic feeds the rightmost "Visibility by topic" tile.
-  // Compressed to value (weakest pct) + suffix (topic name) so the
-  // tile reads at a glance — the full per-topic bar list now lives
-  // on the Band 2 Top Narratives card's sibling surfaces. Tone
-  // tracks the diagnosis: warning when there's a real spread,
-  // success when even the weakest topic is ≥70%, default otherwise.
+  // Weakest topic + gap-exists feed the Visibility-by-topic tile's
+  // bar list — `gapExistsSnap` gates the `highlight="weakest"` row
+  // tone, `weakestTopic` is the row whose mention rate matches the
+  // floor. Earlier this block also computed allHighSnap /
+  // weakestTopicPct / weakestTopicColor for a lead-line summary
+  // above the bars; that line was dropped (it duplicated the
+  // bottom-line verdict's "but only 25% on Current events"
+  // phrasing), so only the bar-list-driving values are kept.
   const withRecallSnap = topicCoverage.filter(_hasFiniteRecall);
   const gapExistsSnap = hasRealVisibilityGap(topicCoverage);
-  const allHighSnap =
-    withRecallSnap.length > 0 &&
-    withRecallSnap.every((t) => (t.ai_recall ?? 0) >= 0.7);
-  const sortedByRecallSnap = withRecallSnap
-    .slice()
-    .sort((a, b) => (a.ai_recall ?? 0) - (b.ai_recall ?? 0));
-  const weakestTopic = sortedByRecallSnap[0] ?? null;
-  const weakestTopicPct =
-    weakestTopic && weakestTopic.ai_recall !== null
-      ? Math.round(weakestTopic.ai_recall * 100)
+  const weakestTopic =
+    withRecallSnap.length > 0
+      ? withRecallSnap.reduce((a, b) =>
+          (a.ai_recall ?? 0) <= (b.ai_recall ?? 0) ? a : b,
+        )
       : null;
-  const weakestTopicColor: string = gapExistsSnap
-    ? "text-warning"
-    : allHighSnap
-      ? "text-success"
-      : "text-foreground";
 
   const renderTrajectoryTile = (m: (typeof metrics)[number]) => {
     // Prior value = the IMMEDIATELY preceding snapshot only. Earlier
@@ -1051,27 +1043,13 @@ function TrajectoryStrip({
               text={`Mention rate per tracked topic for ${subjectName} on topic-area questions (where the prompt doesn't name the subject directly). Bars sorted highest to lowest; warning tone on the weakest topic when there's a real spread. Open the Visibility deep-dive (link below) for snapshot + per-platform detail.`}
             />
           </div>
-          {/* Weakest-topic lead line — same shape as the AI Mention
-              Rate tile's delta line. Warning when there's a real
-              spread; success when even the weakest is ≥70%; silent
-              otherwise. */}
-          {weakestTopic && weakestTopicPct !== null && (
-            <p
-              className={`mt-1 text-[12px] font-medium ${
-                gapExistsSnap
-                  ? "text-warning"
-                  : allHighSnap
-                    ? "text-success"
-                    : "text-muted-foreground"
-              }`}
-            >
-              {gapExistsSnap
-                ? `Weakest: ${weakestTopic.label} ${weakestTopicPct}%`
-                : allHighSnap
-                  ? `Floor: ${weakestTopicPct}% (every topic ≥70%)`
-                  : `Floor: ${weakestTopicPct}%`}
-            </p>
-          )}
+          {/* Weakest-topic lead line removed — the bottom-line
+              verdict above the Vitals row already says "but only
+              25% on Current events" and the warning-toned weakest
+              row in the bar list below carries the same signal,
+              so a third repetition just trained the eye to skip
+              the band. The list's tone + emphasis keeps "which is
+              weakest" obvious without relying on color alone. */}
           {/* Bar list. Reuses TopicBarRow for visual consistency
               with the sibling rendering on the Visibility deep-
               dive. Top 4 only — keeps the tile compact alongside

@@ -45,11 +45,30 @@ export const KPI_WEAK_AVG_RANK = 4.0;
 
 // ── Signed metric (range −1..+1, treated symmetrically) ──────────
 
-// Average sentiment / favorability. Treated SYMMETRICALLY around
-// zero (this metric is NOT a 0..1 rate). ±10% neutral band absorbs
-// snapshot-to-snapshot noise so a -7% reading doesn't fire warning
-// while a +4 pts delta arrow is already carrying the directional
-// story.
+// Average sentiment / favorability. Option B — symmetric absolute-
+// strength tiers around zero (this metric is NOT a 0..1 rate). The
+// number's color reflects a meaningful LEVEL of favorability:
+// green ≥ +10, neutral −10..+10, amber < −10. Direction (the value
+// improving or declining) is carried by the delta arrow, not by
+// the value color — a noisy metric that flips amber on every
+// mildly-negative reading trains the reader to ignore the signal,
+// so amber stays reserved for clearly-negative.
+//
+// Symmetry: same magnitude on both sides (±10). A subject at -7%
+// reads neutral by rule, with the delta arrow ("↑4 pts") carrying
+// the "improving" story.
+//
+// ── Tunable ──────────────────────────────────────────────────────
+// These ±10 thresholds are STARTING values, not load-bearing
+// constants. Once we have the real distribution of avg_sentiment
+// across the subject set (post-Phase B), recalibrate as a pair:
+//   - if most subjects cluster within ±10, tighten the band so
+//     the tier swap actually fires
+//   - if favorability swings wider in practice, widen the band so
+//     normal variance doesn't trip the warning tier
+// Do NOT hand-tune per subject; keep the rule a single symmetric
+// pair so the same favorability number colors identically wherever
+// it appears across the app.
 export const KPI_STRONG_AVG_TONE = 0.10;
 export const KPI_WEAK_AVG_TONE = -0.10;
 
