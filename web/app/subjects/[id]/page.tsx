@@ -1024,7 +1024,10 @@ function TrajectoryStrip({
           {/* Bar list. Reuses TopicBarRow for visual consistency
               with the sibling rendering on the Visibility deep-
               dive. Top 4 only — keeps the tile compact alongside
-              the other Vitals tiles. */}
+              the other Vitals tiles. Row spacing bumped from
+              space-y-2 → space-y-4 so the bars breathe and the
+              tile fills the same vertical space as the sparkline
+              tiles next to it instead of bottoming out short. */}
           {(() => {
             const sortedDesc = withRecallSnap
               .slice()
@@ -1035,7 +1038,7 @@ function TrajectoryStrip({
               weakestRate !== null &&
               Math.abs((t.ai_recall ?? 0) - weakestRate) < 0.001;
             return (
-              <div className="mt-3 space-y-2">
+              <div className="mt-4 space-y-4">
                 {sortedDesc.map((t) => (
                   <TopicBarRow
                     key={t.label}
@@ -1052,6 +1055,15 @@ function TrajectoryStrip({
               </div>
             );
           })()}
+          {/* Methodology footer pinned to the bottom via mt-auto.
+              Mirrors the AI Mention Rate tile's by-platform footer
+              line — names the metric inline so a non-technical
+              reader doesn't have to infer the denominator, and
+              gives the tile a bottom-anchored element so heights
+              equalize cleanly against the sparkline tiles. */}
+          <p className="mt-auto pt-3 text-[10.5px] text-muted-foreground leading-relaxed">
+            % of AI answers per topic that mention {subjectName} · lower = bigger gap
+          </p>
         </div>
       )}
     </div>
