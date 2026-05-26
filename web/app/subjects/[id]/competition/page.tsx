@@ -15,7 +15,9 @@ import { notFound, redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
-import { Card, SectionTitle, Pill, KpiGauge } from "@/components/dashboard/ui";
+import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
+import { BottomLineBlock } from "@/components/dashboard/BottomLineBlock";
+import { KpiVitalsTile } from "@/components/dashboard/KpiVitalsTile";
 import { CompetitiveScatter } from "./CompetitiveScatter";
 import { TopicProminenceFilter } from "./TopicProminenceFilter";
 import { LandscapePlatformFilter } from "./LandscapePlatformFilter";
@@ -199,55 +201,11 @@ function changeFromTrajectory(arr: (number | null)[] | undefined): number | null
   return (cur - pri) * 100;
 }
 
-// Inline SVG sparkline sized to fit the bottom of a KPI tile. Matches
-// the Overview Vitals TinySpark visually (~22px tall, asymmetric pad
-// 40/15 so flat lines don't graze the floor). Connects only adjacent
-// finite points and renders nothing when fewer than two finite values
-// exist — preserves vertical rhythm via the parent's reserved slot.
-function TinySpark({
-  values,
-  color = "var(--primary)",
-}: {
-  values: (number | null)[];
-  color?: string;
-}) {
-  const numeric = values.filter(
-    (v): v is number => v !== null && Number.isFinite(v),
-  );
-  if (numeric.length < 2) return null;
-  const dataMin = Math.min(...numeric);
-  const dataMax = Math.max(...numeric);
-  const rawRange = dataMax - dataMin || 1;
-  const plotMin = dataMin - rawRange * 0.4;
-  const plotMax = dataMax + rawRange * 0.15;
-  const range = plotMax - plotMin || 1;
-  const w = 120;
-  const h = 22;
-  const pad = 2;
-  const step = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
-  const path: string[] = [];
-  let lastWasNull = false;
-  values.forEach((v, i) => {
-    if (v === null || !Number.isFinite(v)) {
-      lastWasNull = true;
-      return;
-    }
-    const x = pad + i * step;
-    const y = h - pad - ((v - plotMin) / range) * (h - pad * 2);
-    path.push(path.length === 0 || lastWasNull ? `M${x},${y}` : `L${x},${y}`);
-    lastWasNull = false;
-  });
-  return (
-    <svg
-      viewBox={`0 0 ${w} ${h}`}
-      preserveAspectRatio="none"
-      className="w-full h-[22px]"
-      aria-hidden
-    >
-      <path d={path.join(" ")} fill="none" stroke={color} strokeWidth={1.5} />
-    </svg>
-  );
-}
+// Local TinySpark removed — Competition's KPI tiles now render
+// through the shared KpiVitalsTile with sparkVariant="tiny", which
+// internally uses the canonical TinySpark from
+// components/dashboard/Sparklines.tsx (same monotone-cubic path
+// math, but with the aria-label SR support added in round 9).
 
 type WhatChangedDelta = {
   label: string;
@@ -1467,13 +1425,27 @@ export default async function CompetitionPage({
                     aria-hidden
                   />
                   <div className="relative">
-                    <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-primary/80 mb-2">
-                      Bottom Line
-                    </div>
-                    <p className="text-[15.5px] leading-relaxed text-foreground/90 max-w-3xl">
-                      {competitiveBottomLine ??
-                        `${data.subject_name}'s competitive position across AI answers in this snapshot.`}
-                    </p>
+                    {/* Shared BottomLineBlock — same component the
+                        Overview Vitals card and Visibility briefing
+                        use, so the three spoke heroes share identical
+                        type + spacing + title/body split treatment.
+                        Earlier this spoke hand-rolled the hero at
+                        text-[15.5px] leading-relaxed + a different
+                        eyebrow size/casing, which read as a separate
+                        surface from the other two spoke verdicts.
+                        bodyTone="neutral" — the Competition bottom
+                        line is a server-polished summary, not a
+                        templated gap punchline, so the warning-toned
+                        left rule would mislabel a strong-position
+                        verdict ("#1 in topic X, lead of 20 pts") as
+                        a gap. */}
+                    <BottomLineBlock
+                      text={
+                        competitiveBottomLine ??
+                        `${data.subject_name}'s competitive position across AI answers in this snapshot.`
+                      }
+                      bodyTone="neutral"
+                    />
                     {(() => {
                       // Filter-aware coverage caveat. Unfiltered: a
                       // simple "N platforms × M topics" frame. When
@@ -1551,137 +1523,49 @@ export default async function CompetitionPage({
                         duplicate render is gone. */}
                   </div>
                   <div className="relative mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-                    {competitionKpis.map((k) => {
-                      // Same fill-color derivation as Visibility — the
-                      // gauge color tracks the value tone so the bar
-                      // and the headline number agree visually.
-                      const gaugeFill =
-                        k.valueColor === "text-success"
-                          ? "var(--success)"
-                          : k.valueColor === "text-warning"
-                            ? "var(--warning)"
-                            : "var(--primary)";
-                      const tileInner = (
-                        <>
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
-                                {k.label}
-                              </div>
-                            </div>
-                            <KpiTooltipIcon
-                              text={k.tooltip ?? k.helper}
-                              align="right"
-                            />
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
-                            <span
-                              className={`text-2xl font-semibold tracking-tight tabular-nums leading-tight ${k.valueColor}`}
-                            >
-                              {k.value}
-                            </span>
-                            {k.valueSuffix && (
-                              <span
-                                className={`text-base font-medium leading-tight ${k.valueColor}`}
-                                title={k.valueSuffix}
-                              >
-                                {k.valueSuffix}
-                              </span>
-                            )}
-                            {/* Pp delta vs first measured point in
-                                the trajectory window. All three
-                                metrics carried here (subject SoV,
-                                gap-to-rival, topic mention rate)
-                                share the convention positive=better,
-                                so the tone rule is uniform across
-                                tiles without per-tile polarity
-                                inversion. */}
-                            {k.deltaPp !== null &&
-                              k.deltaPp !== undefined &&
-                              Number.isFinite(k.deltaPp) && (
-                                <span
-                                  className={`text-[12px] font-medium tabular-nums ${
-                                    k.deltaPp > 0
-                                      ? "text-success"
-                                      : k.deltaPp < 0
-                                        ? "text-warning"
-                                        : "text-muted-foreground"
-                                  }`}
-                                  aria-label={`Change vs start of window: ${k.deltaPp > 0 ? "up" : k.deltaPp < 0 ? "down" : "no change"} ${Math.abs(Math.round(k.deltaPp))} points`}
-                                  title="vs start of trend window"
-                                >
-                                  {k.deltaPp > 0 ? "↑" : k.deltaPp < 0 ? "↓" : ""}
-                                  {Math.abs(Math.round(k.deltaPp))} pts
-                                </span>
-                              )}
-                          </div>
-                          {k.gaugeValue !== null &&
-                            Number.isFinite(k.gaugeValue) && (
-                              <div className="mt-3">
-                                <KpiGauge
-                                  value={k.gaugeValue}
-                                  benchmark={k.gaugeBenchmark}
-                                  fillColor={gaugeFill}
-                                  benchmarkLabel={k.caption ?? undefined}
-                                />
-                              </div>
-                            )}
-                          {/* Standalone caption only when the gauge
-                              isn't consuming it AND no sparkline is
-                              showing in the footer (sparkline takes
-                              priority on no-gauge tiles since the
-                              spark already conveys magnitude over
-                              time; the caption would then duplicate
-                              the headline + caption pair already
-                              above the spark). */}
-                          {k.caption &&
-                            k.gaugeValue === null &&
-                            !(k.sparkValues && k.sparkValues.length > 0) && (
-                              <div
-                                className="mt-auto pt-3 text-[11px] text-muted-foreground leading-snug line-clamp-2"
-                                title={k.caption}
-                              >
-                                {k.caption}
-                              </div>
-                            )}
-                          {/* Sparkline footer — mt-auto pushes it to
-                              the tile floor so baselines align across
-                              all four tiles (matches Overview Vitals).
-                              Color matches the gauge fill / value tone
-                              when set, falling back to primary. */}
-                          {k.sparkValues && k.sparkValues.length > 0 && (
-                            <div className="mt-auto pt-3">
-                              <TinySpark
-                                values={k.sparkValues}
-                                color={gaugeFill}
-                              />
-                            </div>
-                          )}
-                        </>
-                      );
-                      // Tile chrome matches Visibility's: bg-muted/40
-                      // rounded-md p-4. Anchored tiles wrap in an
-                      // anchor with focus-visible ring; static tiles
-                      // are plain divs.
-                      const baseClasses =
-                        "flex h-full flex-col rounded-md bg-muted/40 p-4";
-                      if (k.anchor) {
-                        return (
-                          <a
-                            key={k.label}
-                            href={`#${k.anchor}`}
-                            className={`${baseClasses} group transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm`}
-                          >
-                            {tileInner}
-                          </a>
-                        );
-                      }
-                      return (
-                        <div key={k.label} className={baseClasses}>
-                          {tileInner}
-                        </div>
-                      );
-                    })}
+                    {/* Migrated from the bespoke per-tile JSX builder
+                        to the shared KpiVitalsTile so all three spoke
+                        KPI strips (Overview Vitals, Visibility
+                        briefing, Competition Standing) render through
+                        the same primitive. sparkVariant="tiny" opts
+                        into the 22-px TinySpark instead of the
+                        120-px MiniSpark — the Standing band has a
+                        ranking table folded into the same Card, so
+                        full MiniSparks would push the table below
+                        the fold. deltaTooltip="vs start of trend
+                        window" overrides the default "vs previous
+                        snapshot" since Competition's deltas are
+                        first-measured → latest-measured over the
+                        whole window, not snapshot-to-snapshot. */}
+                    {competitionKpis.map((k) => (
+                      <KpiVitalsTile
+                        key={k.label}
+                        label={k.label}
+                        tooltipText={k.tooltip ?? k.helper}
+                        anchor={k.anchor}
+                        value={k.value}
+                        valueSuffix={k.valueSuffix}
+                        valueColor={k.valueColor}
+                        deltaPp={k.deltaPp}
+                        deltaTooltip="vs start of trend window"
+                        gaugeValue={k.gaugeValue}
+                        gaugeBenchmark={k.gaugeBenchmark}
+                        benchmarkCaption={
+                          k.gaugeValue !== null &&
+                          Number.isFinite(k.gaugeValue)
+                            ? k.caption
+                            : null
+                        }
+                        standaloneCaption={
+                          k.gaugeValue === null &&
+                          !(k.sparkValues && k.sparkValues.length > 0)
+                            ? k.caption
+                            : null
+                        }
+                        sparkValues={k.sparkValues ?? undefined}
+                        sparkVariant="tiny"
+                      />
+                    ))}
                   </div>
                 {/* Ranking table is now folded INTO the same Card as
                     the KPI strip above, separated by a hairline top

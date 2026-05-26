@@ -32,7 +32,7 @@
 // either spoke reads as one visual family.
 
 import { KpiGauge } from "@/components/dashboard/ui";
-import { MiniSpark } from "@/components/dashboard/Sparklines";
+import { MiniSpark, TinySpark } from "@/components/dashboard/Sparklines";
 import { KPI_PLATFORM_SPREAD_LOPSIDED } from "@/lib/kpiThresholds";
 
 export type KpiVitalsTilePlatformItem = {
@@ -97,6 +97,14 @@ export type KpiVitalsTileProps = {
   // that produced their `value` so axis labels read in the same
   // units as the headline.
   sparkFormat?: (v: number | null) => string;
+  // Spark visual variant: "mini" (default, 120px tall with axis
+  // labels + per-point dots) for Vitals-tier tiles where the trend
+  // is the secondary read; "tiny" (22px line-only) for compact
+  // KPI strips where a full mini-chart would dominate the tile.
+  // The Competition spoke's Standing band uses "tiny" because the
+  // 4-tile strip sits above a ranking table in the same Card and
+  // mini-charts would push the table below the fold.
+  sparkVariant?: "mini" | "tiny";
 
   // Per-platform decomposition rendered below the sparkline. Top-3
   // platforms shown as "{Name} {pct}%"; spread flag appended when
@@ -165,6 +173,7 @@ export function KpiVitalsTile(props: KpiVitalsTileProps) {
     sparkIsHistorical,
     sparkLabels,
     sparkFormat,
+    sparkVariant = "mini",
     platformBreakdown,
     platformBreakdownIsSigned,
     platformBreakdownLopsidedThreshold,
@@ -231,7 +240,9 @@ export function KpiVitalsTile(props: KpiVitalsTileProps) {
               className={`text-[12px] font-medium tabular-nums ${deltaToneClass(
                 deltaPp,
               )}`}
-              aria-label={`Change vs previous snapshot: ${
+              aria-label={`Change ${
+                deltaTooltip ?? "vs previous snapshot"
+              }: ${
                 deltaPp > 0 ? "up" : deltaPp < 0 ? "down" : "no change"
               } ${Math.abs(Math.round(deltaPp))} points`}
               title={deltaTooltip ?? "vs previous snapshot"}
@@ -286,17 +297,25 @@ export function KpiVitalsTile(props: KpiVitalsTileProps) {
           another doesn't. */}
       {hasSpark && (
         <div className="mt-auto pt-3">
-          <MiniSpark
-            values={sparkValues as (number | null)[]}
-            isHistorical={
-              sparkIsHistorical ??
-              new Array(sparkValues!.length).fill(false)
-            }
-            labels={sparkLabels ?? new Array(sparkValues!.length).fill("")}
-            format={sparkFormat ?? ((v) => (v === null ? "—" : String(v)))}
-            color={fillColor}
-            ariaLabel={`${label} trend, ${sparkValues!.length} snapshot${sparkValues!.length === 1 ? "" : "s"}`}
-          />
+          {sparkVariant === "tiny" ? (
+            <TinySpark
+              values={sparkValues as (number | null)[]}
+              color={fillColor}
+              ariaLabel={`${label} trend, ${sparkValues!.length} snapshot${sparkValues!.length === 1 ? "" : "s"}`}
+            />
+          ) : (
+            <MiniSpark
+              values={sparkValues as (number | null)[]}
+              isHistorical={
+                sparkIsHistorical ??
+                new Array(sparkValues!.length).fill(false)
+              }
+              labels={sparkLabels ?? new Array(sparkValues!.length).fill("")}
+              format={sparkFormat ?? ((v) => (v === null ? "—" : String(v)))}
+              color={fillColor}
+              ariaLabel={`${label} trend, ${sparkValues!.length} snapshot${sparkValues!.length === 1 ? "" : "s"}`}
+            />
+          )}
           {platformBreakdown &&
             (() => {
               const sorted = platformBreakdown

@@ -71,9 +71,16 @@ export function buildMonoCubicPath(
 export function TinySpark({
   values,
   color = "var(--primary)",
+  ariaLabel,
 }: {
   values: (number | null)[];
   color?: string;
+  // Optional accessible label so the sparkline isn't invisible to AT
+  // when it's the primary trend visual of its container. Mirrors
+  // MiniSpark's same prop. When omitted the SVG goes aria-hidden
+  // (decorative-only fallback for inline magnitude indicators where
+  // the surrounding numeric value already carries the signal).
+  ariaLabel?: string;
 }) {
   const numeric = values.filter(
     (v): v is number => v !== null && Number.isFinite(v),
@@ -110,7 +117,9 @@ export function TinySpark({
       viewBox={`0 0 ${w} ${h}`}
       preserveAspectRatio="none"
       className="w-full h-[22px]"
-      aria-hidden
+      role={ariaLabel ? "img" : undefined}
+      aria-label={ariaLabel}
+      aria-hidden={ariaLabel ? undefined : true}
     >
       <path
         d={path.join(" ")}
