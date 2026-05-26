@@ -93,9 +93,28 @@ export function KpiGauge({
     benchmark !== null && Number.isFinite(benchmark)
       ? Math.max(0, Math.min(1, benchmark))
       : null;
+  const valuePct = Math.round(safeValue * 100);
+  const benchmarkPct =
+    safeBenchmark !== null ? Math.round(safeBenchmark * 100) : null;
+  // aria-valuetext spells out the value AND the benchmark when
+  // present so a screen-reader hears "62 percent of 100; benchmark
+  // 45 percent" instead of just the raw progressbar value. Without
+  // this, the value-vs-benchmark comparison (the whole point of
+  // the gauge) is invisible to AT users.
+  const ariaValueText =
+    benchmarkPct !== null
+      ? `${valuePct}% (subject-set average ${benchmarkPct}%)`
+      : `${valuePct}%`;
   return (
     <div>
-      <div className="relative h-1.5 w-full rounded-full bg-muted">
+      <div
+        className="relative h-1.5 w-full rounded-full bg-muted"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={valuePct}
+        aria-valuetext={ariaValueText}
+      >
         <div
           className="h-full rounded-full"
           style={{
@@ -109,7 +128,7 @@ export function KpiGauge({
             aria-hidden
             className="absolute top-1/2 -translate-y-1/2 h-3 w-[2px] rounded-sm bg-foreground/55"
             style={{ left: `calc(${safeBenchmark * 100}% - 1px)` }}
-            title={`Subject-set average: ${Math.round(safeBenchmark * 100)}%`}
+            title={`Subject-set average: ${benchmarkPct}%`}
           />
         )}
       </div>

@@ -33,6 +33,7 @@
 
 import { KpiGauge } from "@/components/dashboard/ui";
 import { MiniSpark } from "@/components/dashboard/Sparklines";
+import { KPI_PLATFORM_SPREAD_LOPSIDED } from "@/lib/kpiThresholds";
 
 export type KpiVitalsTilePlatformItem = {
   name: string;
@@ -321,8 +322,13 @@ export function KpiVitalsTile(props: KpiVitalsTileProps) {
               };
               const pcts = sorted.map((p) => toPct(p.value as number));
               const spread = pcts[0] - pcts[pcts.length - 1];
+              // Default reads from the shared kpiThresholds module
+              // (was a hardcoded 40 inline) so the threshold can be
+              // retuned in one place. Callers can still override
+              // per-tile if they want a tighter / looser flag.
               const lopsidedThreshold =
-                platformBreakdownLopsidedThreshold ?? 40;
+                platformBreakdownLopsidedThreshold ??
+                KPI_PLATFORM_SPREAD_LOPSIDED;
               const isLopsided = spread >= lopsidedThreshold;
               return (
                 <div className="mt-2 text-[10.5px] text-muted-foreground leading-relaxed">

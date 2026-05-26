@@ -98,6 +98,15 @@ export function Header({
 
   return (
     <header className="border-b border-border bg-card sticky top-0 z-20">
+      {/* Visually-hidden document heading so each spoke has an actual
+          <h1> in its accessibility tree. The subject name is shown
+          visually inside the subject-picker chip below as a <span>,
+          but a <span> doesn't anchor document structure — SR users
+          previously got no top-level heading until the first
+          SectionTitle <h2> on the page, which broke the heading
+          ladder. sr-only keeps the h1 invisible to sighted users
+          while announcing the subject name to AT. */}
+      <h1 className="sr-only">{subjectName}</h1>
       {/* Inner content capped at 1280, matching every spoke's main
           (Overview + Visibility + Narrative + Competition + Sources
           + Prompts all sit at max-w-[1280px]). Background/border

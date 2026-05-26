@@ -492,6 +492,21 @@ function TopicBarRow({
             />
           )}
           <span className="truncate">{capitalizeFirst(label)}</span>
+          {/* Non-color tag for the highlighted row so colorblind
+              readers (and SR users via the visible text) get the
+              "this is the weakest/strongest" signal without
+              relying on bar tone. Inline so it reads as part of
+              the label rather than as a separate badge. */}
+          {highlight === "weakest" && (
+            <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider text-warning">
+              · weakest
+            </span>
+          )}
+          {highlight === "strongest" && (
+            <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider text-success">
+              · strongest
+            </span>
+          )}
         </div>
         <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
           <div
