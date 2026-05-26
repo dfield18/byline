@@ -26,7 +26,11 @@ import { Header } from "@/components/dashboard/Header";
 import { Card, SectionTitle, Pill } from "@/components/dashboard/ui";
 import { BottomLineBlock } from "@/components/dashboard/BottomLineBlock";
 import { KpiVitalsTile } from "@/components/dashboard/KpiVitalsTile";
-import { getKpiValueColor } from "@/lib/kpiThresholds";
+import {
+  KPI_STRONG_MENTION_RATE,
+  KPI_WEAK_MENTION_RATE,
+  getKpiValueColor,
+} from "@/lib/kpiThresholds";
 import { TrendOverTime } from "./TrendOverTime";
 import { OverviewSubNav } from "../OverviewSubNav";
 import { VisibilityTopicFilter } from "./VisibilityTopicFilter";
@@ -178,14 +182,19 @@ function deltaToneClass(v: number | null | undefined): string {
 // muddling level + direction into a single signal that contradicts
 // either column.
 //
-// Thresholds lifted to named constants so they're tunable in one
-// place across both the Platforms and Topics tables (both consume
-// platformStatus). The "Mixed" label was renamed to "Moderate" —
-// "Mixed" reads as a trend word ("mixed signals"), inappropriate
-// for a purely-level judgment.
-const STATUS_STRONG_MENTION_RATE = 0.6;
+// Mention-rate thresholds come from the shared kpiThresholds module
+// so the Platforms / Topics tables, the heatmap tier, and the
+// Overview Vitals KPI tiles all use ONE source of truth — earlier
+// these were locally redeclared (`KPI_STRONG_MENTION_RATE =
+// 0.6`, `KPI_WEAK_MENTION_RATE = 0.3`) which happened to match
+// the kpiThresholds values but would silently drift if either side
+// was retuned. The avg-rank cutoff stays local since it's the
+// only consumer of that threshold today.
+//
+// The "Mixed" label was renamed to "Moderate" — "Mixed" reads as
+// a trend word ("mixed signals"), inappropriate for a purely-
+// level judgment.
 const STATUS_STRONG_AVG_RANK_MAX = 3;
-const STATUS_WEAK_MENTION_RATE = 0.3;
 
 // Per-cell tier for the Current Platform Snapshot heatmap. The
 // thresholds are the SAME constants that drive the Platforms /
@@ -199,8 +208,8 @@ const STATUS_WEAK_MENTION_RATE = 0.3;
 type HeatTier = "gap" | "mid" | "healthy" | "none";
 function heatTier(rate: number | null): HeatTier {
   if (rate === null || !Number.isFinite(rate)) return "none";
-  if (rate < STATUS_WEAK_MENTION_RATE) return "gap";
-  if (rate >= STATUS_STRONG_MENTION_RATE) return "healthy";
+  if (rate < KPI_WEAK_MENTION_RATE) return "gap";
+  if (rate >= KPI_STRONG_MENTION_RATE) return "healthy";
   return "mid";
 }
 function heatTierStyle(tier: HeatTier): {
@@ -245,12 +254,12 @@ function platformStatus(row: {
     return { label: "Limited Data", tone: "neutral" };
   }
   if (
-    row.mention_rate >= STATUS_STRONG_MENTION_RATE &&
+    row.mention_rate >= KPI_STRONG_MENTION_RATE &&
     (row.avg_rank ?? 999) <= STATUS_STRONG_AVG_RANK_MAX
   ) {
     return { label: "Strong", tone: "success" };
   }
-  if (row.mention_rate < STATUS_WEAK_MENTION_RATE) {
+  if (row.mention_rate < KPI_WEAK_MENTION_RATE) {
     return { label: "Weak", tone: "warning" };
   }
   return { label: "Moderate", tone: "primary" };
@@ -1278,7 +1287,7 @@ export default async function VisibilityPage({
                       (c) =>
                         c.mention_rate !== null &&
                         Number.isFinite(c.mention_rate) &&
-                        (c.mention_rate as number) < STATUS_WEAK_MENTION_RATE,
+                        (c.mention_rate as number) < KPI_WEAK_MENTION_RATE,
                     )
                     .map((c) => ({
                       platformName:
@@ -2156,7 +2165,8 @@ export default async function VisibilityPage({
               </span>{" "}
               AI responses across{" "}
               <span className="font-semibold text-foreground/80">
-                {data.meta.n_platforms} platforms
+                {data.meta.n_platforms} platform
+                {data.meta.n_platforms === 1 ? "" : "s"}
               </span>
               .{" "}
               <a href="#" className="text-primary hover:underline">

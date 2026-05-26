@@ -233,6 +233,13 @@ export function TrendOverTime({
   // overlay charts opt in; dense-cluster cases rely on the chip
   // legend below instead.
   showEndLabels?: boolean;
+  // Names of overlays to render visible on first paint. Unlisted
+  // overlays are hidden until the reader clicks their legend chip
+  // to opt them in. Used by Competition to default-show only the
+  // top 3 rivals (out of 7) so the chart doesn't render as a
+  // crowded 7-line tangle on load; Visibility leaves this
+  // undefined so all 4 per-platform overlays show by default.
+  defaultVisibleOverlays?: string[];
 }) {
   // Hover-to-isolate: when the user hovers a legend chip (or a line),
   // drop the opacity of every non-hovered series so the chosen one

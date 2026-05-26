@@ -559,57 +559,6 @@ function TopNarrativesList({
   );
 }
 
-function CompetitiveSharePanel({
-  competitive,
-}: {
-  competitive: SubjectOverview["competitive"];
-}) {
-  if (competitive.length === 0) {
-    return (
-      <div className="lg:border-l lg:border-border/50 lg:pl-12 lg:pt-20">
-        <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
-          Share of Voice (% of answers)
-        </div>
-        <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
-          % of answers mentioning each tracked entity.
-        </p>
-        <p className="mt-3 text-[13px] text-foreground/55 leading-relaxed">
-          No competitive entities tracked for this snapshot yet.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="lg:border-l lg:border-border/50 lg:pl-12 lg:pt-20">
-      <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
-        Share of Voice (% of answers)
-      </div>
-      <p className="mt-1 text-[11.5px] leading-snug text-foreground/55">
-        % of answers mentioning each tracked entity.
-      </p>
-      <div className="mt-5">
-        <CompetitorBarsFromData
-          data={pickTopWithSubject(competitive, 5).map((c) => ({
-            name: c.name,
-            // Defensive: coerce non-finite values (NaN, Infinity)
-            // to 0 AND floor any tiny negatives from float round-off.
-            // Backend float arithmetic can produce −1e−16 from
-            // subtraction; analyzer bugs could also produce NaN
-            // (0/0 mention rate) or Infinity. The chart computes
-            // bar width from this value, so without the guard
-            // either would render visually broken ("NaN%" /
-            // negative width).
-            sov: Number.isFinite(c.sov) ? Math.max(0, c.sov) : 0,
-            is_subject: c.is_subject,
-          }))}
-          height={340}
-        />
-      </div>
-    </div>
-  );
-}
-
 // Top-N by SoV with the subject force-included when they're outside
 // the natural top N. Drops the lowest-ranked non-subject row to make
 // room so the searched-for entity stays visible.
@@ -1466,10 +1415,14 @@ export default async function SubjectOverviewPage({
   // what it landed on.
   const overviewSectionNavItems: { id: string; label: string; num: string }[] = [];
   overviewSectionNavItems.push({ id: "vitals", label: "Vitals", num: "01" });
-  if (
-    data.narrative_clusters.length > 0 ||
-    data.recommended_actions?.primary
-  ) {
+  // Nav item gate matches the Top Narratives card's render gate
+  // (`narrative_clusters.length > 0`), NOT the loosened section
+  // gate that also accepts a fallback `recommended_actions.primary`.
+  // Without this, never-refreshed subjects (zero clusters but the
+  // backend ships a placeholder primary action) showed a
+  // "Narratives" nav item that landed on a Fix-only band with no
+  // Narratives content — false advertising in the rail.
+  if (data.narrative_clusters.length > 0) {
     overviewSectionNavItems.push({
       id: "narratives",
       label: "Narratives",
@@ -1860,9 +1813,14 @@ export default async function SubjectOverviewPage({
                       <CompetitorBarsFromData
                         data={pickTopWithSubject(data.competitive, 5).map((c) => ({
                           name: c.name,
-                          // Defensive floor at 0 — see CompetitiveSharePanel
-                          // comment for the rationale (float round-off
-                          // can produce tiny negatives).
+                          // Defensive: coerce non-finite (NaN /
+                          // Infinity) to 0 and floor tiny negatives
+                          // from float round-off. Backend float
+                          // arithmetic can produce −1e−16; analyzer
+                          // bugs could produce NaN (0/0). The chart
+                          // computes bar width from this value, so
+                          // without the guard either would render
+                          // visually broken (NaN% / negative width).
                           sov: Number.isFinite(c.sov) ? Math.max(0, c.sov) : 0,
                           is_subject: c.is_subject,
                         }))}
@@ -2207,7 +2165,8 @@ export default async function SubjectOverviewPage({
               </span>{" "}
               AI responses across{" "}
               <span className="font-semibold text-foreground/80">
-                {data.meta.n_platforms} platforms
+                {data.meta.n_platforms} platform
+                {data.meta.n_platforms === 1 ? "" : "s"}
               </span>
               .{" "}
               <a href="#" className="text-primary hover:underline">
