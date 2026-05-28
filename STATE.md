@@ -1,6 +1,6 @@
 # byline — project state
 
-> A pulse-check of where the project sits **as of 2026-05-26**
+> A pulse-check of where the project sits **as of 2026-05-28**
 > — three new spokes (Narrative, Sources, Prompts) stood up
 > from scratch, then a full Overview-spoke restructure into a
 > five-band narrative layout with horizontal sub-nav, then a
@@ -1203,6 +1203,59 @@ With the bypass active, a fresh round of parallel agents (sparse-subject edge ca
 ### Pixel / keyboard / VoiceOver still needs you
 
 Agents can structurally verify markup, but they can't see layout, spacing, color shifts in practice, hover states, focus ring contrast against backgrounds, screen-reader announcement order, mobile breakpoints. The bypass lets future agents reach the DOM but doesn't give them a real rendering engine. The productive next step on the QA side is a manual walk-through with DevTools + VoiceOver + a Lighthouse run to validate the perf win.
+
+---
+
+## Follow-up session #8 (2026-05-26 → 2026-05-28) — Competition spoke parity sweep + shared-primitive consolidation
+
+Seven commits on `main`. Sustained pass on the Competition spoke to bring it into design + a11y + behavior parity with Visibility, plus shared-primitive lifts that benefit all three spokes. Most of the work followed a "QA flagged this last round, now ship it" cadence — items the cross-spoke QA agents tagged but were deferred at the time. One real user-reported bug (KPI tooltips not working) caught at the end.
+
+### Competition spoke parity sweep
+
+- **`89ed714`** — BottomLineBlock + KpiVitalsTile migration. Hand-rolled "BOTTOM LINE" hero (eyebrow `text-[12px] tracking-[0.08em] text-primary/80`, body `text-[15.5px] leading-relaxed text-foreground/90`) replaced with shared `<BottomLineBlock text={...} bodyTone="neutral" />`. Bespoke 4-tile JSX builder (~120 lines) replaced with `competitionKpis.map(k => <KpiVitalsTile />)`. Three shared-component additions made the migration mechanical: **`sparkVariant: "mini" | "tiny"`** on KpiVitalsTile (Competition's Standing band has a ranking table folded into the same Card, so MiniSpark would push it below the fold — `"tiny"` opts into the 22-px TinySpark instead); **`ariaLabel`** on TinySpark mirroring the round-9 MiniSpark fix; and a **`deltaTooltip`-driven aria-label** so Competition's "vs start of trend window" semantic reaches SR users instead of being overridden by KpiVitalsTile's hardcoded "vs previous snapshot". Cleanup: removed Competition's local TinySpark (~40 lines, duplicate of the shared one) and the orphan `KpiGauge` import.
+- **`57c652c`** — `composeCompetitionWhatChanged` defense-in-depth STABLE_COPY fix. Mirrored the round-10 fix on Visibility's `composeWhatChanged`: the function returned a confident "The comparison set is mostly stable across recent snapshots" on `<2 snapshots` / `!overallEndpoints` paths. Currently latent because the only live consumer is gated by `hasTrend` outside, so sparse subjects never see it today — but a future refactor that removes that outer gate would surface the lie. New `NOT_ENOUGH_DATA_COPY` constant fires for both early-return paths. Bonus catch: `const snapshotDiff = composeCompetitionWhatChanged(...)` at line 1304 was dead code — round 8 cleanup removed its consumer (`snapshotDiffDeltas`) but left the source assignment running on every render. Now gone.
+- **`4c25b3a`** — Standing tile comparator unified with Bottom Line + Overview. **Cross-spoke incoherence the QA agent flagged**: Overview's Competitive Position card showed "Gap to leader −40 pts behind Donald Trump"; Competition's same-band Bottom Line said "trailing Donald Trump by 40 pts"; but Competition's "Closest Rival" KPI tile said "Marco Rubio · trails by 0 SoV pts". Three surfaces, three different comparator names + gaps for the same "where do I stand?" concept. Even within Competition itself, the Bottom Line and the tile disagreed. Root cause: Bottom Line + Overview both pick `referenceEntity = isLeader ? runnerUp : leader` (canonical); the Closest Rival tile instead picked the entity at smallest absolute SoV distance — a different question. Fix: renamed tile to "Gap to Leader" / "Lead over Runner-up" (flips with `isLeader`) and rewired to use the Bottom Line's comparator. Spark + delta also rewired to track subject − comparator over time. Bonus: caught a latent issue where the KpiVitalsTile callsite suppressed `standaloneCaption` when sparks were present (even though the shared component handles both — caption at `mt-3`, spark `mt-auto pt-3`). Dropped the suppression so the gap value is now visible on the tile.
+- **`7fbc6c0`** — Sub-nav now gates Wins & Losses + Platform Ownership heatmap auto-summary parity. Two more parity items vs Visibility. (1) Competition's sub-nav array was hardcoded to 4 entries (Standing/Positioning/Trend/Co-Mentions) but the page has a 5th `<section id="wins-losses">` gated on `hasWinsLossesData` (always false today; flag flips when the per-(prompt × entity) co-occurrence builder lands). If/when the flag lit up, the section would render but the sub-nav would skip over it. Conditionally inserts `Wins & Losses` (num="04") via `...(hasWinsLossesData ? [...] : [])` with Co-Mentions' num computed as "04" or "05" depending. (2) Visibility's Current Platform Snapshot heatmap renders an auto-summary below the legend ("Full coverage…" / "One gap: X doesn't mention Y on Z." / "N gaps — largest:…"); Competition's Platform Ownership heatmap had no parallel. Added an equivalent line scoped to the SUBJECT's per-platform performance with four branches (0/1/N marginal cells × single-vs-multi-platform). Renders for Vance as: `"Strongest on Gemini (80%); most contested on ChatGPT (20%)."`
+
+### Shared-primitive consolidations
+
+- **`6be2390`** — Shared `bandTier` classifier (`web/lib/bandTier.ts`, new). Long-running follow-up open since session #4. Visibility's `heatTier` (Gap < 30% / Mid 30-60% / Healthy ≥ 60%) and Competition's `sovTier` (Marginal < 15% / Contested 15-40% / Dominant ≥ 40%) had identical structure with different thresholds — two classifiers doing the same `< lowMax / >= highMin` arithmetic. Now both bodies collapse to a `bandTier(value, { highMin, lowMax })` call + a small alias rename. **`SOV_TIER_DOMINANT = 0.4`** and **`SOV_TIER_MARGINAL = 0.15`** lifted to `kpiThresholds.ts` so all four tier thresholds (Visibility mention-rate + Competition SoV) live in one home — a future retune lands in one file. Style mappers (`heatTierStyle` / `sovTierStyle`) stay local because the intent inversion is intentional (Visibility wants healthy cells to RECEDE so gap cells stand out; Competition wants dominant cells to POP because they're wins).
+
+### Trend chart legend rework
+
+- **`2c459b1`** — Hide off-chart overlays from the legend (was crossed-out chips). User asked for: on Competition's Trend chart, hidden entities (Marco Rubio, Tim Scott, Nikki Haley) were rendered as line-through, opacity-50 chips next to the visible ones — visual weight the user didn't want once a chip was hidden. Now `overlays.map(...)` returns null for non-visible overlays; "Show all" / "Reset" button is the canonical recovery. Show-all gate broadened from `defaultVisibleOverlays && overlays.length > visibleByDefault.size` to ALSO render when any overlay is hidden (regardless of `defaultVisibleOverlays`) — without this, Visibility users who toggle a platform off would lose all recovery path. Button text: "Show all" when any hidden, "Reset" when all visible AND non-trivial default subset exists.
+
+### Tooltip popover lift (real bug fix)
+
+- **`c7b1f3f`** — KpiVitalsTile tooltip: lift styled popover into shared component (was native browser `title` only). User reported: tooltips on Overview's AI Mention Rate + Net Favorability tiles "don't work." Root cause: the shared `KpiTooltipIcon` inside `KpiVitalsTile.tsx` used only the native `title` attribute — slow ~1s browser delay, unstyled grey rectangle. Round 9's a11y fix made it focusable but didn't add a popover element; every other tooltip in the app is a custom CSS popover, so the bare title felt like the tooltip was broken. Lifted the Overview-local KpiTooltipIcon's popover pattern (page.tsx ~125) into the shared component: now reveals immediately on hover (`group-hover:opacity-100`) AND on Tab focus (`group-focus-within:opacity-100`); aria-label still announces the text to SR users; native `title` dropped. New `align` prop (default `"right"` since KPI tile icons sit at the right edge of the title block; `"center"`/`"left"` available). Affects every KpiVitalsTile consumer — Overview Vitals, Visibility briefing, Competition Standing — all three now have a consistent styled popover.
+
+### Net state of the Competition spoke
+
+Now fully primer-driven through shared components:
+
+- **BottomLineBlock** (was bespoke hero)
+- **KpiVitalsTile** with `sparkVariant="tiny"`, `deltaTooltip="vs start of trend window"`, focusable popover tooltip (was bespoke ~120-line tile builder + bespoke tooltip + local `TinySpark`)
+- **TrendOverTime** with `overlayStrokeWidth={2}` explicit, `defaultVisibleOverlays` for top-3 rivals, hide-on-toggle-off legend behavior
+- **bandTier** for SoV-tier classification (was local sovTier)
+- **kpiThresholds.ts** constants for all three thresholds (`KPI_*_MENTION_RATE`, `SOV_TIER_*`, `KPI_PLATFORM_SPREAD_LOPSIDED`)
+
+Standing tile, Bottom Line, and Overview's Competitive Position card all reference the same comparator (leader / runner-up depending on `isLeader`) with the same rounded gap value. Sub-nav array shape now reflects the page's actual render gates.
+
+### Remaining design follow-ups (still deferred)
+
+- **`CompetitiveScatter` dots a11y** — dots are `<div>` with `aria-label` but not focusable / no role. SR users can't reach per-entity Position/SoV data points. Add `tabIndex={0}` + `role="img"` + focus-visible ring.
+- **Recommendations spoke** boilerplate references "{subject_name}'s latest snapshot" on zero-snapshot subjects (caught by sparse-subject runtime QA in session #7 round 10, still untouched).
+- **Narrative spoke** internal sub-nav (Sentiment Mix / Topic Sentiment / Narrative Clusters / Representative Quotes) doesn't gate on data presence.
+- **Opacity-attenuated text contrast** (`text-foreground/55`, `/60`, `/65`) at 9-11px sizes fails WCAG AA. Broad sweep across many sites.
+- **Subject picker listbox** lacks roving `tabIndex` + arrow-key navigation.
+- **Heatmap cells** use `title` (not reliably announced) → `aria-label`.
+- **Skip-to-main link**, `aria-current="true"` → `"location"` — small a11y closeouts.
+- **Charts.tsx per-type split** + **SourcesTypeMix dynamic-import** — small perf wins.
+- **Metric rename** (`competitive[].sov` → `competitive[].mention_rate`) — open since session #5.
+
+### Pixel / keyboard / VoiceOver still needs you
+
+The auth-bypass commit from session #7 (`09771a3`) lets curl + agents reach the rendered DOM, but they still can't see actual layout, color rendering, hover states in motion, screen-reader announcement order, or mobile breakpoints. The post-session-#7 fixes have all been structurally verified; the visual + interaction verification is still on you with DevTools + VoiceOver + a Lighthouse run. The Trend chart legend rework (`2c459b1`) and tooltip popover lift (`c7b1f3f`) in particular are interaction-heavy changes that a walk-through would catch any subtle regression on.
 
 ---
 
