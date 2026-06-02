@@ -329,11 +329,108 @@ export default async function SubjectOverviewPage({
         </div>
       )}
 
+      {/* Narratives + recommended action */}
+      {(data.narrative_clusters.length > 0 ||
+        data.recommended_actions?.primary) && (
+        <div style={{ marginBottom: 24 }}>
+          <div className="section-tag">How AI frames {data.subject_name}</div>
+          <div
+            className={`band-2col${
+              data.narrative_clusters.length > 0 &&
+              data.recommended_actions?.primary
+                ? ""
+                : " single"
+            }`}
+          >
+            {data.narrative_clusters.length > 0 && (
+              <div className="cluster-list">
+                {data.narrative_clusters.map((c) => {
+                  const tone = sentimentTone(c.sentiment_mean);
+                  return (
+                    <div className="cluster" key={c.name}>
+                      <div className="ch">
+                        <span className="cname">{c.name}</span>
+                        {tone && (
+                          <span className={`tone-pill ${tone.cls}`}>
+                            {tone.word}
+                          </span>
+                        )}
+                        <span className="cshare">{formatPct(c.share)} of answers</span>
+                      </div>
+                      <p className="cdesc">{c.description}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {data.recommended_actions?.primary && (
+              <div className="action-card">
+                <div className="eyebrow">Recommended action</div>
+                <div className="alabel">
+                  {data.recommended_actions.primary.label}
+                </div>
+                <p className="aaction">
+                  {data.recommended_actions.primary.action}
+                </p>
+                <p className="awhy">{data.recommended_actions.primary.why}</p>
+                {data.recommended_actions.secondary.length > 0 && (
+                  <div className="action-sec">
+                    {data.recommended_actions.secondary.slice(0, 2).map((s) => (
+                      <div className="si" key={s.label}>
+                        <div className="sl">{s.label}</div>
+                        <div className="sa">{s.action}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Competitive landscape — mention-rate leaderboard. NB: the
+          backend's competitive[].sov field is MENTION RATE
+          (subject_mentions / total_responses), distinct from the
+          pie-share trajectory.share_of_voice. Labelled "mention rate"
+          here to avoid conflating the two. */}
+      {data.competitive.length > 0 &&
+        (() => {
+          const rows = [...data.competitive].sort((a, b) => b.sov - a.sov);
+          const maxSov = Math.max(...rows.map((r) => r.sov), 0.0001);
+          return (
+            <div style={{ marginBottom: 24 }}>
+              <div className="section-tag">Competitive landscape · mention rate</div>
+              <div className="comp-list">
+                {rows.map((c, i) => (
+                  <div
+                    className={`comp-row${c.is_subject ? " is-subject" : ""}`}
+                    key={c.name}
+                  >
+                    <span className="comp-rank">{i + 1}</span>
+                    <span className="comp-name">
+                      {c.name}
+                      {c.is_subject && <span className="you">You</span>}
+                    </span>
+                    <span className="comp-bar">
+                      <i style={{ width: `${(c.sov / maxSov) * 100}%` }} />
+                    </span>
+                    <span className="comp-val">{formatPct(c.sov)}</span>
+                    <span className="comp-aux">
+                      {c.avg_rank !== null ? `rank ${c.avg_rank.toFixed(1)}` : "—"}{" "}
+                      · {formatPct(c.first_mention_rate)} first
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
       <div className="deferred-note">
-        <b>More of this brief is on the way.</b> Narrative clusters, competitive
-        landscape, source mix, and evidence quotes are being ported next — along
-        with the in-page refresh action. The data for all of them is already
-        served by the same backend endpoint.
+        <b>More of this brief is on the way.</b> The source mix and evidence
+        quotes are being ported next. The data for both is already served by
+        the same backend endpoint.
       </div>
     </>
   );
