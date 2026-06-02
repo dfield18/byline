@@ -1449,3 +1449,102 @@ body {
   font-size: 13px;
   color: var(--gray-light);
 }
+
+/* ── section subline ── */
+.section-sub {
+  font-size: 12.5px;
+  color: var(--gray);
+  margin: -6px 0 14px;
+  line-height: 1.5;
+  max-width: 64ch;
+}
+
+/* ── stat strip (first-mention steal summary) ── */
+.stat-strip {
+  display: flex;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.stat-cell {
+  flex: 1;
+  padding: 14px 18px;
+}
+.stat-cell + .stat-cell {
+  border-left: 1px solid var(--line);
+}
+.stat-cell .sn {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.stat-cell .sk {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-light);
+}
+
+/* ── generic labelled bar-list (stealers, co-mentions) ── */
+.lb-list {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  padding: 4px 18px;
+}
+.lb-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+.lb-row:first-child {
+  border-top: none;
+}
+.lb-name {
+  width: 150px;
+  flex: none;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lb-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 5px;
+  background: #eeede6;
+  overflow: hidden;
+  min-width: 40px;
+}
+.lb-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--gray-light);
+}
+.lb-val {
+  width: 96px;
+  flex: none;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--gray);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 620px) {
+  .lb-name {
+    width: 110px;
+  }
+}
