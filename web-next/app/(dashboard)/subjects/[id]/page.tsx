@@ -34,6 +34,24 @@ const CATEGORY_CLASS: Record<string, string> = {
   event: "cat-event",
 };
 
+const MODEL_NAMES: Record<string, string> = {
+  chatgpt: "ChatGPT",
+  gemini: "Gemini",
+  claude: "Claude",
+  perplexity: "Perplexity",
+};
+
+// Evidence-card type → tone class + display label. Criticism reads
+// negative, praise positive, everything else neutral.
+const EVIDENCE_TYPE: Record<string, { cls: string; label: string }> = {
+  criticism: { cls: "neg", label: "Criticism" },
+  praise: { cls: "pos", label: "Praise" },
+  factual_claim: { cls: "neu", label: "Factual claim" },
+  characterization: { cls: "neu", label: "Characterization" },
+  narrative_frame: { cls: "neu", label: "Narrative frame" },
+  model_difference: { cls: "neu", label: "Model difference" },
+};
+
 type KpiDef = {
   key: keyof SubjectOverview["kpis"];
   label: string;
@@ -427,11 +445,70 @@ export default async function SubjectOverviewPage({
           );
         })()}
 
-      <div className="deferred-note">
-        <b>More of this brief is on the way.</b> The source mix and evidence
-        quotes are being ported next. The data for both is already served by
-        the same backend endpoint.
-      </div>
+      {/* Sources AI cites — influence-score leaderboard */}
+      {data.sources.length > 0 &&
+        (() => {
+          const maxScore = Math.max(...data.sources.map((s) => s.score), 1);
+          return (
+            <div style={{ marginBottom: 24 }}>
+              <div className="section-tag">Sources AI cites</div>
+              <div className="source-list">
+                {data.sources.map((s) => {
+                  // Per-platform citation split surfaces in the row's
+                  // title tooltip rather than crowding the row.
+                  const platforms = s.platforms
+                    .map((p) => `${p.name} ${p.n_citations}`)
+                    .join(" · ");
+                  return (
+                    <div
+                      className="source-row"
+                      key={s.name}
+                      title={platforms || undefined}
+                    >
+                      <div className="source-name">
+                        <span className="sd">{s.name}</span>
+                        <span className="src-type">{s.type}</span>
+                      </div>
+                      <div className="source-bar">
+                        <i style={{ width: `${(s.score / maxScore) * 100}%` }} />
+                      </div>
+                      <div className="source-meta">
+                        {s.n_citations} cite{s.n_citations === 1 ? "" : "s"} ·{" "}
+                        {Math.round(s.response_coverage * 100)}% cov
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
+      {/* Evidence — verbatim AI quotes the cross-analyzer surfaced */}
+      {data.evidence_cards.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div className="section-tag">Evidence — what AI actually said</div>
+          <div className="evidence-grid">
+            {data.evidence_cards.map((e) => {
+              const t = EVIDENCE_TYPE[e.type] ?? { cls: "neu", label: e.type };
+              const model = MODEL_NAMES[e.model_slug] ?? e.model_slug;
+              return (
+                <div className="ev-card" key={e.model_response_id}>
+                  <div className="ev-top">
+                    <span className={`ev-type ${t.cls}`}>{t.label}</span>
+                    <span className="ev-model">{model}</span>
+                  </div>
+                  <p className="ev-quote">“{e.excerpt}”</p>
+                  {e.rationale && <p className="ev-rationale">{e.rationale}</p>}
+                  <p className="ev-prompt">
+                    <b>In response to:</b> {e.prompt_text}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </>
   );
 }
