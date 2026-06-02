@@ -134,7 +134,7 @@ const SPOKES: Spoke[] = [
     key: "recommendations",
     label: "Recommendations",
     Icon: RecommendationsIcon,
-    built: false,
+    built: true,
   },
 ];
 
