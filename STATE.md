@@ -3316,6 +3316,18 @@ web/                         # Customer-facing Next.js app (App Router, TS, Tail
 └── .env.example             #   BYLINE_API_URL + BYLINE_API_TOKEN
                              # Run: `cd web && npm run dev` (after API is up)
 
+web-next/                    # BRAND-NEW frontend (full redesign WIP). Same repo,
+│                              parallel to web/. Backend frozen — talks to the same
+│                              FastAPI :8000 only through copied lib/api.ts.
+├── lib/api.ts               #   copied VERBATIM from web/ — the backend contract
+├── proxy.ts                 #   copied: Clerk middleware + BYLINE_AUTH bypass
+├── app/api/.../route.ts     #   copied: the two client-poll proxy handlers
+├── app/layout.tsx           #   minimal ClerkProvider (no fonts/branding yet)
+└── app/page.tsx             #   THROWAWAY Phase-0 JSON seam-check — delete before
+                             #   real UI. Proves :3001 reaches the backend.
+                             # Run: `cd web-next && BYLINE_AUTH=disabled \
+                             #   BYLINE_API_TOKEN=dev-token npm run dev` → :3001
+
 migrations/                  # 5 applied: 001-003 + 010 (analysis) + 004 (org_id)
 ```
 
@@ -3593,6 +3605,24 @@ anything else in Track C.
 | **Recently shipped (this session)** | ✓ Event subject end-to-end test (subject 11) · ✓ Sources dict expansion (~50 domains; unknown 34% → 28% across the full 3016-citation corpus) · ✓ Entities v1.3 retry-on-parse-failure · ✓ Sources v1.1 with `cited_own_site` (stored as `subjects.setup_inputs.canonical_url`, no migration needed) · ✓ Mention-detection backfill on all 17 historical refreshes via new `--only-extractor` analyzer flag ($0.06 total — vs the ~$0.7 of running full analyzer on each) · ✓ Mention_detection v1.1 retry-on-parse-failure (mirrors entities v1.3) · ✓ QA-cleanup pass closed Issues 1–3: cross-analyzer aggregates latest-non-null per column (Issue 1); full per-response extraction on the 8 partial subjects' latest refreshes ($0.43, Issue 2); cross-analyzer invoked on all 11 subjects ($0.06, Issue 3). Every subject now has full asymmetry / top_quotes / share_of_voice findings; 4 subjects also have narrative_drift (the ones with multiple completed refreshes). |
 | **Recently shipped (Track C polish, continued)** | ✓ canonical_url backfilled on 7 subjects (Bernie, McConnell, AOC, Cotton, Newsom, Vance, Rubio) — official Senate/House/Governor/State Department sites. `cited_own_site` re-extracted via `--only-extractor sources`; $0 cost (pure Python). Heritage now joined by all person subjects. Issues / events / IRA intentionally left NULL (no canonical site applies). First findings: Heritage cites own site in 8 of 20 responses (21 citations total — most aggressive self-citation); Newsom 4 of 20 (11 cites); Cotton 5 of 26; Vance 0 (AI cites whitehouse.gov for VP role, not his old Senate site — a real finding about how the methodology measures "current officeholder" self-citation). |
 | **Remaining pickable items** | backfill full extraction on older refreshes for richer narrative_drift histories (today only the latest refresh per subject has full extraction; older refreshes have descriptors + mention_detection only). |
+
+### Frontend redesign — brand-new UI in `web-next/` (Phase 0 shipped, UNCOMMITTED)
+
+A full **frontend redesign** is underway: a brand-new UI (no reuse of
+`web/`'s design) built in a parallel `web-next/` directory in this same
+repo. **The backend is frozen** — out of scope for the redesign. The
+contract seam is `lib/api.ts`; every new page must go through it and
+nowhere else (no ad-hoc `fetch` to :8000, no client-invented shapes).
+The backend only re-enters the conversation if the new UI needs data the
+contract doesn't expose.
+
+| | |
+|---|---|
+| **Owns these files** | everything under `web-next/` (new dir). Does NOT touch `app/`, `web/`, or any backend file. |
+| **Phase 0 (DONE, in working tree)** | Scaffolded `web-next/` (Next 16.2.6 / React 19.2.4 / Clerk 7.4.2 / Tailwind 4, `--empty`). Copied verbatim as wiring: `lib/api.ts`, `proxy.ts`, both `app/api/.../route.ts` proxy handlers, `.env.local`. Minimal ClerkProvider layout. `app/page.tsx` = throwaway JSON seam-check. Runs on **:3001**. Verified: live subjects render through the seam; `tsc --noEmit` clean. |
+| **Git status** | NOT committed, NOT pushed. `web-next/` is untracked on `main`. When committing: branch first (`redesign/web-next`), and confirm `.gitignore` covers `web-next/.env.local` (real Clerk keys), `web-next/node_modules`, `web-next/.next`. |
+| **Remaining** | Phase 1 design system (likely shadcn/ui; decide recharts keep/replace) → Phase 2 port pages leaf-first, `/subjects/[id]` overview (2,000+ lines) LAST as a decomposition → Phase 3 cutover (`git mv web web-old && git mv web-next web`). |
+| **Install caveat** | `web-next/node_modules` was installed with `npm install --cache /tmp/npm-cache-bln` — `~/.npm` has root-owned cache files (old npm bug); plain install EACCESes until `sudo chown -R 501:20 ~/.npm`. |
 
 ### Cross-track dependency to be aware of
 
@@ -3878,6 +3908,11 @@ direction.
 ## Useful commands quick reference
 
 ```bash
+# Full local stack (3 servers)
+BYLINE_AUTH=disabled .venv/bin/uvicorn app.api.main:app --reload --port 8000  # backend
+cd web && npm run dev                                                          # old UI  :3000
+cd web-next && BYLINE_AUTH=disabled BYLINE_API_TOKEN=dev-token npm run dev     # new UI  :3001
+
 # Run a refresh on a subject
 .venv/bin/python -m app.refresh "Subject Name"
 

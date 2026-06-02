@@ -4,6 +4,9 @@ node_modules/
 .env
 .vercel
 
+# Next.js build output (stray root .next + any nested)
+.next/
+
 # Python
 .venv/
 __pycache__/
