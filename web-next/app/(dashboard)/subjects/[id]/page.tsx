@@ -8,6 +8,7 @@ import {
   type KpiValue,
 } from "@/lib/api";
 import { Sparkline } from "@/components/dashboard/Sparkline";
+import { RefreshButton } from "./refresh-button";
 
 /**
  * Subject Overview — the customer-facing AI Narrative Brief.
@@ -199,6 +200,9 @@ export default async function SubjectOverviewPage({
             competitive snapshot, and the source mix. A typical snapshot takes
             1–3 minutes across the major AI assistants.
           </p>
+          <div style={{ marginTop: 24 }}>
+            <RefreshButton subjectId={subjectId} />
+          </div>
         </div>
       </>
     );
@@ -233,6 +237,7 @@ export default async function SubjectOverviewPage({
             </span>
           </div>
         </div>
+        <RefreshButton subjectId={subjectId} />
       </div>
 
       {/* Vitals: the verdict + recommended focus */}

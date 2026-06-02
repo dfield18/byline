@@ -277,6 +277,27 @@ body {
   width: 15px;
   height: 15px;
 }
+.dash-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+.refresh-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  animation: refreshPulse 1.4s ease-in-out infinite;
+}
+@keyframes refreshPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 
 /* ── page header block ── */
 .page-head {
