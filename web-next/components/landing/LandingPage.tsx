@@ -31,25 +31,29 @@ export default function LandingPage() {
     const root = rootRef.current;
     if (!root) return;
 
-    // ----- mock narrative data (illustrative; order: ChatGPT, Gemini, Perplexity) -----
+    // ----- mock narrative data (illustrative; order: ChatGPT, Claude, Gemini, Perplexity) -----
     const TOPICS = [
       { q: "Donald Trump", m: [
         { sent: "mix", label: "MIXED",   text: "Emphasizes legal challenges and democratic risk." },
+        { sent: "neu", label: "NEUTRAL", text: "Lays out the competing legal and political interpretations side by side." },
         { sent: "neu", label: "NEUTRAL", text: "Focuses on electoral influence and institutional conflict." },
         { sent: "neu", label: "NEUTRAL", text: "Highlights recent polling and court coverage." },
       ] },
       { q: "AI regulation", m: [
         { sent: "neu", label: "NEUTRAL",    text: "Frames it as safety versus innovation." },
+        { sent: "neu", label: "NEUTRAL",    text: "Maps the trade-offs between consumer guardrails and innovation." },
         { sent: "pos", label: "SUPPORTIVE", text: "Leans toward the case for consumer guardrails." },
         { sent: "neu", label: "NEUTRAL",    text: "Lays out the current bills and state of play." },
       ] },
       { q: "inflation", m: [
         { sent: "neu", label: "NEUTRAL", text: "Attributes the trend to several drivers; assigns no blame." },
+        { sent: "neu", label: "NEUTRAL", text: "Distinguishes cyclical from structural causes." },
         { sent: "neu", label: "NEUTRAL", text: "Centers the Fed's response and policy mechanism." },
         { sent: "neu", label: "NEUTRAL", text: "Sticks closely to the latest sourced figures." },
       ] },
       { q: "James Talarico", m: [
         { sent: "pos", label: "SUPPORTIVE", text: "Leads with his education record; favorable tone." },
+        { sent: "neu", label: "NEUTRAL",    text: "Gives a balanced read of his record and rising profile." },
         { sent: "neu", label: "NEUTRAL",    text: "Straight biography; notes a rising national profile." },
         { sent: "neu", label: "NEUTRAL",    text: "Cites recent coverage and growing attention." },
       ] },
@@ -88,9 +92,9 @@ export default function LandingPage() {
     function showVerdict(m: { sent: string; label: string; text: string }[]) {
       const distinct = new Set(m.map((x) => x.label)).size;
       let lead: string, rest: string;
-      if (distinct === 1) { lead = "Rare consensus —"; rest = "all three assistants frame it the same way."; }
+      if (distinct === 1) { lead = "Rare consensus —"; rest = "all " + m.length + " assistants frame it the same way."; }
       else if (distinct === 2) { lead = "Framing splits —"; rest = "the assistants divide into two camps."; }
-      else { lead = "Three assistants —"; rest = "three different framings of the same question."; }
+      else { lead = distinct + " framings —"; rest = "the assistants split " + distinct + " different ways on the same question."; }
       const dots = m.map((x) => '<i style="background:' + SENT_COLORS[x.sent] + '"></i>').join("");
       verdictEl!.innerHTML = '<span class="dot3">' + dots + "</span><span><b>" + lead + "</b> " + rest + "</span>";
       verdictEl!.classList.add("show");
@@ -146,6 +150,7 @@ export default function LandingPage() {
       autoActive = false;
       const t = { q: safe, m: [
         { sent: "neu", label: "NEUTRAL", text: "Leads with background and current relevance." },
+        { sent: "neu", label: "NEUTRAL", text: "Weighs the main points of contention even-handedly." },
         { sent: "neu", label: "NEUTRAL", text: "Notes where opinion is most divided." },
         { sent: "neu", label: "NEUTRAL", text: "Aggregates current reporting with citations." },
       ] };
@@ -255,6 +260,7 @@ export default function LandingPage() {
 
             <div className="lc-cards" id="lc-cards">
               <div className="lc-card"><div className="lg gpt"><svg viewBox="0 0 24 24"><path fill="#fff" d="M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-4 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" /></svg></div><div className="bd"><div className="nm-row"><span className="nm">ChatGPT</span><span className="lc-sent"></span></div><div className="lc-text"></div></div></div>
+              <div className="lc-card"><div className="lg cla"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"><path d="M12 3v18M3 12h18M5.6 5.6L18.4 18.4M18.4 5.6L5.6 18.4" /></svg></div><div className="bd"><div className="nm-row"><span className="nm">Claude</span><span className="lc-sent"></span></div><div className="lc-text"></div></div></div>
               <div className="lc-card"><div className="lg gem"><svg viewBox="0 0 24 24"><path fill="#fff" d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z" /></svg></div><div className="bd"><div className="nm-row"><span className="nm">Gemini</span><span className="lc-sent"></span></div><div className="lc-text"></div></div></div>
               <div className="lc-card"><div className="lg pplx"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2"><circle cx="12" cy="12" r="8" /><path d="M12 4v16" strokeLinecap="round" /></svg></div><div className="bd"><div className="nm-row"><span className="nm">Perplexity</span><span className="lc-sent"></span></div><div className="lc-text"></div></div></div>
             </div>
