@@ -1321,3 +1321,131 @@ body {
   color: var(--gray);
   font-weight: 600;
 }
+
+/* ── spoke page eyebrow ── */
+.page-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent-bronze);
+  margin-bottom: 8px;
+}
+
+/* ── rank distribution (answer prominence) ── */
+.rank-list {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  padding: 6px 20px;
+}
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.rank-row:first-child {
+  border-top: none;
+}
+.rank-label {
+  width: 120px;
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.rank-bar {
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  background: #eeede6;
+  overflow: hidden;
+  min-width: 40px;
+}
+.rank-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--accent-bronze);
+}
+.rank-val {
+  width: 96px;
+  flex: none;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--gray);
+  font-variant-numeric: tabular-nums;
+}
+.rank-row.absence .rank-label {
+  color: var(--gray-light);
+}
+.rank-row.absence .rank-bar i {
+  background: var(--neg);
+  opacity: 0.5;
+}
+
+/* ── per-prompt coverage table ── */
+.table-scroll {
+  overflow-x: auto;
+}
+.cov-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cov-table thead th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gray-light);
+  padding: 13px 14px;
+  background: var(--bg-sand-soft);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.cov-table thead th.plat {
+  text-align: center;
+}
+.cov-table tbody td {
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+}
+.cov-table tbody tr:hover {
+  background: var(--bg-sand-soft);
+}
+.cov-prompt {
+  font-weight: 500;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  max-width: 360px;
+}
+.cov-topic {
+  font-size: 11px;
+  color: var(--gray-light);
+  margin-top: 3px;
+}
+.cov-cell {
+  text-align: center;
+  white-space: nowrap;
+}
+.cov-yes {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pos);
+  font-variant-numeric: tabular-nums;
+}
+.cov-miss {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--neg);
+}
+.cov-absent {
+  font-size: 13px;
+  color: var(--gray-light);
+}
