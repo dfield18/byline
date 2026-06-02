@@ -233,11 +233,117 @@ export default async function VisibilityPage({
         </div>
       )}
 
+      {/* Platform × topic mention-rate heatmap */}
+      {(() => {
+        const ptm = data.platform_topic_matrix;
+        if (ptm.platforms.length === 0 || ptm.topics.length === 0) return null;
+        // Densify the sparse cell list into a (platform_slug, topic_label)
+        // lookup so every grid cell resolves, even the un-measured ones.
+        const cellMap = new Map(
+          ptm.cells.map((c) => [`${c.platform_slug} ${c.topic_label}`, c]),
+        );
+        return (
+          <div style={{ marginBottom: 24 }}>
+            <div className="section-tag">Mention rate · platform × topic</div>
+            <div className="table-card table-scroll">
+              <table className="heat">
+                <thead>
+                  <tr>
+                    <th>Topic</th>
+                    {ptm.platforms.map((p) => (
+                      <th key={p.slug}>{p.name}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ptm.topics.map((t) => (
+                    <tr key={t.label}>
+                      <td className="heat-topic">{t.label}</td>
+                      {ptm.platforms.map((p) => {
+                        const c = cellMap.get(`${p.slug} ${t.label}`);
+                        if (!c || c.mention_rate === null) {
+                          return (
+                            <td
+                              key={p.slug}
+                              className="heat-cell empty"
+                              title="Not measured"
+                            >
+                              ·
+                            </td>
+                          );
+                        }
+                        return (
+                          <td
+                            key={p.slug}
+                            className="heat-cell"
+                            style={{
+                              background: `rgba(138, 109, 47, ${
+                                c.mention_rate * 0.66 + 0.05
+                              })`,
+                            }}
+                            title={`${c.n_mentioned}/${c.n_responses} mentioned`}
+                          >
+                            {formatPct(c.mention_rate)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Cross-platform divergence */}
+      {data.cross_platform_divergence.total_multi_platform > 0 &&
+        (() => {
+          const cpd = data.cross_platform_divergence;
+          return (
+            <div style={{ marginBottom: 24 }}>
+              <div className="section-tag">Cross-platform agreement</div>
+              <div className="stat-strip">
+                <div className="stat-cell">
+                  <div className="sn">{cpd.agreed}</div>
+                  <div className="sk">Platforms agreed</div>
+                </div>
+                <div className="stat-cell">
+                  <div className="sn">{cpd.diverged}</div>
+                  <div className="sk">Diverged</div>
+                </div>
+                <div className="stat-cell">
+                  <div className="sn">{formatPct(cpd.alignment_score)}</div>
+                  <div className="sk">Alignment score</div>
+                </div>
+              </div>
+              {cpd.divergent_prompts.length > 0 && (
+                <div className="div-list">
+                  {cpd.divergent_prompts.map((dp) => (
+                    <div className="div-row" key={dp.prompt_id}>
+                      <div className="div-prompt">{dp.rendered}</div>
+                      <div className="div-states">
+                        {dp.platform_states.map((s) => (
+                          <span
+                            key={s.slug}
+                            className={`pstat ${s.mentioned ? "yes" : "miss"}`}
+                          >
+                            {s.name} {s.mentioned ? "✓" : "✕"}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
       <div className="deferred-note">
-        <b>More of the Visibility deep-dive is coming.</b> The platform×topic
-        mention-rate heatmap, rank distribution by platform/topic, and
-        cross-platform divergence are being ported next — all already in the
-        same backend payload.
+        <b>One more Visibility view is coming.</b> Rank distribution by platform
+        and topic (with combinable dropdown filters) is the remaining deferred
+        piece — already in the same backend payload.
       </div>
     </>
   );
