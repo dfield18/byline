@@ -6,6 +6,7 @@ import {
   type SubjectDetail,
 } from "@/lib/api";
 import { RefreshButton } from "../refresh-button";
+import { Sparkline } from "@/components/dashboard/Sparkline";
 
 /**
  * Narrative spoke — how AI talks about the subject (sentiment + framings).
@@ -46,6 +47,48 @@ function segments(pos: number, neu: number, neg: number) {
     neg: (neg / total) * 100,
   };
 }
+
+function latestMeasured(series: (number | null)[]): number | null {
+  for (let i = series.length - 1; i >= 0; i--) {
+    if (series[i] !== null) return series[i];
+  }
+  return null;
+}
+
+// Narrative-score trends. directional_lean is signed (−1..+1);
+// criticism_severity / certainty are 0..1 intensities; net_sentiment is
+// a signed count whose domain varies with response volume (the Sparkline
+// computes its axis bounds from the data, so that's fine).
+const NARR_TRENDS: {
+  key: "directional_lean" | "criticism_severity" | "certainty" | "net_sentiment";
+  label: string;
+  format: (v: number | null) => string;
+}[] = [
+  {
+    key: "directional_lean",
+    label: "Directional lean",
+    format: (v) =>
+      v === null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)}`,
+  },
+  {
+    key: "criticism_severity",
+    label: "Criticism severity",
+    format: (v) => (v === null ? "—" : v.toFixed(2)),
+  },
+  {
+    key: "certainty",
+    label: "Certainty",
+    format: (v) => (v === null ? "—" : v.toFixed(2)),
+  },
+  {
+    key: "net_sentiment",
+    label: "Net sentiment",
+    format: (v) =>
+      v === null
+        ? "—"
+        : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(Math.round(v))}`,
+  },
+];
 
 export default async function NarrativePage({
   params,
@@ -211,12 +254,60 @@ export default async function NarrativePage({
         </div>
       )}
 
-      <div className="deferred-note">
-        <b>More of the Narrative deep-dive is coming.</b> Per-platform sentiment
-        and the narrative-score trajectories (directional lean, criticism
-        severity, certainty) are being ported next — all already in the same
-        backend payload.
-      </div>
+      {/* Narrative-score trends */}
+      {data.trajectory.weeks.length >= 2 && (
+        <div style={{ marginBottom: 24 }}>
+          <div className="section-tag">
+            Narrative-score trends · last {data.trajectory.weeks.length} snapshots
+          </div>
+          <div className="trend-grid">
+            {NARR_TRENDS.map((m) => {
+              const series = data.trajectory[m.key];
+              const latest = latestMeasured(series);
+              return (
+                <div className="trend-tile" key={m.key}>
+                  <div className="th">
+                    <span className="tl">{m.label}</span>
+                    <span className="tv">{m.format(latest)}</span>
+                  </div>
+                  <Sparkline
+                    values={series}
+                    isHistorical={data.trajectory.is_historical}
+                    labels={data.trajectory.weeks}
+                    format={m.format}
+                    ariaLabel={`${m.label} trend over the last ${data.trajectory.weeks.length} snapshots, latest ${m.format(latest)}`}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Sentiment by platform */}
+      {data.platform_sentiment_distribution.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div className="section-tag">Sentiment by platform</div>
+          <div className="tsm-list">
+            {data.platform_sentiment_distribution.map((p) => {
+              const seg = segments(p.positive, p.neutral, p.negative);
+              return (
+                <div className="tsm-row" key={p.platform_slug}>
+                  <span className="tsm-name">{p.platform_name}</span>
+                  <span className="tsm-bar">
+                    <span className="seg pos" style={{ width: `${seg.pos}%` }} />
+                    <span className="seg neu" style={{ width: `${seg.neu}%` }} />
+                    <span className="seg neg" style={{ width: `${seg.neg}%` }} />
+                  </span>
+                  <span className="tsm-val">
+                    {p.total} · {formatSent(p.mean)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </>
   );
 }
