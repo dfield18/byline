@@ -1667,3 +1667,39 @@ body {
     width: 130px;
   }
 }
+
+/* ── sources spoke: enriched leaderboard with per-platform chips ── */
+.src2-list {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  padding: 6px 20px;
+}
+.src2-row {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.src2-row:first-child {
+  border-top: none;
+}
+.src2-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.src2-plats {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+.src-plat {
+  font-size: 10.5px;
+  color: var(--gray);
+  background: var(--bg-sand);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 7px;
+  font-variant-numeric: tabular-nums;
+}
