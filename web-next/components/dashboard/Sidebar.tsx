@@ -129,7 +129,7 @@ const SPOKES: Spoke[] = [
   { key: "competition", label: "Competitive", Icon: CompetitionIcon, built: true },
   { key: "narrative", label: "Narrative", Icon: NarrativeIcon, built: true },
   { key: "sources", label: "Sources", Icon: SourcesIcon, built: true },
-  { key: "prompts", label: "Prompts", Icon: PromptsIcon, built: false },
+  { key: "prompts", label: "Prompts", Icon: PromptsIcon, built: true },
   {
     key: "recommendations",
     label: "Recommendations",
