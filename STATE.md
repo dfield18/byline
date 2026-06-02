@@ -3819,10 +3819,15 @@ direction.
      validation. Frontend integration via `@clerk/nextjs` (Vercel
      Marketplace integration auto-provisions env vars). ~half a day.
 
-  2. **Async job pattern (Phase B)** — `POST /api/subjects/{id}/refresh`
-     can't synchronously call `app.refresh` (30+ second operation).
-     Needs a `jobs` table migration + a small worker loop. Frontend
-     polls `GET /api/jobs/{id}` for completion. ~1 day.
+  2. **Async job pattern (Phase B) — ✅ SHIPPED.** `POST
+     /api/subjects/{id}/refresh` returns `202` and enqueues a row in
+     the `jobs` table (per-subject cooldown + per-org hourly rate
+     limits); `app/worker.py` claims jobs via `SELECT … FOR UPDATE SKIP
+     LOCKED` and runs the refresh + analyzer + cross_analyzer chain.
+     Frontend polls `GET /api/jobs/{job_id}`. A stale-job reaper (runs
+     at worker startup + each poll, default 10-min threshold) clears
+     crashed `running` rows. Still missing: automatic retries (failed
+     jobs stay failed; user re-triggers from the UI).
 
   3. **Scheduled refreshes (Phase B)** — APScheduler or cron wrapping
      `python -m app.refresh` so `narrative_drift` findings accumulate

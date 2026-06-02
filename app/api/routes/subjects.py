@@ -146,9 +146,9 @@ async def create_new_subject(
     page.
 
     Note: this does NOT trigger a refresh. The next step is to call
-    `POST /api/subjects/{id}/refresh` (TODO — needs the async job
-    pattern to land first), or run `python -m app.refresh "<name>"`
-    from the CLI.
+    `POST /api/subjects/{id}/refresh` (enqueues an async job — poll
+    `GET /api/jobs/{job_id}` for status), or run
+    `python -m app.refresh "<name>"` from the CLI.
     """
     org_id = _require_org(user)
 

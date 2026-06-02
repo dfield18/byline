@@ -19,8 +19,10 @@ SKIP LOCKED` claiming the row so multiple worker processes coexist
 safely.
 
 Failure handling for v1: failed jobs stay failed; the user can
-re-trigger from the UI. No retries, no stuck-job reaper. Add when
-real traffic justifies it.
+re-trigger from the UI. No automatic retries (add when real traffic
+justifies it). A stale-job reaper DOES run — at worker startup and on
+each poll iteration — flipping rows stuck in running/in_progress past
+the threshold to failed (see the "stale-job reaper" section below).
 """
 from __future__ import annotations
 
