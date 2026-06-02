@@ -1,1 +1,37 @@
 @import "tailwindcss";
+
+/* ── Byline design tokens ───────────────────────────────────────────
+   Shared by the dashboard shell (app/(dashboard)/dashboard.css) and the
+   marketing landing (components/landing/landing.css). The landing's
+   :root block is the original source of truth — these values mirror it
+   verbatim so dashboard routes get the same sand/ink/bronze palette
+   WITHOUT pulling in the landing's bare-element rules (h1{}, button{},
+   …) which are tuned for the marketing page, not app chrome.
+   Keep in sync with components/landing/landing.css. */
+:root {
+  --bg: #fafaf7;
+  --bg-card: #ffffff;
+  --ink: #16161a;
+  --ink-soft: #3b3b42;
+  --gray: #6b6b73;
+  --gray-light: #9a9aa2;
+  --line: #e8e7e0;
+  --line-strong: #dad9d0;
+  --bg-sand: #f4f1ea;
+  --bg-sand-soft: #f6f4ee;
+  --accent-bronze: #8a6d2f;
+  --accent-bronze-deep: #75591f;
+  --shadow-card: 0 1px 2px rgba(16, 16, 26, 0.04),
+    0 18px 40px -26px rgba(16, 16, 26, 0.2);
+  --accent: #16161a;
+  --pos: #3f7d52;
+  --pos-bg: #eaf3ec;
+  --neu: #8a7a4e;
+  --neu-bg: #f5f0e2;
+  --neg: #a85248;
+  --neg-bg: #f6eae8;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --sans: var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
