@@ -284,17 +284,10 @@ export default function LandingPage() {
         </div>
       </header>
 
-      {/* audience strip */}
+      {/* differentiator strip — the audience pills moved down to Use cases */}
       <div className="strip">
         <div className="wrap">
-          <div className="eg">Narrative intelligence built for <b>public affairs</b> — not brand marketing.</div>
-          <div className="aud">
-            <span>Government relations</span>
-            <span>Advocacy organizations</span>
-            <span>Campaigns &amp; PACs</span>
-            <span>Corporate public affairs</span>
-            <span>Communications agencies</span>
-          </div>
+          <div className="eg" style={{ marginBottom: 0 }}>Narrative intelligence built for <b>public affairs</b> — not brand marketing.</div>
         </div>
       </div>
 
@@ -394,6 +387,13 @@ export default function LandingPage() {
           <div className="center reveal">
             <div className="sec-tag">Use cases</div>
             <h2 className="sec-h">What teams actually use Byline for.</h2>
+            <div className="aud" style={{ marginTop: 24 }}>
+              <span>Government relations</span>
+              <span>Advocacy organizations</span>
+              <span>Campaigns &amp; PACs</span>
+              <span>Corporate public affairs</span>
+              <span>Communications agencies</span>
+            </div>
           </div>
           <div className="use-grid">
             <div className="use-card reveal">
