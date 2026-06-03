@@ -13,14 +13,15 @@ const inter = Inter({
   display: "swap",
 });
 
-// Newsreader — editorial serif for the landing masthead H1. Exposed as
+// Newsreader — editorial serif for the landing masthead. Exposed as
 // --font-serif so the landing's --serif token binds to it; replaces the
 // placeholder where --serif previously fell back to Inter. next/font
 // (not a <link>) keeps it non-render-blocking, matching how Inter is
-// loaded above. Only the weights the headline uses are loaded.
+// loaded above. 600 normal drives the H1; 500 italic drives the deck.
 const newsreader = Newsreader({
   subsets: ["latin"],
   weight: ["500", "600"],
+  style: ["normal", "italic"],
   variable: "--font-serif",
   display: "swap",
 });
@@ -30,11 +31,11 @@ const newsreader = Newsreader({
 export const metadata: Metadata = {
   title: "Byline — AI narrative intelligence for public affairs",
   description:
-    "Byline tracks how the major AI assistants describe the people and issues you represent — and alerts you when the narrative shifts.",
+    "Byline tracks how the major AI assistants describe the people and issues you represent.",
   openGraph: {
     title: "Byline — AI narrative intelligence for public affairs",
     description:
-      "Byline tracks how the major AI assistants describe the people and issues you represent — and alerts you when the narrative shifts.",
+      "Byline tracks how the major AI assistants describe the people and issues you represent.",
     type: "website",
     // TODO(user): add a share image (images: ["/og.png"]) before launch.
   },
@@ -42,7 +43,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Byline — AI narrative intelligence for public affairs",
     description:
-      "Byline tracks how the major AI assistants describe the people and issues you represent — and alerts you when the narrative shifts.",
+      "Byline tracks how the major AI assistants describe the people and issues you represent.",
     // TODO(user): add the share image once it exists.
   },
 };

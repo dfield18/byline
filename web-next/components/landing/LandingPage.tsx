@@ -239,13 +239,23 @@ export default function LandingPage() {
       <header className="hero">
         <div className="wrap">
           <div className="eyebrow">AI narrative intelligence for public affairs</div>
-          <h1>AI is shaping political narratives.<span className="line2">See how it <span className="accent-word">frames</span> your issue.</span></h1>
+          <h1>AI is shaping<br />political narratives.</h1>
+          <p className="hero-deck">See how it <span className="accent-word">frames</span> your issue.</p>
+
+          <p className="subhead">Byline tracks how the major AI assistants describe the people and issues you represent.</p>
+
+          <div className="hero-cta">
+            {/* in-page scroll anchors — match the nav targets */}
+            <a href="#cta" className="btn btn-accent btn-lg">Analyze your issue</a>
+            <a href="#how" className="btn btn-ghost btn-lg">See how it works</a>
+          </div>
 
           {/* live console centerpiece */}
           <div className="console reveal" id="console">
             <div className="lc-head">
               <span className="lc-mark">B</span>
               <span className="dom">Cross-model readout</span>
+              <span className="lc-updated"><span className="lc-updated-dot" aria-hidden></span>Updated 2m ago</span>
             </div>
 
             <div className="lc-q"><span className="lead">What is AI saying about </span><span className="topic" id="lc-topic"></span><span className="cursor" id="lc-cursor"></span></div>
@@ -273,8 +283,6 @@ export default function LandingPage() {
               </div>
             </div>
           </div>
-
-          <p className="subhead reveal">Byline tracks how the major AI assistants describe the people and issues you represent — and alerts you when the narrative shifts.</p>
 
         </div>
       </header>
