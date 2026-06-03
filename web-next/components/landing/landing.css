@@ -55,8 +55,8 @@ button{font-family:inherit;cursor:pointer}
 .topbar{
   position:sticky;top:0;z-index:60;
   background:var(--accent-olive);color:var(--cream);
-  font-size:13px;font-weight:400;letter-spacing:.02em;
-  text-align:center;padding:10px 16px;
+  font-size:17px;font-weight:400;letter-spacing:.02em;
+  text-align:center;padding:11px 16px;
 }
 .topbar b{font-weight:600;color:var(--cream)}
 .topbar .dot{opacity:.5;margin:0 11px}
@@ -141,12 +141,8 @@ h1{
   margin:.5rem auto 0;
 }
 .accent-word{color:var(--accent-olive)}
-.subhead{
-  margin:18px auto 0;max-width:54ch;
-  font-size:clamp(16px,2vw,19px);color:var(--gray);line-height:1.55;
-}
-/* hero CTA row — primary + ghost, centered under the explainer */
-.hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:24px}
+/* hero CTA row — primary action, centered under the deck */
+.hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:26px}
 /* trust strip — small muted positioning line under the CTA (placeholder
    copy; replace with real social proof when available) */
 .hero-trust{margin-top:18px;font-size:12.5px;font-weight:500;letter-spacing:.02em;color:var(--gray-light)}
@@ -256,6 +252,15 @@ h1{
    width. This is what keeps the whole console a fixed size as responses
    print in (no sub-pixel growth, no wrap-induced jump). */
 .lc-text{font-size:15px;color:var(--ink-soft);line-height:1.55;height:1.55em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* skeleton bar on queued cards (not yet active/done) so waiting models
+   read as "loading" rather than blank. Hidden the moment a card starts
+   typing (.active) or finishes (.done). */
+.lc-card:not(.active):not(.done) .lc-text::before{
+  content:"";display:block;height:9px;width:72%;margin-top:.28em;border-radius:5px;
+  background:linear-gradient(90deg,#edece5 25%,#f5f3ed 50%,#edece5 75%);
+  background-size:200% 100%;animation:lcSkel 1.5s ease-in-out infinite;
+}
+@keyframes lcSkel{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .lc-dots{display:inline-flex;gap:4px;align-items:center;height:22px}
 .lc-dots i{width:5px;height:5px;border-radius:50%;background:var(--gray-light);animation:tdots 1.1s infinite}
 .lc-dots i:nth-child(2){animation-delay:.15s}
@@ -463,11 +468,12 @@ footer{border-top:1px solid var(--line);padding:48px 0 56px}
 .foot-bottom{margin-top:40px;padding-top:22px;border-top:1px solid var(--line);font-size:12.5px;color:var(--gray-light);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
 
 /* ---------- credibility ---------- */
-.cred{padding:44px 0 6px;text-align:center}
+.cred{padding:44px 0 48px;text-align:center}
 .cred-line{max-width:64ch;margin:0 auto;font-size:15px;color:var(--gray);line-height:1.6}
 .cred-line b{color:var(--ink-soft);font-weight:600}
-.cred-logos{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-top:22px}
-.cred-logos span{font-size:12px;letter-spacing:.04em;color:var(--gray-light);border:1px dashed var(--line-strong);border-radius:8px;padding:11px 24px;background:#fff}
+.cred-logos{display:flex;gap:30px;flex-wrap:wrap;justify-content:center;margin-top:22px}
+.cred-logos span{display:inline-flex;align-items:center;gap:8px;font-size:15px;font-weight:600;letter-spacing:-.01em;color:var(--gray)}
+.cred-logos span svg{width:19px;height:19px;flex:none}
 
 /* ---------- use cases ---------- */
 .use-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:48px}
