@@ -30,8 +30,8 @@ export default async function RecommendationsPage({
   params: Promise<{ id: string }>;
 }) {
   const { id: idStr } = await params;
+  if (!/^\d+$/.test(idStr)) notFound();
   const subjectId = Number.parseInt(idStr, 10);
-  if (Number.isNaN(subjectId)) notFound();
 
   let data: SubjectOverview;
   let subject: SubjectDetail;
