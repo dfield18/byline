@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Newsreader } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
@@ -10,6 +10,18 @@ const inter = Inter({
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700", "800"],
   variable: "--font-inter",
+  display: "swap",
+});
+
+// Newsreader — editorial serif for the landing masthead H1. Exposed as
+// --font-serif so the landing's --serif token binds to it; replaces the
+// placeholder where --serif previously fell back to Inter. next/font
+// (not a <link>) keeps it non-render-blocking, matching how Inter is
+// loaded above. Only the weights the headline uses are loaded.
+const newsreader = Newsreader({
+  subsets: ["latin"],
+  weight: ["500", "600"],
+  variable: "--font-serif",
   display: "swap",
 });
 
@@ -42,7 +54,7 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en" className={inter.variable}>
+      <html lang="en" className={`${inter.variable} ${newsreader.variable}`}>
         <body>{children}</body>
       </html>
     </ClerkProvider>

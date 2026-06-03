@@ -19,6 +19,10 @@
   --bg-sand-soft:#f6f4ee;
   --accent-bronze:#8a6d2f;
   --accent-bronze-deep:#75591f;
+  /* editorial masthead tokens (themeable) — olive accent + cream surface */
+  --accent-olive:#8a6d2f;
+  --cream:#fafaf7;
+  --hairline:rgba(58,53,42,.12);
   --shadow-card:0 1px 2px rgba(16,16,26,.04),0 18px 40px -26px rgba(16,16,26,.20);
   --accent:#16161a;
   --pos:#3f7d52;
@@ -31,7 +35,7 @@
   --radius-lg:20px;
   --maxw:1120px;
   --sans:var(--font-inter),"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  --serif:var(--font-inter),"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --serif:var(--font-serif),"Newsreader",Georgia,"Times New Roman",serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
@@ -50,19 +54,32 @@ button{font-family:inherit;cursor:pointer}
 /* ---------- announcement bar ---------- */
 .topbar{
   position:sticky;top:0;z-index:60;
-  background:var(--ink);color:#eceae3;
+  background:var(--accent-olive);color:var(--cream);
   font-size:13px;font-weight:400;letter-spacing:.02em;
   text-align:center;padding:10px 16px;
 }
-.topbar b{font-weight:600;color:#fff}
-.topbar .dot{opacity:.35;margin:0 11px}
+.topbar b{font-weight:600;color:var(--cream)}
+.topbar .dot{opacity:.5;margin:0 11px}
+/* pulsing dot before "Now in open beta" */
+.beta-pulse{
+  display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:var(--cream);margin-right:9px;vertical-align:middle;
+  animation:betaPulse 1.8s infinite;
+}
+@keyframes betaPulse{
+  0%{box-shadow:0 0 0 0 rgba(250,250,247,.5)}
+  70%{box-shadow:0 0 0 6px rgba(250,250,247,0)}
+  100%{box-shadow:0 0 0 0 rgba(250,250,247,0)}
+}
 
 /* ---------- nav ---------- */
 nav{
   position:relative;z-index:1;
   background:var(--bg);
-  border-bottom:1px solid var(--line);
 }
+/* content-width editorial hairline directly under the nav */
+.masthead-rule{background:var(--bg)}
+.masthead-rule .wrap{border-top:1px solid var(--hairline)}
 .nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px}
 .logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:20px;letter-spacing:-.02em}
 .logo .mark{
@@ -99,16 +116,24 @@ nav{
   pointer-events:none;
 }
 .hero .wrap{position:relative;z-index:1;text-align:center}
+/* kicker: short olive rule + uppercase label, tight to the headline */
 .eyebrow{
+  display:inline-flex;align-items:center;gap:12px;
   font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.14em;
-  color:var(--gray);margin-bottom:24px;
+  color:var(--gray);margin-bottom:14px;
+}
+.eyebrow::before{
+  content:"";width:24px;height:1.5px;flex:none;background:var(--accent-olive);
 }
 h1{
-  font-size:clamp(33px,5vw,56px);
-  line-height:1.12;letter-spacing:-.025em;font-weight:700;
+  font-family:var(--serif);
+  font-size:clamp(38px,5.75vw,64px);
+  line-height:.98;letter-spacing:-.02em;font-weight:600;
+  color:var(--ink);
   max-width:22ch;margin:0 auto;
 }
-h1 .line2{display:block;margin-top:10px;color:var(--gray);font-weight:500}
+h1 .line2{display:block;margin-top:4px;color:var(--ink);font-weight:600}
+.accent-word{color:var(--accent-olive)}
 .subhead{
   margin:26px auto 0;max-width:58ch;
   font-size:clamp(16px,2vw,19px);color:var(--gray);line-height:1.55;
@@ -192,9 +217,6 @@ h1 .line2{display:block;margin-top:10px;color:var(--gray);font-weight:500}
 .lc-head{display:flex;align-items:center;gap:10px;padding:15px 24px;border-bottom:1px solid var(--line);background:#fcfcfb}
 .lc-mark{width:24px;height:24px;border-radius:6px;background:var(--ink);color:#fafaf7;display:grid;place-items:center;font-size:12px;font-weight:800;letter-spacing:-.02em;flex:none}
 .lc-head .dom{font-size:13.5px;color:var(--ink-soft);font-weight:600;letter-spacing:-.01em}
-.lc-live{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;letter-spacing:.1em;color:#3f7d52;background:#edf3ee;border:1px solid #dceadf;padding:4px 10px;border-radius:20px}
-.lc-live .pulse{width:7px;height:7px;border-radius:50%;background:var(--pos);animation:pulse 1.8s infinite}
-@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,125,82,.5)}70%{box-shadow:0 0 0 6px rgba(63,125,82,0)}100%{box-shadow:0 0 0 0 rgba(63,125,82,0)}}
 
 .lc-q{padding:32px 28px 10px;font-size:clamp(22px,3vw,30px);font-weight:700;letter-spacing:-.026em;line-height:1.28}
 .lc-q .lead{color:var(--gray-light);font-weight:600}
@@ -212,7 +234,12 @@ h1 .line2{display:block;margin-top:10px;color:var(--gray);font-weight:500}
 .lc-card .bd{flex:1;min-width:0}
 .lc-card .nm-row{display:flex;align-items:center;gap:10px;margin-bottom:5px;min-height:22px}
 .lc-card .nm{font-weight:700;font-size:15px;letter-spacing:-.01em}
-.lc-text{font-size:15px;color:var(--ink-soft);line-height:1.55;min-height:22px}
+/* Each response is locked to exactly one line — FIXED height + nowrap +
+   ellipsis — so a card's text region is identical whether it's empty,
+   showing the typing dots, or filled, and never wraps at any viewport
+   width. This is what keeps the whole console a fixed size as responses
+   print in (no sub-pixel growth, no wrap-induced jump). */
+.lc-text{font-size:15px;color:var(--ink-soft);line-height:1.55;height:1.55em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lc-dots{display:inline-flex;gap:4px;align-items:center;height:22px}
 .lc-dots i{width:5px;height:5px;border-radius:50%;background:var(--gray-light);animation:tdots 1.1s infinite}
 .lc-dots i:nth-child(2){animation-delay:.15s}
@@ -225,15 +252,17 @@ h1 .line2{display:block;margin-top:10px;color:var(--gray);font-weight:500}
 .lc-sent.neg{background:var(--neg-bg);color:var(--neg)}
 .lc-sent.mix{background:#eceaf3;color:#5d5a7c}
 
-.lc-verdict{
-  margin:12px 28px 0;padding:13px 16px;border-radius:10px;background:#faf9f4;border:1px solid var(--line);
-  font-size:13.5px;color:var(--gray);display:flex;align-items:center;gap:11px;
-  opacity:0;transform:translateY(6px);transition:opacity .4s ease,transform .4s ease;
+/* inter-topic loader — fades in during the pause between topics so the
+   cycle reads as "moving to the next topic". Always in normal flow (its
+   height is reserved) so toggling it never shifts the console height. */
+.lc-next{
+  margin:8px 28px 0;min-height:16px;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  opacity:0;transition:opacity .3s ease;
 }
-.lc-verdict.show{opacity:1;transform:none}
-.lc-verdict b{font-weight:700;color:var(--ink)}
-.lc-verdict .dot3{display:flex;gap:4px;flex:none}
-.lc-verdict .dot3 i{width:7px;height:7px;border-radius:50%}
+.lc-next.show{opacity:1}
+.lc-next .lc-dots{height:16px}
+.lc-next-lbl{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-light)}
 
 .lc-foot{padding:20px 28px 22px;border-top:1px solid var(--line);margin-top:20px;background:#fcfcfb}
 .lc-foot .askrow{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:11px}
@@ -252,7 +281,7 @@ h1 .line2{display:block;margin-top:10px;color:var(--gray);font-weight:500}
   .lc-cards{padding:14px 18px 4px}
   .lc-card{gap:12px;padding:14px 0}
   .lc-text,.lc-card .nm{font-size:14px}
-  .lc-verdict{margin:10px 18px 0}
+  .lc-next{margin:10px 18px 0}
   .lc-foot{padding:16px 18px 18px}
   .lc-foot .askrow{flex-direction:column;align-items:flex-start;gap:6px}
   .lc-ask input{min-width:0;width:100%}
