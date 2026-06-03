@@ -624,7 +624,7 @@ export default function LandingPage() {
           </div>
           <div className="faq-layout">
             <div className="faq-visual reveal">
-              <div className="v-head">Live snapshot — your watchlist</div>
+              <div className="v-head">Snapshot — your watchlist</div>
               <div className="v-body">
                 <div className="mini-metric"><span className="mn">Your client</span><span className="mv"><span className="trend dn">▼ Critical</span></span></div>
                 <div className="mini-metric"><span className="mn">Carbon pricing</span><span className="mv"><span className="trend up">▲ Neutral</span></span></div>
