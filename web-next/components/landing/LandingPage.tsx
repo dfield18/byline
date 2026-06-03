@@ -703,9 +703,8 @@ export default function LandingPage() {
               </div>
               <div className="foot-col">
                 <h4>Legal</h4>
-                {/* TODO(user): real Privacy / Terms pages */}
-                <a href="#">Privacy</a>
-                <a href="#">Terms</a>
+                <a href="/privacy">Privacy</a>
+                <a href="/terms">Terms</a>
               </div>
             </div>
           </div>

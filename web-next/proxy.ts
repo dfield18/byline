@@ -7,7 +7,7 @@
 // in-page header link.
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 
-const isPublicRoute = createRouteMatcher(['/'])
+const isPublicRoute = createRouteMatcher(['/', '/privacy', '/terms'])
 
 // Dev-only auth bypass. Set BYLINE_AUTH=disabled when running
 // `npm run dev` to skip the Clerk session check on authed routes

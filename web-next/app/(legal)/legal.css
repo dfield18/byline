@@ -1,0 +1,154 @@
+/* Minimal, readable styling for the legal pages (Privacy, Terms).
+   Loaded only by the (legal) route-group layout. Uses the shared design
+   tokens from app/globals.css; headings in the Newsreader serif (loaded
+   on <html> by the root layout), body in Inter. */
+
+.legal-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.legal-wrap {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+
+.legal-nav {
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.legal-nav .legal-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+}
+.legal-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.legal-logo .mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--bg);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 800;
+}
+.legal-back {
+  font-size: 13.5px;
+  color: var(--gray);
+}
+.legal-back:hover {
+  color: var(--ink);
+}
+
+.legal-main {
+  flex: 1;
+  padding: 48px 0 72px;
+}
+
+.legal-doc h1 {
+  font-family: var(--font-serif), Georgia, "Times New Roman", serif;
+  font-size: clamp(30px, 4vw, 42px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.legal-meta {
+  margin-top: 10px;
+  font-size: 13.5px;
+  color: var(--gray-light);
+}
+.legal-draft {
+  margin: 24px 0 8px;
+  border: 1px solid #e7dcb6;
+  background: #f3edd9;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #8a7437;
+}
+.legal-draft b {
+  color: #75591f;
+}
+.legal-doc h2 {
+  margin-top: 36px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.legal-doc h3 {
+  margin-top: 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.legal-doc p {
+  margin-top: 12px;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--ink-soft);
+}
+.legal-doc ul {
+  margin-top: 12px;
+  padding-left: 22px;
+}
+.legal-doc li {
+  margin-top: 6px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+.legal-doc a {
+  color: var(--accent-bronze);
+  text-decoration: underline;
+}
+.legal-ph {
+  background: #f3edd9;
+  border: 1px solid #e7dcb6;
+  border-radius: 5px;
+  padding: 0 6px;
+  color: #8a7437;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.legal-foot {
+  border-top: 1px solid var(--line);
+  padding: 24px 0;
+}
+.legal-foot .legal-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--gray-light);
+}
+.legal-foot a {
+  color: var(--gray);
+  margin-left: 16px;
+}
+.legal-foot a:hover {
+  color: var(--ink);
+}
