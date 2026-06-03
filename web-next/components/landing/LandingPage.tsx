@@ -227,7 +227,7 @@ export default function LandingPage() {
           </div>
           <div className="nav-right">
             {/* in-page scroll anchor — keep */}
-            <a href="#cta" className="btn btn-accent">Analyze your issue</a>
+            <a href="#cta" className="btn btn-ghost">Get started</a>
           </div>
         </div>
       </nav>
@@ -245,10 +245,12 @@ export default function LandingPage() {
           <p className="subhead">Byline tracks how the major AI assistants describe the people and issues you represent.</p>
 
           <div className="hero-cta">
-            {/* in-page scroll anchors — match the nav targets */}
+            {/* in-page scroll anchor — matches the nav target */}
             <a href="#cta" className="btn btn-accent btn-lg">Analyze your issue</a>
-            <a href="#how" className="btn btn-ghost btn-lg">See how it works</a>
           </div>
+
+          {/* TODO(user): swap in real social proof (customer logos / a concrete stat) when available */}
+          <div className="hero-trust">For communications, public-affairs, and campaign teams</div>
 
           {/* live console centerpiece */}
           <div className="console reveal" id="console">

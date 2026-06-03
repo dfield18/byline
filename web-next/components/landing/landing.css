@@ -147,6 +147,9 @@ h1{
 }
 /* hero CTA row — primary + ghost, centered under the explainer */
 .hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:24px}
+/* trust strip — small muted positioning line under the CTA (placeholder
+   copy; replace with real social proof when available) */
+.hero-trust{margin-top:18px;font-size:12.5px;font-weight:500;letter-spacing:.02em;color:var(--gray-light)}
 
 /* interactive hero demo */
 .demo{
