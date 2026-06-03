@@ -143,9 +143,6 @@ h1{
 .accent-word{color:var(--accent-olive)}
 /* hero CTA row — primary action, centered under the deck */
 .hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:26px}
-/* trust strip — small muted positioning line under the CTA (placeholder
-   copy; replace with real social proof when available) */
-.hero-trust{margin-top:18px;font-size:12.5px;font-weight:500;letter-spacing:.02em;color:var(--gray-light)}
 
 /* interactive hero demo */
 .demo{
@@ -296,6 +293,13 @@ h1{
 .lc-ask input:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(22,22,26,.06)}
 
 @media(max-width:560px){
+  /* hero scaling + tighter gutters so the serif H1 and demo fit phones */
+  .wrap{padding:0 20px}
+  h1{font-size:32px}
+  .hero-deck{font-size:20px}
+  /* demo responses wrap to two readable lines on mobile (fixed height)
+     instead of truncating to a single ellipsised line */
+  .lc-text{white-space:normal;height:calc(1.55em * 2)}
   .console{margin-top:34px;border-radius:14px}
   .lc-head{padding:13px 16px}
   .lc-q{padding:24px 18px 8px;font-size:21px}

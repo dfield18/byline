@@ -247,9 +247,6 @@ export default function LandingPage() {
             <a href="#cta" className="btn btn-accent btn-lg">Analyze your narrative</a>
           </div>
 
-          {/* TODO(user): swap in real social proof (customer logos / a concrete stat) when available */}
-          <div className="hero-trust">For communications, public-affairs, and campaign teams</div>
-
           {/* live console centerpiece */}
           <div className="console reveal" id="console">
             <div className="lc-head">
@@ -674,7 +671,7 @@ export default function LandingPage() {
             <p className="sec-sub center">Enter an issue to compare how leading AI models frame it — and identify the narratives taking shape.</p>
             <div className="cta-actions">
               {/* TODO(user): point at the real app-entry / signup destination */}
-              <a href="#" className="btn btn-accent btn-xl">Analyze your issue</a>
+              <a href="#" className="btn btn-accent btn-xl">Analyze your narrative</a>
             </div>
             <div className="fine">Free during the beta · No account required · Nonpartisan by design</div>
           </div>
