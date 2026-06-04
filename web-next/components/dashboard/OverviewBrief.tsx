@@ -1,6 +1,16 @@
 import type { ReactNode } from "react";
-import type { SubjectOverview, KpiValue } from "@/lib/api";
+import type { SubjectOverview } from "@/lib/api";
 import { Sparkline } from "@/components/dashboard/Sparkline";
+import {
+  formatPct,
+  formatScore,
+  sentimentTone,
+  formatDelta,
+  KPI_DEFS,
+  type KpiDef,
+  KpiGrid,
+  VitalsBlock,
+} from "@/components/dashboard/overviewKpis";
 
 /**
  * OverviewBrief — the customer-facing AI Narrative Brief, as a pure
@@ -40,54 +50,6 @@ const EVIDENCE_TYPE: Record<string, { cls: string; label: string }> = {
   model_difference: { cls: "neu", label: "Model difference" },
 };
 
-type KpiDef = {
-  key: keyof SubjectOverview["kpis"];
-  label: string;
-  format: "pct" | "score";
-  higherBetter: boolean;
-};
-
-const KPI_DEFS: KpiDef[] = [
-  { key: "ai_recall", label: "AI Recall", format: "pct", higherBetter: true },
-  { key: "avg_sentiment", label: "Avg Sentiment", format: "score", higherBetter: true },
-  { key: "risk_frame_rate", label: "Risk Framing", format: "pct", higherBetter: false },
-  { key: "citation_rate", label: "Citation Rate", format: "pct", higherBetter: true },
-];
-
-function formatPct(value: number | null): string {
-  if (value === null) return "—";
-  return `${Math.round(value * 100)}%`;
-}
-
-function formatScore(value: number | null): string {
-  if (value === null) return "—";
-  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(2)}`;
-}
-
-function sentimentTone(value: number | null): { cls: string; word: string } | null {
-  if (value === null) return null;
-  if (value > 0.1) return { cls: "pos", word: "Positive" };
-  if (value < -0.1) return { cls: "neg", word: "Negative" };
-  return { cls: "neu", word: "Neutral" };
-}
-
-function formatDelta(delta: number | null): string | null {
-  if (delta === null || delta === 0) return null;
-  const abs = Math.abs(delta);
-  const num = Number.isInteger(abs) ? String(abs) : abs.toFixed(1);
-  return `${delta > 0 ? "+" : "−"}${num}`;
-}
-
-function deltaClass(kpi: KpiValue, higherBetter: boolean): string {
-  if (kpi.delta === null || kpi.delta === 0) return "flat";
-  const good = higherBetter ? kpi.delta > 0 : kpi.delta < 0;
-  return good ? "good" : "bad";
-}
-
-function trendArrow(trend: KpiValue["trend"]): string {
-  return trend === "up" ? "↑" : trend === "down" ? "↓" : "→";
-}
-
 function latestMeasured(series: (number | null)[]): number | null {
   for (let i = series.length - 1; i >= 0; i--) {
     const v = series[i];
@@ -98,50 +60,6 @@ function latestMeasured(series: (number | null)[]): number | null {
 
 function kpiFormatter(format: KpiDef["format"]): (v: number | null) => string {
   return format === "pct" ? formatPct : formatScore;
-}
-
-function KpiCard({ def, kpi, unit }: { def: KpiDef; kpi: KpiValue; unit: string }) {
-  const hasValue = kpi.value !== null;
-  const tone = hasValue && def.format === "score" ? sentimentTone(kpi.value) : null;
-  const deltaText = formatDelta(kpi.delta);
-  const dClass = deltaClass(kpi, def.higherBetter);
-
-  // Footer rules:
-  //  - no value at all → muted "Not enough data" (a missing metric never
-  //    shows a meaningless change indicator).
-  //  - value present but no prior snapshot (delta === null) → render an
-  //    invisible spacer so tiles stay aligned, but show no change text.
-  //  - delta === 0 → "No change"; otherwise the arrow + signed delta.
-  let footer: ReactNode;
-  if (!hasValue) {
-    footer = <div className="delta empty">Not enough data</div>;
-  } else if (kpi.delta === null) {
-    footer = (
-      <div className="delta" aria-hidden style={{ visibility: "hidden" }}>
-        —
-      </div>
-    );
-  } else if (deltaText === null) {
-    footer = <div className="delta flat">No change</div>;
-  } else {
-    footer = (
-      <div className={`delta ${dClass}`}>
-        <span aria-hidden>{trendArrow(kpi.trend)}</span>
-        {deltaText} {unit}
-      </div>
-    );
-  }
-
-  return (
-    <div className="kpi">
-      <div className="k">{def.label}</div>
-      <div className="v">
-        {def.format === "pct" ? formatPct(kpi.value) : formatScore(kpi.value)}
-        {tone && <span className={`tone-pill ${tone.cls}`}>{tone.word}</span>}
-      </div>
-      {footer}
-    </div>
-  );
 }
 
 export function OverviewBrief({
@@ -219,34 +137,13 @@ export function OverviewBrief({
       </div>
 
       {/* Vitals: the verdict + recommended focus */}
-      {(data.bottom_line || data.recommended_focus) && (
-        <div className="vitals">
-          {data.bottom_line && (
-            <>
-              <div className="eyebrow">Bottom line</div>
-              <p className="bottom-line">{data.bottom_line}</p>
-            </>
-          )}
-          {data.recommended_focus && (
-            <div className="focus">
-              <div className="eyebrow">Recommended focus</div>
-              <p className="ftext">{data.recommended_focus}</p>
-            </div>
-          )}
-        </div>
-      )}
+      <VitalsBlock
+        bottomLine={data.bottom_line}
+        recommendedFocus={data.recommended_focus}
+      />
 
       {/* Headline KPIs */}
-      <div className="kpi-grid">
-        {KPI_DEFS.map((def) => (
-          <KpiCard
-            key={def.key}
-            def={def}
-            kpi={data.kpis[def.key]}
-            unit={def.format === "score" ? "pts" : "pp"}
-          />
-        ))}
-      </div>
+      <KpiGrid kpis={data.kpis} />
 
       {/* 12-week trends — one sparkline per headline KPI */}
       {data.trajectory.weeks.length >= 2 && (

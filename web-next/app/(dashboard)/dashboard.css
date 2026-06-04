@@ -2469,3 +2469,25 @@ body {
 @media (max-width: 620px) {
   .alt-src .s-type { display: none; }
 }
+
+/* mini-sparkline inside a KPI card (Overview Dashboard) */
+.kpi-spark { margin-top: 12px; }
+.kpi-spark .spark-plot { height: 36px; padding-left: 0; }
+.kpi-spark .spark-axis-max,
+.kpi-spark .spark-axis-min,
+.kpi-spark .spark-axis-mid,
+.kpi-spark .spark-ticks,
+.kpi-spark .spark-empty { display: none; }
+
+/* visibility data-bar in the industry-ranking table */
+.alt-rank .alt-rank-bar {
+  width: 60px;
+  flex: none;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--bg-sand);
+  overflow: hidden;
+}
+.alt-rank-head .alt-rank-bar { background: transparent; }
+.alt-rank-bar i { display: block; height: 100%; border-radius: 4px; background: var(--gray-light); }
+.alt-rank-row.is-subject .alt-rank-bar i { background: var(--accent-bronze); }

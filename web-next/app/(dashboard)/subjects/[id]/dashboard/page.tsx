@@ -7,6 +7,7 @@ import {
 } from "@/lib/api";
 import { TrendLines, type TrendSeries } from "@/components/dashboard/TrendLines";
 import { SourceDonut, type DonutSegment } from "@/components/dashboard/SourceDonut";
+import { VitalsBlock, KpiGrid } from "@/components/dashboard/overviewKpis";
 import { RefreshButton } from "../refresh-button";
 
 /**
@@ -68,6 +69,12 @@ function shortWeek(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+function latestOf(values: (number | null)[]): number | null {
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (values[i] !== null) return values[i];
+  }
+  return null;
 }
 
 export default async function AltDashboardPage({
@@ -135,6 +142,7 @@ export default async function AltDashboardPage({
 
   // ── Industry ranking ─────────────────────────────────────────────────
   const ranking = [...data.competitive].sort((a, b) => b.sov - a.sov);
+  const maxSov = Math.max(...ranking.map((c) => c.sov), 0.0001);
 
   // ── Per-LLM readout: recall + sentiment + a representative quote ──────
   const perModel = [...data.per_platform_kpis]
@@ -174,6 +182,14 @@ export default async function AltDashboardPage({
         <RefreshButton subjectId={subjectId} />
       </div>
 
+      {/* Bottom line + recommended focus, then the four headline KPIs —
+          shared with the Overview brief. */}
+      <VitalsBlock
+        bottomLine={data.bottom_line}
+        recommendedFocus={data.recommended_focus}
+      />
+      <KpiGrid kpis={data.kpis} trajectory={data.trajectory} />
+
       {/* Row 1: visibility trend + industry ranking */}
       <div className="alt-grid alt-grid-top">
         <div className="alt-panel">
@@ -185,12 +201,16 @@ export default async function AltDashboardPage({
             <>
               <TrendLines labels={weeks.map(shortWeek)} series={trendSeries} format={pct0} />
               <div className="alt-legend">
-                {trendSeries.map((s) => (
-                  <span className="alt-legend-item" key={s.name}>
-                    <i style={{ background: s.color }} />
-                    {s.name}
-                  </span>
-                ))}
+                {trendSeries.map((s) => {
+                  const latest = latestOf(s.values);
+                  return (
+                    <span className="alt-legend-item" key={s.name}>
+                      <i style={{ background: s.color }} />
+                      {s.name}
+                      {latest !== null && <b>{pct0(latest)}</b>}
+                    </span>
+                  );
+                })}
               </div>
             </>
           ) : (
@@ -209,6 +229,7 @@ export default async function AltDashboardPage({
             <div className="alt-rank-row alt-rank-head">
               <span className="r-num">#</span>
               <span className="r-name">Entity</span>
+              <span className="alt-rank-bar" aria-hidden />
               <span className="r-val">Vis.</span>
               <span className="r-val">Pos.</span>
               <span className="r-val">1st</span>
@@ -222,6 +243,9 @@ export default async function AltDashboardPage({
                 <span className="r-name" title={c.name}>
                   <span className="r-name-text">{c.name}</span>
                   {c.is_subject && <span className="you">You</span>}
+                </span>
+                <span className="alt-rank-bar" aria-hidden>
+                  <i style={{ width: `${(c.sov / maxSov) * 100}%` }} />
                 </span>
                 <span className="r-val">{pct0(c.sov)}</span>
                 <span className="r-val">{c.avg_rank !== null ? c.avg_rank.toFixed(1) : "—"}</span>
