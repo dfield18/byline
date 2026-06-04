@@ -67,6 +67,15 @@ function OverviewIcon({ className }: IconProps) {
     </svg>
   );
 }
+function DashboardIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <rect x="3" y="3" width="7" height="18" rx="1" />
+      <rect x="14" y="3" width="7" height="8" rx="1" />
+      <rect x="14" y="15" width="7" height="6" rx="1" />
+    </svg>
+  );
+}
 function VisibilityIcon({ className }: IconProps) {
   return (
     <svg className={className} {...svgProps}>
@@ -125,6 +134,7 @@ type Spoke = {
 
 const SPOKES: Spoke[] = [
   { key: "", label: "Overview", Icon: OverviewIcon, built: true },
+  { key: "dashboard", label: "Overview Dashboard", Icon: DashboardIcon, built: true },
   { key: "visibility", label: "Visibility", Icon: VisibilityIcon, built: true },
   { key: "competition", label: "Competitive", Icon: CompetitionIcon, built: true },
   { key: "narrative", label: "Narrative", Icon: NarrativeIcon, built: true },
