@@ -11,8 +11,9 @@ const API_URL = process.env.BYLINE_API_URL ?? "http://localhost:8000";
 
 export async function POST(req: Request) {
   let topic: unknown;
+  let turnstileToken: unknown;
   try {
-    ({ topic } = await req.json());
+    ({ topic, turnstile_token: turnstileToken } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
@@ -30,7 +31,10 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
         ...(fwd ? { "X-Forwarded-For": fwd } : {}),
       },
-      body: JSON.stringify({ topic: topic.trim().slice(0, 80) }),
+      body: JSON.stringify({
+        topic: topic.trim().slice(0, 80),
+        turnstile_token: typeof turnstileToken === "string" ? turnstileToken : null,
+      }),
       cache: "no-store",
     });
   } catch {

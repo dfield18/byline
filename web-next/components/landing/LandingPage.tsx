@@ -22,7 +22,13 @@
  */
 
 import { useEffect, useRef } from "react";
+import Script from "next/script";
 import "./landing.css";
+
+// Cloudflare Turnstile site key. When set, the hero renders the widget and the
+// submit includes its token; the backend enforces it. Unset (dev) → no widget,
+// no token, backend skips the gate.
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 export default function LandingPage() {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -188,11 +194,17 @@ export default function LandingPage() {
       });
       setLbl("Building your live narrative brief — one moment…", false);
 
+      const ts = (window as unknown as {
+        turnstile?: { getResponse?: () => string; reset?: () => void };
+      }).turnstile;
       try {
         const res = await fetch("/api/try", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topic: safe }),
+          body: JSON.stringify({
+            topic: safe,
+            turnstile_token: ts?.getResponse?.() || null,
+          }),
         });
         const payload = await res.json().catch(() => ({}));
         if (!res.ok || !payload?.subject_id) {
@@ -200,6 +212,7 @@ export default function LandingPage() {
         }
         window.location.assign(`/try/${payload.subject_id}`);
       } catch (err) {
+        ts?.reset?.(); // Turnstile tokens are single-use — reset for retry
         setLbl(err instanceof Error ? err.message : String(err), true);
         if (askBtn) { askBtn.disabled = false; askBtn.textContent = "See the narrative"; }
         resumeBtn!.classList.add("show");
@@ -340,6 +353,21 @@ export default function LandingPage() {
                 <input id="hero-input" type="text" placeholder="Type a name or issue…" autoComplete="off" />
                 <button className="btn btn-accent" id="lc-ask-btn">See the narrative</button>
               </div>
+              {TURNSTILE_SITE_KEY && (
+                <>
+                  <Script
+                    src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+                    async
+                    defer
+                  />
+                  <div
+                    className="cf-turnstile lc-turnstile"
+                    id="cf-turnstile"
+                    data-sitekey={TURNSTILE_SITE_KEY}
+                    data-size="flexible"
+                  />
+                </>
+              )}
             </div>
           </div>
 

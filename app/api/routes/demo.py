@@ -25,6 +25,7 @@ from collections import defaultdict, deque
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.api.turnstile import verify_turnstile
 from app.prompt_preview import ModelRunResult, run_prompt_against_models
 
 
@@ -48,6 +49,7 @@ _global_state = {"day": -1, "count": 0}
 
 class DemoPreviewRequest(BaseModel):
     topic: str = Field(min_length=2, max_length=TOPIC_MAX_LEN)
+    turnstile_token: str | None = None
 
 
 class DemoPreviewResponse(BaseModel):
@@ -115,6 +117,12 @@ async def demo_preview(req: DemoPreviewRequest, request: Request) -> DemoPreview
     topic = req.topic.strip()
     if not topic:
         raise HTTPException(status_code=422, detail="topic is required")
+
+    # Bot challenge (no-op until TURNSTILE_SECRET_KEY is set; skipped in dev).
+    if not _is_dev_exempt(request) and not await verify_turnstile(
+        req.turnstile_token, _client_ip(request)
+    ):
+        raise HTTPException(status_code=403, detail="Verification failed — please try again.")
 
     _enforce_limits(request)
 

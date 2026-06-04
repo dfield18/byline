@@ -9,11 +9,13 @@ analysis + cross-analysis, ~2-5 min, ~$0.30-0.80 a run), so cost/abuse control
 matters a lot:
   - a 7-day topic-reuse cache: the SAME topic reuses an existing refreshed
     subject instead of re-running the pipeline (the main cost lever);
-  - per-IP rate limit + a hard GLOBAL daily cap on NEW runs (the cost ceiling,
-    counted only when we actually spend — reuses are free);
+  - a hard GLOBAL daily cap on NEW runs, DB-backed via the jobs table (truly
+    global across workers + restarts; counted only when we actually spend —
+    reuses are free), plus a per-IP window (in-process, best-effort friction);
   - a forced public org so these never touch real customer tenancy;
-  - loopback is exempt so local dev can exercise it freely.
-For a real public launch add a bot challenge (Turnstile) in front of this.
+  - an optional Cloudflare Turnstile gate (enforced when TURNSTILE_SECRET_KEY
+    is set; skipped in dev);
+  - the dev exemption keys on the real socket peer, not a spoofable header.
 
 Endpoints:
   POST /api/try            {topic} -> {subject_id, job_id, reused, status}
@@ -32,8 +34,10 @@ import yaml
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.api.turnstile import verify_turnstile
 from app.db import get_cursor
 from app.providers import get_provider
+from app.public_demo import ORG_PUBLIC_TRY
 from dashboard.lib.queries import create_subject, get_subject, get_subject_overview
 
 
@@ -45,8 +49,7 @@ _PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
 _SKIP_SETUP_KEYS = {"name", "recent_news", "canonical_url"}
 
 
-# All try-subjects live in this constant org, walled off from real customers.
-ORG_PUBLIC_TRY = "org_public_try"
+# ORG_PUBLIC_TRY imported from app.public_demo (single source of truth).
 REUSE_WINDOW_DAYS = 7
 TOPIC_MAX_LEN = 80
 _VALID_CATEGORIES = {"person", "organization", "issue", "policy", "event"}
@@ -62,11 +65,11 @@ _GLOBAL_DAILY_CAP = int(os.environ.get("TRY_DAILY_CAP", "20"))
 _DEV_LOOPBACK = {"127.0.0.1", "::1"}
 
 _ip_state: dict[str, deque] = defaultdict(deque)
-_global_state = {"day": -1, "count": 0}
 
 
 class TryRequest(BaseModel):
     topic: str = Field(min_length=2, max_length=TOPIC_MAX_LEN)
+    turnstile_token: str | None = None
 
 
 class TryResponse(BaseModel):
@@ -97,23 +100,43 @@ def _is_dev_exempt(request: Request) -> bool:
     return peer in _DEV_LOOPBACK
 
 
+def _global_runs_today() -> int:
+    """Count of NEW try-runs enqueued today (UTC), read from the jobs table.
+
+    Every paid run is a `jobs` row in the public org, so this is a SHARED,
+    restart-safe global counter — no per-process drift, no reset on deploy.
+    (Reuse/cache hits don't enqueue, so they correctly don't count.)
+    """
+    with get_cursor(commit=False) as cur:
+        cur.execute(
+            """
+            SELECT count(*) FROM jobs
+            WHERE org_id = %s AND kind = 'refresh'
+              AND enqueued_at >= date_trunc('day', (now() AT TIME ZONE 'utc'))
+            """,
+            (ORG_PUBLIC_TRY,),
+        )
+        return cur.fetchone()[0]
+
+
 def _enforce_limits(request: Request) -> None:
-    """Bound spend on NEW pipeline runs. Local dev (real loopback peer) exempt."""
+    """Bound spend on NEW pipeline runs. Local dev (real loopback peer) exempt.
+
+    Global daily cap is DB-backed (truly global across workers + restarts); the
+    per-IP window stays in-process (best-effort friction — the global cap is the
+    hard cost ceiling).
+    """
     if _is_dev_exempt(request):
         return
 
-    now = time.monotonic()
-    ip = _client_ip(request)
-    day = int(time.time() // 86400)
-    if _global_state["day"] != day:
-        _global_state["day"] = day
-        _global_state["count"] = 0
-    if _global_state["count"] >= _GLOBAL_DAILY_CAP:
+    if _global_runs_today() >= _GLOBAL_DAILY_CAP:
         raise HTTPException(
             status_code=429,
             detail="The live demo is at capacity for today — please try again tomorrow.",
         )
 
+    now = time.monotonic()
+    ip = _client_ip(request)
     dq = _ip_state[ip]
     while dq and now - dq[0] > _PER_IP_WINDOW_S:
         dq.popleft()
@@ -124,7 +147,6 @@ def _enforce_limits(request: Request) -> None:
         )
 
     dq.append(now)
-    _global_state["count"] += 1
 
 
 def _find_try_subject(name: str) -> int | None:
@@ -314,6 +336,12 @@ async def create_try(req: TryRequest, request: Request) -> TryResponse:
     topic = req.topic.strip()
     if not topic:
         raise HTTPException(status_code=422, detail="topic is required")
+
+    # Bot challenge (no-op until TURNSTILE_SECRET_KEY is set; skipped in dev).
+    if not _is_dev_exempt(request) and not await verify_turnstile(
+        req.turnstile_token, _client_ip(request)
+    ):
+        raise HTTPException(status_code=403, detail="Verification failed — please try again.")
 
     existing = _find_try_subject(topic)
     if existing is not None:

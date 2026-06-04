@@ -51,9 +51,10 @@ def client(monkeypatch):
     monkeypatch.setattr(try_, "_enqueue_refresh", fake_enqueue)
     monkeypatch.setattr(try_, "_update_setup_inputs", fake_update)
 
-    # Reset the in-memory limiters.
+    # Reset the in-process per-IP limiter; the global cap is DB-backed, stubbed
+    # to 0 here so it never trips unless a test opts in.
     try_._ip_state.clear()
-    try_._global_state.update({"day": -1, "count": 0})
+    monkeypatch.setattr(try_, "_global_runs_today", lambda: 0)
 
     c = TestClient(app)
     c._calls = calls  # type: ignore[attr-defined]
@@ -157,9 +158,26 @@ def test_create_race_does_not_double_enqueue(client, monkeypatch):
     assert client._calls["enqueued"] == []  # no redundant second pipeline run
 
 
+def test_turnstile_failure_blocks_with_403(client, monkeypatch):
+    # When the bot challenge is active and verification fails, the endpoint
+    # rejects with 403 before any subject is created or run enqueued.
+    async def fail(token, remote_ip=None):
+        return False
+
+    monkeypatch.setattr(try_, "verify_turnstile", fail)
+    # Non-loopback peer (via XFF) + BYLINE_AUTH not 'disabled' → gate is active.
+    res = client.post(
+        "/api/try", json={"topic": "Gated Topic"}, headers={"X-Forwarded-For": "203.0.113.50"}
+    )
+    assert res.status_code == 403
+    assert client._calls["created"] == []
+    assert client._calls["enqueued"] == []
+
+
 def test_global_daily_cap(client, monkeypatch):
+    # The DB-backed counter reports the cap is already reached → 429, regardless
+    # of IP (it's a global ceiling, not per-IP).
     monkeypatch.setattr(try_, "_GLOBAL_DAILY_CAP", 2)
-    try_._global_state.update({"day": -1, "count": 0})
-    for i in range(2):
-        assert client.post("/api/try", json={"topic": "Topic"}, headers={"X-Forwarded-For": f"10.1.0.{i}"}).status_code == 200
-    assert client.post("/api/try", json={"topic": "Topic"}, headers={"X-Forwarded-For": "10.1.0.250"}).status_code == 429
+    monkeypatch.setattr(try_, "_global_runs_today", lambda: 2)
+    res = client.post("/api/try", json={"topic": "Topic"}, headers={"X-Forwarded-For": "10.1.0.250"})
+    assert res.status_code == 429

@@ -33,6 +33,7 @@ import logging
 import os
 import signal
 import sys
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -41,6 +42,7 @@ load_dotenv()
 
 from app.db import get_database_url  # noqa: E402
 from app.pipeline import run_full_refresh_pipeline  # noqa: E402
+from app.public_demo import prune_old_try_subjects  # noqa: E402
 
 import psycopg  # noqa: E402
 from psycopg.types.json import Json  # noqa: E402
@@ -347,6 +349,24 @@ def _install_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, _handler)
 
 
+_PRUNE_INTERVAL_S = 6 * 3600.0  # prune stale try-subjects at most every 6h
+_last_prune = 0.0
+
+
+def _maybe_prune_try_subjects(*, force: bool = False) -> None:
+    """Periodically delete stale public try-subjects. Best-effort — a failure
+    here must never take the worker's job loop down."""
+    global _last_prune
+    now = time.monotonic()
+    if not force and now - _last_prune < _PRUNE_INTERVAL_S:
+        return
+    _last_prune = now
+    try:
+        prune_old_try_subjects()
+    except Exception:  # noqa: BLE001
+        logger.exception("try-subject prune failed (non-fatal)")
+
+
 async def _main(poll_seconds: float) -> None:
     _install_signal_handlers()
     threshold = _reap_threshold_minutes()
@@ -367,7 +387,11 @@ async def _main(poll_seconds: float) -> None:
             startup_reaped["jobs"], startup_reaped["refresh_runs"],
         )
 
+    # Prune stale throwaway try-subjects on startup, then periodically below.
+    _maybe_prune_try_subjects(force=True)
+
     while not _should_stop:
+        _maybe_prune_try_subjects()
         # Per-iteration reap. Cheap when the tables are clean (two
         # UPDATEs matching zero rows); essential when another worker
         # process or a CLI run has died mid-job and left orphans.
