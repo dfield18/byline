@@ -27,9 +27,10 @@ const MODEL_NAMES: Record<string, string> = {
   perplexity: "Perplexity",
 };
 
-// Subject line + two competitor overlays. Subject is the bronze accent.
+// Subject line + two competitor overlays. Subject is the bronze accent; the
+// competitor hues are picked for legibility against the subject and each other.
 const SUBJECT_COLOR = "#8a6d2f";
-const COMP_COLORS = ["#5b6b4a", "#9aa0a6"];
+const COMP_COLORS = ["#5f7a52", "#7a818c"];
 
 // Source-type → donut/legend color. Falls back to a neutral for unmapped types.
 const TYPE_COLORS: Record<string, string> = {
@@ -268,20 +269,38 @@ export default async function AltDashboardPage({
       {/* Row 3: source types + top sources */}
       {data.sources.length > 0 && (
         <div className="alt-grid alt-grid-sources">
-          <div className="alt-panel">
+          <div className="alt-panel alt-panel-fill">
             <div className="alt-panel-head">
               <span className="alt-panel-title">Source types</span>
               <span className="alt-panel-sub">Citations across active models</span>
             </div>
-            <div className="alt-donut-wrap">
-              <SourceDonut segments={donutSegments} total={totalCitations} />
-              <div className="alt-donut-legend">
+            <div className="alt-srctypes-body">
+              <div className="alt-donut-wrap">
+                <SourceDonut segments={donutSegments} total={totalCitations} />
+                <div className="alt-donut-legend">
+                  {donutSegments.map((s) => {
+                    const p = Math.round((s.value / (totalCitations || 1)) * 100);
+                    return (
+                      <span className="alt-legend-item" key={s.label}>
+                        <i style={{ background: s.color }} />
+                        {s.label}
+                        <b>{s.value}</b>
+                        <span className="alt-legend-pct">{p}%</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="alt-typebar" aria-hidden>
                 {donutSegments.map((s) => (
-                  <span className="alt-legend-item" key={s.label}>
-                    <i style={{ background: s.color }} />
-                    {s.label}
-                    <b>{s.value}</b>
-                  </span>
+                  <span
+                    key={s.label}
+                    className="alt-typebar-seg"
+                    style={{
+                      width: `${(s.value / (totalCitations || 1)) * 100}%`,
+                      background: s.color,
+                    }}
+                  />
                 ))}
               </div>
             </div>

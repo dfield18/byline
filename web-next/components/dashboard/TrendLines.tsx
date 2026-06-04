@@ -4,9 +4,11 @@
  * dashboard's Visibility Trend panel to plot the subject's mention rate against
  * its top competitors over the tracked snapshots.
  *
- * Null values break the line (a gap), so a competitor with no data in a given
- * week doesn't get a misleading interpolated segment.
+ * Lines are smoothed with the same monotone-cubic interpolation as Sparkline
+ * (never overshoots, so a rate curve can't peak above the axis). Null values
+ * break the line (a gap) rather than interpolating across missing weeks.
  */
+import { buildMonoCubicPath } from "@/components/dashboard/Sparkline";
 
 export type TrendSeries = {
   name: string;
@@ -35,7 +37,7 @@ export function TrendLines({
   labels,
   series,
   format,
-  height = 240,
+  height = 290,
 }: {
   labels: string[];
   series: TrendSeries[];
@@ -50,15 +52,17 @@ export function TrendLines({
   const padB = 28;
   const n = labels.length;
 
+  // Values are 0..1 rates. Cap the axis at a clean 25%-multiple ceiling that
+  // never exceeds 100% (no more "115%"), and draw gridlines on the round 25%
+  // marks up to that ceiling.
   const allVals = series.flatMap((s) => s.values.filter((v): v is number => v !== null));
   const rawMax = allVals.length ? Math.max(...allVals) : 1;
-  const yMax = rawMax <= 0 ? 1 : rawMax * 1.15;
+  const yMax = Math.max(0.25, Math.min(1, Math.ceil((rawMax * 1.05) / 0.25) * 0.25));
 
   const x = (i: number) => padL + (n <= 1 ? 0 : (i / (n - 1)) * (W - padL - padR));
   const y = (v: number) => padT + (1 - v / yMax) * (H - padT - padB);
 
-  // 4 horizontal gridlines + y labels.
-  const gridVals = [0, 0.25, 0.5, 0.75, 1].map((f) => f * yMax);
+  const gridVals = [0, 0.25, 0.5, 0.75, 1].filter((v) => v <= yMax + 1e-9);
 
   // x tick indices: first, middle, last (avoid crowding).
   const xTicks = n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
@@ -100,10 +104,10 @@ export function TrendLines({
       {series.map((s) => (
         <g key={s.name}>
           {buildSegments(s.values).map((seg, si) => (
-            <polyline
+            <path
               key={si}
               className={`trend-line${s.emphasis ? " emphasis" : ""}`}
-              points={seg.map((i) => `${x(i)},${y(s.values[i] as number)}`).join(" ")}
+              d={buildMonoCubicPath(seg.map((i) => ({ x: x(i), y: y(s.values[i] as number) })))}
               style={{ stroke: s.color }}
             />
           ))}
