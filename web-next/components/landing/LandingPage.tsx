@@ -305,6 +305,13 @@ export default function LandingPage() {
         </div>
       </div>
 
+      {/* brand thesis — serif pull-quote, lead-in to the stakes */}
+      <section className="thesis">
+        <div className="wrap">
+          <p className="thesis-line">The most influential editor in politics doesn&rsquo;t have a <span className="accent-word">byline</span>.</p>
+        </div>
+      </section>
+
       {/* why now */}
       <section className="block why" id="why">
         <div className="wrap">

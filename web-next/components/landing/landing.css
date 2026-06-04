@@ -320,6 +320,10 @@ h1{
 .strip .wrap{padding:34px 28px;text-align:center}
 .strip .eg{font-size:21px;font-weight:600;letter-spacing:-.02em;color:var(--ink-soft);margin-bottom:18px}
 .strip .eg b{font-style:normal;font-weight:700;color:var(--ink)}
+
+/* ---------- brand thesis pull-quote ---------- */
+.thesis{padding:60px 0 80px;text-align:center}
+.thesis-line{max-width:24ch;margin:0 auto;font-family:var(--serif);font-style:italic;font-weight:500;font-size:clamp(26px,4vw,44px);line-height:1.2;letter-spacing:-.02em;color:var(--ink)}
 .aud{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
 .aud span{font-size:14.5px;color:var(--ink-soft);background:#fff;border:1px solid var(--line-strong);padding:10px 18px;border-radius:10px;line-height:1.3}
 
