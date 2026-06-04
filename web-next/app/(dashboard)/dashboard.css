@@ -734,6 +734,11 @@ body {
 .kpi .delta.flat {
   color: var(--gray-light);
 }
+.kpi .delta.empty {
+  color: var(--gray-light);
+  font-weight: 500;
+  font-style: italic;
+}
 
 .tone-pill {
   font-size: 10.5px;
@@ -1098,18 +1103,24 @@ body {
   color: var(--gray-light);
   font-variant-numeric: tabular-nums;
 }
+/* Name column flexes to absorb available width; the rank/bar/metadata
+   columns stay fixed. The text child ellipsizes cleanly (the .you badge
+   stays visible because the ellipsis lives on .comp-name-text, not here). */
 .comp-name {
-  width: 150px;
-  flex: none;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 13.5px;
   font-weight: 600;
   color: var(--ink-soft);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   display: flex;
   align-items: center;
   gap: 7px;
+}
+.comp-name-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .comp-row.is-subject .comp-name {
   color: var(--accent-bronze-deep);
@@ -1125,12 +1136,12 @@ body {
   padding: 1px 5px;
 }
 .comp-bar {
-  flex: 1;
+  flex: 0 0 100px;
+  width: 100px;
   height: 8px;
   border-radius: 5px;
   background: #eeede6;
   overflow: hidden;
-  min-width: 40px;
 }
 .comp-bar i {
   display: block;
@@ -1162,8 +1173,9 @@ body {
   .comp-aux {
     display: none;
   }
-  .comp-name {
-    width: 110px;
+  .comp-bar {
+    flex-basis: 70px;
+    width: 70px;
   }
 }
 

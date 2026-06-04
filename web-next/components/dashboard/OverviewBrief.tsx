@@ -101,9 +101,36 @@ function kpiFormatter(format: KpiDef["format"]): (v: number | null) => string {
 }
 
 function KpiCard({ def, kpi, unit }: { def: KpiDef; kpi: KpiValue; unit: string }) {
-  const tone = def.format === "score" ? sentimentTone(kpi.value) : null;
+  const hasValue = kpi.value !== null;
+  const tone = hasValue && def.format === "score" ? sentimentTone(kpi.value) : null;
   const deltaText = formatDelta(kpi.delta);
   const dClass = deltaClass(kpi, def.higherBetter);
+
+  // Footer rules:
+  //  - no value at all → muted "Not enough data" (a missing metric never
+  //    shows a meaningless change indicator).
+  //  - value present but no prior snapshot (delta === null) → render an
+  //    invisible spacer so tiles stay aligned, but show no change text.
+  //  - delta === 0 → "No change"; otherwise the arrow + signed delta.
+  let footer: ReactNode;
+  if (!hasValue) {
+    footer = <div className="delta empty">Not enough data</div>;
+  } else if (kpi.delta === null) {
+    footer = (
+      <div className="delta" aria-hidden style={{ visibility: "hidden" }}>
+        —
+      </div>
+    );
+  } else if (deltaText === null) {
+    footer = <div className="delta flat">No change</div>;
+  } else {
+    footer = (
+      <div className={`delta ${dClass}`}>
+        <span aria-hidden>{trendArrow(kpi.trend)}</span>
+        {deltaText} {unit}
+      </div>
+    );
+  }
 
   return (
     <div className="kpi">
@@ -112,16 +139,7 @@ function KpiCard({ def, kpi, unit }: { def: KpiDef; kpi: KpiValue; unit: string 
         {def.format === "pct" ? formatPct(kpi.value) : formatScore(kpi.value)}
         {tone && <span className={`tone-pill ${tone.cls}`}>{tone.word}</span>}
       </div>
-      <div className={`delta ${dClass}`}>
-        {deltaText ? (
-          <>
-            <span aria-hidden>{trendArrow(kpi.trend)}</span>
-            {deltaText} {unit}
-          </>
-        ) : (
-          "No change"
-        )}
-      </div>
+      {footer}
     </div>
   );
 }
@@ -368,8 +386,8 @@ export function OverviewBrief({
                     key={c.name}
                   >
                     <span className="comp-rank">{i + 1}</span>
-                    <span className="comp-name">
-                      {c.name}
+                    <span className="comp-name" title={c.name}>
+                      <span className="comp-name-text">{c.name}</span>
                       {c.is_subject && <span className="you">You</span>}
                     </span>
                     <span className="comp-bar">

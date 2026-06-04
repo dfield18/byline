@@ -2133,6 +2133,7 @@ def _compute_bottom_line(
 
 def _read_competitive_snapshot(
     cur, refresh_run_id: int, subject_name: str,
+    setup_inputs: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the Competitive Snapshot table: the focal subject + the
     top 4 competitor entities aggregated across all unnamed-layer
@@ -2185,6 +2186,37 @@ def _read_competitive_snapshot(
     subject_ranks = [r[1] for r in rows if r[0] and r[1] is not None]
     subject_first = sum(1 for r in rows if r[0] and r[1] == 1)
 
+    # Names/titles that resolve to the subject. The extractor sometimes
+    # surfaces a subject's own role/title ("Secretary of Transportation") as
+    # a separate entity; without this the subject would appear twice (once as
+    # itself, once as its own "competitor"). Match the subject name AND its
+    # known title from setup_inputs, case-insensitively and substring-aware.
+    import re as _re
+
+    def _norm(s: str) -> str:
+        return _re.sub(r"[^a-z0-9 ]", "", _re.sub(r"\s+", " ", (s or "").strip().lower())).strip()
+
+    subject_aliases: set[str] = set()
+    if _norm(subject_name):
+        subject_aliases.add(_norm(subject_name))
+    role = _norm((setup_inputs or {}).get("role", "")) if setup_inputs else ""
+    if role:
+        subject_aliases.add(role)
+
+    def _is_subject_entity(name: str) -> bool:
+        n = _norm(name)
+        if not n:
+            return False
+        for alias in subject_aliases:
+            if n == alias:
+                return True
+            # Title overlap (e.g. "secretary of transportation" within
+            # "us secretary of transportation"). Length-guarded so short
+            # generic tokens can't trigger a false match.
+            if len(n) >= 6 and (n in alias or alias in n):
+                return True
+        return False
+
     # Competitors: count appearances and collect ranks per name
     competitors: dict[str, dict[str, Any]] = {}
     for _, _, comps in rows:
@@ -2203,6 +2235,9 @@ def _read_competitive_snapshot(
                 continue
             name = c.get("name")
             if not name or not isinstance(name, str):
+                continue
+            # Drop the subject itself / its own title — it owns the focal row.
+            if _is_subject_entity(name):
                 continue
             if name in seen_in_response:
                 continue
@@ -3030,7 +3065,7 @@ def get_subject_overview(
 
         # ── Competitive snapshot (Phase 4 — single-subject path) ────
         competitive = _read_competitive_snapshot(
-            cur, latest_refresh_id, sname,
+            cur, latest_refresh_id, sname, setup_inputs,
         )
 
         # ── Snapshot diff (Visibility "what changed" banner) ────
