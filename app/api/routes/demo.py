@@ -63,7 +63,16 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+_LOOPBACK = {"127.0.0.1", "::1", "localhost", "unknown"}
+
+
 def _enforce_limits(ip: str) -> None:
+    # Local dev (browser → Next proxy → backend all on loopback) is exempt so
+    # the demo can be exercised freely. In production the visitor's real IP
+    # arrives via X-Forwarded-For, so the limits apply there.
+    if ip in _LOOPBACK:
+        return
+
     now = time.monotonic()
 
     # Global daily cap (cost ceiling).
