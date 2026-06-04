@@ -899,3 +899,32 @@ export const getPromptResponses = (
   apiGet<{ responses: PromptResponse[] }>(
     `/api/subjects/${subjectId}/prompts/${promptId}/responses`,
   );
+
+// Prompt preview — run a prompt once against the selected models and get
+// per-model results, scored with the same scorer as scheduled runs.
+// Persists nothing. `subject_mentioned` / `mention_rank` come straight from
+// the mention detector (no derived visibility number).
+export type PromptPreviewModelResult = {
+  model: string;
+  response: string | null;
+  sentiment: number | null;
+  subject_mentioned: boolean | null;
+  mention_rank: number | null;
+  grounded: boolean;
+  error: string | null;
+};
+
+export type PromptPreviewResult = {
+  results: PromptPreviewModelResult[];
+};
+
+export const previewPrompt = (
+  text: string,
+  models: string[],
+  subject: string,
+) =>
+  apiPost<PromptPreviewResult>("/api/prompts/preview", {
+    text,
+    models,
+    subject,
+  });

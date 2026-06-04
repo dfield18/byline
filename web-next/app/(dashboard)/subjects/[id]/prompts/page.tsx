@@ -7,6 +7,7 @@ import {
 } from "@/lib/api";
 import { RefreshButton } from "../refresh-button";
 import { PromptCard } from "./PromptCard";
+import { PromptPreviewPanel } from "./PromptPreviewPanel";
 
 /**
  * Prompts spoke — the tracked prompts and how each AI assistant answered.
@@ -88,6 +89,8 @@ export default async function PromptsPage({
         </div>
         <RefreshButton subjectId={subjectId} />
       </div>
+
+      <PromptPreviewPanel subject={data.subject_name} />
 
       {prompts.length === 0 ? (
         <div className="deferred-note">
