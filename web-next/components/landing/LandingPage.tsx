@@ -64,9 +64,11 @@ export default function LandingPage() {
     const cards = [...root.querySelectorAll<HTMLElement>("#lc-cards .lc-card")];
     const resumeBtn = root.querySelector<HTMLElement>("#lc-resume");
     const heroInput = root.querySelector<HTMLInputElement>("#hero-input");
-    const askBtn = root.querySelector<HTMLElement>("#lc-ask-btn");
+    const askBtn = root.querySelector<HTMLButtonElement>("#lc-ask-btn");
     const consoleEl = root.querySelector<HTMLElement>("#console");
     const nextEl = root.querySelector<HTMLElement>("#lc-next");
+    const askLbl = root.querySelector<HTMLElement>(".askrow .lbl");
+    const askLblDefault = askLbl?.textContent ?? "";
     let runId = 0;
 
     if (!topicEl || !resumeBtn || !heroInput) return;
@@ -79,13 +81,34 @@ export default function LandingPage() {
 
     function resetCards() {
       cards.forEach((c) => {
-        c.classList.remove("active", "done");
+        c.classList.remove("active", "done", "muted");
         const t = c.querySelector<HTMLElement>(".lc-text");
         if (t) t.textContent = "";
         const s = c.querySelector<HTMLElement>(".lc-sent");
         if (s) { s.className = "lc-sent"; s.textContent = ""; }
       });
       if (nextEl) nextEl.classList.remove("show");
+    }
+
+    // ----- real-run helpers (the user-submitted path hits the live API) -----
+    // Card order in the markup: ChatGPT, Claude, Gemini, Perplexity.
+    const CARD_INDEX: Record<string, number> = { chatgpt: 0, claude: 1, gemini: 2, perplexity: 3 };
+
+    function sentChip(v: number | null): { cls: string; label: string } | null {
+      if (v === null || v === undefined) return null;
+      if (v > 0.1) return { cls: "pos", label: "SUPPORTIVE" };
+      if (v < -0.1) return { cls: "neg", label: "CRITICAL" };
+      return { cls: "neu", label: "NEUTRAL" };
+    }
+
+    // First sentence of the real response, capped — the card is a single line.
+    function excerpt(text: string): string {
+      const clean = (text || "").replace(/\s+/g, " ").trim();
+      if (!clean) return "";
+      const m = clean.match(/^.*?[.!?](\s|$)/);
+      let s = m ? m[0].trim() : clean;
+      if (s.length > 140) s = s.slice(0, 137).trimEnd() + "…";
+      return s;
     }
 
     async function playTopic(t: { q: string; m: { sent: string; label: string; text: string }[] }, id: number) {
@@ -132,19 +155,110 @@ export default function LandingPage() {
       }
     }
 
-    function askOwn() {
+    function setLbl(text: string, isErr: boolean) {
+      if (!askLbl) return;
+      askLbl.textContent = text;
+      askLbl.classList.toggle("err", isErr);
+    }
+
+    // Real run: type the topic, put every card into a loading state, then call
+    // the public demo endpoint and fill each card with the model's real
+    // sentiment + a one-line excerpt of its actual answer. Models without a
+    // key (no result returned) collapse to a muted "Live soon" card.
+    async function askOwn() {
       const raw = (heroInput!.value || "").trim();
       if (!raw) return;
-      const safe = raw.replace(/[<>]/g, "");
+      const safe = raw.replace(/[<>]/g, "").slice(0, 80);
       const id = ++runId; // cancels the auto loop
       autoActive = false;
-      const t = { q: safe, m: [
-        { sent: "neu", label: "NEUTRAL", text: "Leads with background and current relevance." },
-        { sent: "neu", label: "NEUTRAL", text: "Weighs the main points of contention even-handedly." },
-        { sent: "neu", label: "NEUTRAL", text: "Notes where opinion is most divided." },
-        { sent: "neu", label: "NEUTRAL", text: "Aggregates current reporting with citations." },
-      ] };
-      playTopic(t, id).then(() => { if (id === runId) resumeBtn!.classList.add("show"); });
+      if (askBtn) askBtn.disabled = true;
+      resumeBtn!.classList.remove("show");
+
+      resetCards();
+      const typed = await typeOut(topicEl!, safe, 46, id);
+      if (!typed || id !== runId) { if (askBtn) askBtn.disabled = false; return; }
+
+      // every card → loading
+      cards.forEach((c) => {
+        c.classList.add("active");
+        c.classList.remove("done", "muted");
+        const t = c.querySelector<HTMLElement>(".lc-text");
+        if (t) t.innerHTML = '<span class="lc-dots"><i></i><i></i><i></i></span>';
+        const s = c.querySelector<HTMLElement>(".lc-sent");
+        if (s) { s.className = "lc-sent"; s.textContent = ""; }
+      });
+      // A ticking elapsed counter so the wait reads as "working", not frozen —
+      // grounded model calls take ~10-15s and the cards otherwise just sit on
+      // dots. Cleared on every exit path below.
+      let elapsed = 0;
+      setLbl("Reading live results across models… 0s", false);
+      const ticker = window.setInterval(() => {
+        if (id !== runId) return;
+        elapsed += 1;
+        setLbl(`Reading live results across models… ${elapsed}s`, false);
+      }, 1000);
+
+      type DemoResult = {
+        model: string; response: string | null; sentiment: number | null;
+        subject_mentioned: boolean | null; mention_rank: number | null;
+        grounded: boolean; error: string | null;
+      };
+      let results: DemoResult[];
+      try {
+        const res = await fetch("/api/demo/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic: safe }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(payload?.error || "The live demo is unavailable right now.");
+        results = (payload?.results ?? []) as DemoResult[];
+      } catch (err) {
+        window.clearInterval(ticker);
+        if (id !== runId) return;
+        resetCards();
+        setLbl(err instanceof Error ? err.message : String(err), true);
+        if (askBtn) askBtn.disabled = false;
+        resumeBtn!.classList.add("show");
+        return;
+      }
+      window.clearInterval(ticker);
+      if (id !== runId) { if (askBtn) askBtn.disabled = false; return; }
+
+      setLbl(askLblDefault, false);
+      const byModel: Record<string, DemoResult> = {};
+      for (const r of results) byModel[r.model] = r;
+
+      for (let i = 0; i < cards.length; i++) {
+        if (id !== runId) return;
+        const slug = Object.keys(CARD_INDEX).find((k) => CARD_INDEX[k] === i);
+        const r = slug ? byModel[slug] : undefined;
+        const card = cards[i];
+        const textEl = card.querySelector<HTMLElement>(".lc-text")!;
+        const sChip = card.querySelector<HTMLElement>(".lc-sent")!;
+
+        if (!r || r.error || !r.response) {
+          // model not part of this demo (no key yet) — muted placeholder
+          card.classList.remove("active");
+          card.classList.add("done", "muted");
+          textEl.textContent = "Live soon";
+          sChip.className = "lc-sent"; sChip.textContent = "";
+          continue;
+        }
+
+        card.classList.add("active");
+        card.classList.remove("muted");
+        const ok = await typeOut(textEl, excerpt(r.response), 11, id);
+        if (!ok || id !== runId) return;
+        const chip = sentChip(r.sentiment);
+        if (chip) { sChip.className = "lc-sent show " + chip.cls; sChip.textContent = chip.label; }
+        card.classList.remove("active");
+        card.classList.add("done");
+        await sleep(120);
+      }
+
+      if (askBtn) askBtn.disabled = false;
+      if (id === runId) resumeBtn!.classList.add("show");
     }
 
     function resumeAuto() { autoLoop(); }

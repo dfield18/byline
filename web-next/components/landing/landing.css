@@ -269,6 +269,9 @@ h1{
 .lc-sent.neu{background:var(--neu-bg);color:var(--neu)}
 .lc-sent.neg{background:var(--neg-bg);color:var(--neg)}
 .lc-sent.mix{background:#eceaf3;color:#5d5a7c}
+/* models with no key yet — dim "Live soon" card during a real run */
+.lc-card.done.muted{opacity:.5}
+.lc-card.done.muted .lc-text{font-style:italic;color:var(--gray-light)}
 
 /* inter-topic loader — fades in during the pause between topics so the
    cycle reads as "moving to the next topic". Always in normal flow (its
@@ -285,6 +288,7 @@ h1{
 .lc-foot{padding:20px 28px 22px;border-top:1px solid var(--line);margin-top:20px;background:#fcfcfb}
 .lc-foot .askrow{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:11px}
 .lc-foot .askrow .lbl{font-size:12.5px;color:var(--gray);font-weight:500;letter-spacing:.01em}
+.lc-foot .askrow .lbl.err{color:var(--neg);font-weight:600}
 .resume{display:none;align-items:center;gap:5px;background:none;border:none;color:var(--ink);font-weight:600;font-size:12.5px;cursor:pointer}
 .resume.show{display:inline-flex}
 .resume:hover{opacity:.7}

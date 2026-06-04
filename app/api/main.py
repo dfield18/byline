@@ -43,7 +43,7 @@ load_dotenv()
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from app.api.routes import categories, jobs, prompts, refreshes, responses, subjects  # noqa: E402
+from app.api.routes import categories, demo, jobs, prompts, refreshes, responses, subjects  # noqa: E402
 
 
 app = FastAPI(
@@ -94,3 +94,4 @@ app.include_router(responses.router)
 app.include_router(categories.router)
 app.include_router(jobs.router)
 app.include_router(prompts.router)
+app.include_router(demo.router)
