@@ -285,6 +285,22 @@ h1{
 .lc-next .lc-dots{height:16px}
 .lc-next-lbl{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-light)}
 
+/* live-result mode — the console is showing a visitor's own query, not the
+   ambient demo. Tint the header so the transition is unmistakable. */
+.console.live-result .lc-head{background:var(--cream,#faf7f0)}
+.console.live-result .lc-head .dom{color:var(--ink);font-weight:700}
+.console.live-result .lc-head .lc-mark{background:var(--accent-bronze);color:#fff}
+
+/* "See the full analysis →" — hidden until a real result lands */
+.lc-cta{
+  display:none;margin:12px 28px 0;padding:11px 16px;border-radius:9px;
+  background:var(--accent-bronze);color:#fff;font-size:13.5px;font-weight:600;
+  text-align:center;text-decoration:none;letter-spacing:-.01em;
+  transition:background .15s ease;
+}
+.lc-cta:hover{background:var(--accent-bronze-deep)}
+.lc-cta.show{display:block}
+
 .lc-foot{padding:20px 28px 22px;border-top:1px solid var(--line);margin-top:20px;background:#fcfcfb}
 .lc-foot .askrow{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:11px}
 .lc-foot .askrow .lbl{font-size:12.5px;color:var(--gray);font-weight:500;letter-spacing:.01em}

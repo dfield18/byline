@@ -7,14 +7,19 @@
 // in-page header link.
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 
-// `/api/demo/preview` is the public landing hero demo — it proxies to the
-// backend's own unauthenticated, rate-limited demo endpoint, so it must NOT
-// require a Clerk session (the landing visitor has none).
+// Public, session-less surfaces:
+//  - `/api/demo/preview`  — the landing hero's lightweight live demo.
+//  - `/api/try` + `/try/*` — the public "try it" flow: a visitor's topic spins
+//    up a throwaway subject and renders its real Overview, no login.
+// All proxy to the backend's own unauthenticated, rate-limited endpoints.
 const isPublicRoute = createRouteMatcher([
   '/',
   '/privacy',
   '/terms',
   '/api/demo/preview',
+  '/api/try',
+  '/api/try/(.*)',
+  '/try/(.*)',
 ])
 
 // Dev-only auth bypass. Set BYLINE_AUTH=disabled when running

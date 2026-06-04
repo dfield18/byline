@@ -69,6 +69,10 @@ export default function LandingPage() {
     const nextEl = root.querySelector<HTMLElement>("#lc-next");
     const askLbl = root.querySelector<HTMLElement>(".askrow .lbl");
     const askLblDefault = askLbl?.textContent ?? "";
+    const domEl = root.querySelector<HTMLElement>(".lc-head .dom");
+    const domDefault = domEl?.textContent ?? "Cross-model readout";
+    const updatedEl = root.querySelector<HTMLElement>(".lc-updated");
+    const ctaEl = root.querySelector<HTMLElement>("#lc-cta");
     let runId = 0;
 
     if (!topicEl || !resumeBtn || !heroInput) return;
@@ -90,26 +94,6 @@ export default function LandingPage() {
       if (nextEl) nextEl.classList.remove("show");
     }
 
-    // ----- real-run helpers (the user-submitted path hits the live API) -----
-    // Card order in the markup: ChatGPT, Claude, Gemini, Perplexity.
-    const CARD_INDEX: Record<string, number> = { chatgpt: 0, claude: 1, gemini: 2, perplexity: 3 };
-
-    function sentChip(v: number | null): { cls: string; label: string } | null {
-      if (v === null || v === undefined) return null;
-      if (v > 0.1) return { cls: "pos", label: "SUPPORTIVE" };
-      if (v < -0.1) return { cls: "neg", label: "CRITICAL" };
-      return { cls: "neu", label: "NEUTRAL" };
-    }
-
-    // First sentence of the real response, capped — the card is a single line.
-    function excerpt(text: string): string {
-      const clean = (text || "").replace(/\s+/g, " ").trim();
-      if (!clean) return "";
-      const m = clean.match(/^.*?[.!?](\s|$)/);
-      let s = m ? m[0].trim() : clean;
-      if (s.length > 140) s = s.slice(0, 137).trimEnd() + "…";
-      return s;
-    }
 
     async function playTopic(t: { q: string; m: { sent: string; label: string; text: string }[] }, id: number) {
       resetCards();
@@ -139,6 +123,7 @@ export default function LandingPage() {
       const id = ++runId;
       autoActive = true;
       resumeBtn!.classList.remove("show");
+      setResultMode(null); // back to ambient chrome
       heroInput!.value = "";
       let i = 0;
       while (id === runId) {
@@ -161,24 +146,43 @@ export default function LandingPage() {
       askLbl.classList.toggle("err", isErr);
     }
 
-    // Real run: type the topic, put every card into a loading state, then call
-    // the public demo endpoint and fill each card with the model's real
-    // sentiment + a one-line excerpt of its actual answer. Models without a
-    // key (no result returned) collapse to a muted "Live soon" card.
+    const updatedDefault = updatedEl?.innerHTML ?? "";
+
+    // Flip the console between the ambient demo and a visitor's live result.
+    // Passing a topic badges the header ("Live results for …") so it's
+    // unmistakably THEIR answer, not the looping demo; passing null restores
+    // the ambient chrome.
+    function setResultMode(topic: string | null) {
+      if (topic) {
+        if (domEl) domEl.textContent = `Live results for “${topic}”`;
+        if (updatedEl) updatedEl.innerHTML = '<span class="lc-updated-dot" aria-hidden></span>Just now';
+        consoleEl?.classList.add("live-result");
+      } else {
+        if (domEl) domEl.textContent = domDefault;
+        if (updatedEl) updatedEl.innerHTML = updatedDefault;
+        consoleEl?.classList.remove("live-result");
+        ctaEl?.classList.remove("show");
+      }
+    }
+
+    // On submit, spin up a real "try it" run and navigate to its live Overview
+    // dashboard. The dashboard's building state takes over from there — this
+    // POST just creates/reuses the subject (fast) and hands off via redirect.
     async function askOwn() {
       const raw = (heroInput!.value || "").trim();
       if (!raw) return;
       const safe = raw.replace(/[<>]/g, "").slice(0, 80);
       const id = ++runId; // cancels the auto loop
       autoActive = false;
-      if (askBtn) askBtn.disabled = true;
+      if (askBtn) { askBtn.disabled = true; askBtn.textContent = "Starting…"; }
       resumeBtn!.classList.remove("show");
+      ctaEl?.classList.remove("show");
+      setResultMode(safe); // badge the console immediately — clear "it happened"
 
       resetCards();
-      const typed = await typeOut(topicEl!, safe, 46, id);
-      if (!typed || id !== runId) { if (askBtn) askBtn.disabled = false; return; }
+      await typeOut(topicEl!, safe, 46, id);
 
-      // every card → loading
+      // cards → loading while we hand off
       cards.forEach((c) => {
         c.classList.add("active");
         c.classList.remove("done", "muted");
@@ -187,78 +191,24 @@ export default function LandingPage() {
         const s = c.querySelector<HTMLElement>(".lc-sent");
         if (s) { s.className = "lc-sent"; s.textContent = ""; }
       });
-      // A ticking elapsed counter so the wait reads as "working", not frozen —
-      // grounded model calls take ~10-15s and the cards otherwise just sit on
-      // dots. Cleared on every exit path below.
-      let elapsed = 0;
-      setLbl("Reading live results across models… 0s", false);
-      const ticker = window.setInterval(() => {
-        if (id !== runId) return;
-        elapsed += 1;
-        setLbl(`Reading live results across models… ${elapsed}s`, false);
-      }, 1000);
+      setLbl("Building your live narrative brief — one moment…", false);
 
-      type DemoResult = {
-        model: string; response: string | null; sentiment: number | null;
-        subject_mentioned: boolean | null; mention_rank: number | null;
-        grounded: boolean; error: string | null;
-      };
-      let results: DemoResult[];
       try {
-        const res = await fetch("/api/demo/preview", {
+        const res = await fetch("/api/try", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ topic: safe }),
         });
         const payload = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(payload?.error || "The live demo is unavailable right now.");
-        results = (payload?.results ?? []) as DemoResult[];
-      } catch (err) {
-        window.clearInterval(ticker);
-        if (id !== runId) return;
-        resetCards();
-        setLbl(err instanceof Error ? err.message : String(err), true);
-        if (askBtn) askBtn.disabled = false;
-        resumeBtn!.classList.add("show");
-        return;
-      }
-      window.clearInterval(ticker);
-      if (id !== runId) { if (askBtn) askBtn.disabled = false; return; }
-
-      setLbl(askLblDefault, false);
-      const byModel: Record<string, DemoResult> = {};
-      for (const r of results) byModel[r.model] = r;
-
-      for (let i = 0; i < cards.length; i++) {
-        if (id !== runId) return;
-        const slug = Object.keys(CARD_INDEX).find((k) => CARD_INDEX[k] === i);
-        const r = slug ? byModel[slug] : undefined;
-        const card = cards[i];
-        const textEl = card.querySelector<HTMLElement>(".lc-text")!;
-        const sChip = card.querySelector<HTMLElement>(".lc-sent")!;
-
-        if (!r || r.error || !r.response) {
-          // model not part of this demo (no key yet) — muted placeholder
-          card.classList.remove("active");
-          card.classList.add("done", "muted");
-          textEl.textContent = "Live soon";
-          sChip.className = "lc-sent"; sChip.textContent = "";
-          continue;
+        if (!res.ok || !payload?.subject_id) {
+          throw new Error(payload?.error || "Couldn't start the live demo.");
         }
-
-        card.classList.add("active");
-        card.classList.remove("muted");
-        const ok = await typeOut(textEl, excerpt(r.response), 11, id);
-        if (!ok || id !== runId) return;
-        const chip = sentChip(r.sentiment);
-        if (chip) { sChip.className = "lc-sent show " + chip.cls; sChip.textContent = chip.label; }
-        card.classList.remove("active");
-        card.classList.add("done");
-        await sleep(120);
+        window.location.assign(`/try/${payload.subject_id}`);
+      } catch (err) {
+        setLbl(err instanceof Error ? err.message : String(err), true);
+        if (askBtn) { askBtn.disabled = false; askBtn.textContent = "See the narrative"; }
+        resumeBtn!.classList.add("show");
       }
-
-      if (askBtn) askBtn.disabled = false;
-      if (id === runId) resumeBtn!.classList.add("show");
     }
 
     function resumeAuto() { autoLoop(); }
@@ -382,6 +332,9 @@ export default function LandingPage() {
               <span className="lc-next-lbl">Up next</span>
               <span className="lc-dots"><i></i><i></i><i></i></span>
             </div>
+
+            {/* shown after a real user result — routes to sign-up / app */}
+            <a className="lc-cta" id="lc-cta" href="#cta">See the full analysis →</a>
 
             <div className="lc-foot">
               <div className="askrow">
