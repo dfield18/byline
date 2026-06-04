@@ -1,11 +1,15 @@
 from app.providers.base import Provider, ProviderResponse
 from app.providers.openai_provider import OpenAIProvider
 from app.providers.gemini_provider import GeminiProvider
+from app.providers.anthropic_provider import AnthropicProvider
+from app.providers.perplexity_provider import PerplexityProvider
 
 
 PROVIDERS: dict[str, type[Provider]] = {
     "openai": OpenAIProvider,
     "google": GeminiProvider,
+    "anthropic": AnthropicProvider,
+    "perplexity": PerplexityProvider,
 }
 
 

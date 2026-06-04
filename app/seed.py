@@ -45,9 +45,19 @@ CATEGORIES: list[tuple[str, str, str]] = [
 
 
 # Update these identifiers as new stable models ship.
-MODELS: list[tuple[str, str, str, str, str | None]] = [
-    ("chatgpt", "openai", "ChatGPT (GPT-5 Mini)", "gpt-5-mini", None),
-    ("gemini", "google", "Gemini 2.5 Flash", "gemini-2.5-flash", None),
+# (slug, provider, display_name, model_identifier, notes, active)
+MODELS: list[tuple[str, str, str, str, str | None, bool]] = [
+    ("chatgpt", "openai", "ChatGPT (GPT-5 Mini)", "gpt-5-mini", None, True),
+    ("gemini", "google", "Gemini 2.5 Flash", "gemini-2.5-flash", None, True),
+    # New providers for the four-model preview. Seeded active=FALSE so the
+    # scheduler (which queries WHERE active=TRUE) skips them — otherwise every
+    # scheduled refresh would query these keyless providers and go "partial".
+    # Preview resolves them regardless of `active`, so the preview endpoint can
+    # offer them now (they return a clean per-model error until their keys are
+    # set). Flip active=TRUE once ANTHROPIC_API_KEY / PERPLEXITY_API_KEY are set
+    # and you want them in scheduled refreshes (re-seeding won't reset that).
+    ("claude", "anthropic", "Claude Sonnet", "claude-sonnet-4-5", "verify model id; needs ANTHROPIC_API_KEY", False),
+    ("perplexity", "perplexity", "Perplexity Sonar", "sonar", "needs PERPLEXITY_API_KEY", False),
 ]
 
 
@@ -70,18 +80,18 @@ def seed_categories() -> int:
 
 def seed_models() -> int:
     with get_cursor() as cur:
-        for slug, provider, display_name, identifier, notes in MODELS:
+        for slug, provider, display_name, identifier, notes, active in MODELS:
             cur.execute(
                 """
-                INSERT INTO models (slug, provider, display_name, model_identifier, notes)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO models (slug, provider, display_name, model_identifier, notes, active)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (slug) DO UPDATE SET
                     provider = EXCLUDED.provider,
                     display_name = EXCLUDED.display_name,
                     model_identifier = EXCLUDED.model_identifier,
                     notes = EXCLUDED.notes
                 """,
-                (slug, provider, display_name, identifier, notes),
+                (slug, provider, display_name, identifier, notes, active),
             )
         cur.execute("SELECT COUNT(*) FROM models")
         return cur.fetchone()[0]
