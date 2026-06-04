@@ -35,18 +35,39 @@ export function TryBuilding({
   useEffect(() => {
     let alive = true;
     const t0 = Date.now();
+    // Hard cutoff so a stuck/queued job (e.g. worker down) can't spin forever.
+    const MAX_SECONDS = 360;
+    const stop = (cleanup: () => void) => {
+      alive = false;
+      cleanup();
+    };
     const tick = window.setInterval(() => {
-      if (alive) setElapsed(Math.floor((Date.now() - t0) / 1000));
+      if (!alive) return;
+      const e = Math.floor((Date.now() - t0) / 1000);
+      setElapsed(e);
+      if (e >= MAX_SECONDS) {
+        setFailed(
+          "This is taking longer than expected. The brief may still be building — refresh in a minute, or try another topic.",
+        );
+        window.clearInterval(tick);
+        window.clearInterval(poll);
+        alive = false;
+      }
     }, 1000);
     const poll = window.setInterval(async () => {
       try {
         const res = await fetch(`/api/try/${subjectId}/status`, { cache: "no-store" });
         const j = await res.json();
         if (!alive) return;
-        if (j.status === "succeeded") {
+        // Any terminal status → stop polling and let the server component
+        // re-render (it shows the brief if data landed, or a failure state).
+        // Stopping first prevents a refresh loop if the run came back partial.
+        if (j.status === "succeeded" || j.status === "failed" || j.status === "none") {
+          stop(() => {
+            window.clearInterval(tick);
+            window.clearInterval(poll);
+          });
           router.refresh();
-        } else if (j.status === "failed") {
-          setFailed(j.error || "The analysis run didn't complete.");
         }
       } catch {
         /* transient — keep polling */
@@ -86,8 +107,9 @@ export function TryBuilding({
       </p>
 
       <div className="try-steps">
-        {STEPS.map((s) => {
-          const done = elapsed >= STEPS[STEPS.indexOf(s) + 1]?.at;
+        {STEPS.map((s, i) => {
+          const next = STEPS[i + 1];
+          const done = next ? elapsed >= next.at : false;
           const active = elapsed >= s.at && !done;
           return (
             <div

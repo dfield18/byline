@@ -88,7 +88,9 @@ def test_cache_hit_does_not_respend(client, monkeypatch):
     res = client.post("/api/try", json={"topic": "Cached Person"})
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body == {"subject_id": 42, "job_id": 7, "reused": True, "status": "ready"}
+    # job_id is None on a cache hit — the overview is what matters, and the
+    # latest job may be a later stale/failed one whose status would mislead.
+    assert body == {"subject_id": 42, "job_id": None, "reused": True, "status": "ready"}
     # The cost-critical assertion: NO new pipeline run.
     assert client._calls["enqueued"] == []
     assert client._calls["created"] == []
@@ -121,6 +123,38 @@ def test_per_ip_rate_limit_on_new_runs(client):
     for _ in range(try_._PER_IP_LIMIT):
         assert client.post("/api/try", json={"topic": "Fresh Topic Xyz"}, headers=headers).status_code == 200
     assert client.post("/api/try", json={"topic": "Fresh Topic Xyz"}, headers=headers).status_code == 429
+
+
+def test_xforwarded_loopback_cannot_bypass_limit(client):
+    # A remote client forging X-Forwarded-For: 127.0.0.1 must NOT be exempted —
+    # the dev exemption keys on the real socket peer, not the spoofable header.
+    headers = {"X-Forwarded-For": "127.0.0.1"}
+    for _ in range(try_._PER_IP_LIMIT):
+        assert client.post("/api/try", json={"topic": "Spoof Topic"}, headers=headers).status_code == 200
+    assert client.post("/api/try", json={"topic": "Spoof Topic"}, headers=headers).status_code == 429
+
+
+def test_create_race_does_not_double_enqueue(client, monkeypatch):
+    # Two requests race on the same new topic: the loser's create_subject raises
+    # ValueError; it must defer to the winner's in-flight job, not enqueue again.
+    # _find_try_subject: None at the top (so we take the create path), then the
+    # winner's id inside the except branch.
+    seen = {"n": 0}
+
+    def find(name):
+        seen["n"] += 1
+        return None if seen["n"] == 1 else 77
+
+    def boom(*, org_id, category_slug, name, setup_inputs):
+        raise ValueError("duplicate")
+
+    monkeypatch.setattr(try_, "_find_try_subject", find)
+    monkeypatch.setattr(try_, "create_subject", boom)
+    monkeypatch.setattr(try_, "_latest_refresh_job", lambda sid: {"id": 5, "status": "queued", "completed_at": None, "fresh": False})
+
+    body = client.post("/api/try", json={"topic": "Racy Topic"}).json()
+    assert body["subject_id"] == 77 and body["status"] == "building" and body["reused"] is True
+    assert client._calls["enqueued"] == []  # no redundant second pipeline run
 
 
 def test_global_daily_cap(client, monkeypatch):

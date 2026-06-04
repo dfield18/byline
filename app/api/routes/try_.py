@@ -56,7 +56,10 @@ _VALID_CATEGORIES = {"person", "organization", "issue", "policy", "event"}
 _PER_IP_LIMIT = 3
 _PER_IP_WINDOW_S = 3600.0  # 1 hour
 _GLOBAL_DAILY_CAP = int(os.environ.get("TRY_DAILY_CAP", "20"))
-_LOOPBACK = {"127.0.0.1", "::1", "localhost", "unknown"}
+# Only the REAL socket peer (un-spoofable) is trusted for the dev exemption —
+# never the X-Forwarded-For header, which a remote client can forge to claim
+# loopback and bypass the cap entirely.
+_DEV_LOOPBACK = {"127.0.0.1", "::1"}
 
 _ip_state: dict[str, deque] = defaultdict(deque)
 _global_state = {"day": -1, "count": 0}
@@ -77,18 +80,30 @@ class TryResponse(BaseModel):
 
 
 def _client_ip(request: Request) -> str:
+    # Rate-limit KEY (best-effort): behind a trusted proxy the client is the
+    # first X-Forwarded-For hop; otherwise the socket peer.
     fwd = request.headers.get("x-forwarded-for")
     if fwd:
         return fwd.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 
-def _enforce_limits(ip: str) -> None:
-    """Bound spend on NEW pipeline runs. Loopback (local dev) is exempt."""
-    if ip in _LOOPBACK:
+def _is_dev_exempt(request: Request) -> bool:
+    """Local dev only — keyed on the real socket peer + an explicit dev flag,
+    so a remote client can't forge X-Forwarded-For to dodge the cap."""
+    if os.environ.get("BYLINE_AUTH") != "disabled":
+        return False
+    peer = request.client.host if request.client else ""
+    return peer in _DEV_LOOPBACK
+
+
+def _enforce_limits(request: Request) -> None:
+    """Bound spend on NEW pipeline runs. Local dev (real loopback peer) exempt."""
+    if _is_dev_exempt(request):
         return
 
     now = time.monotonic()
+    ip = _client_ip(request)
     day = int(time.time() // 86400)
     if _global_state["day"] != day:
         _global_state["day"] = day
@@ -196,13 +211,18 @@ def _update_setup_inputs(subject_id: int, setup_inputs: dict) -> None:
 
 
 def _load_setup_def(category: str) -> list[dict]:
-    """The category's setup_inputs schema (key/label/description/required)."""
+    """The category's setup_inputs schema (key/label/description/required).
+    Degrades to [] on a missing or malformed YAML file rather than 500."""
     path = _PROMPTS_DIR / f"{category}.yaml"
     if not path.exists():
         return []
-    with path.open() as f:
-        data = yaml.safe_load(f) or {}
-    return data.get("setup_inputs", [])
+    try:
+        with path.open() as f:
+            data = yaml.safe_load(f) or {}
+    except yaml.YAMLError:
+        return []
+    inputs = data.get("setup_inputs", [])
+    return inputs if isinstance(inputs, list) else []
 
 
 async def _infer_setup_inputs(topic: str, category: str) -> dict:
@@ -243,12 +263,12 @@ async def _infer_setup_inputs(topic: str, category: str) -> dict:
             prompt, {"temperature": 0.2}, enable_grounding=False, reasoning_enabled=False
         )
         if resp.success and resp.text:
-            text = resp.text.strip()
-            if text.startswith("```"):
-                text = text.split("```", 2)[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            parsed = json.loads(text.strip())
+            # Robust extraction: pull the first {...} object out of the reply,
+            # tolerating markdown fences or stray prose around it.
+            import re as _re
+            m = _re.search(r"\{.*\}", resp.text, _re.DOTALL)
+            if m:
+                parsed = json.loads(m.group(0))
     except Exception:
         parsed = {}
 
@@ -302,8 +322,10 @@ async def create_try(req: TryRequest, request: Request) -> TryResponse:
             return TryResponse(subject_id=existing, job_id=job["id"], reused=True, status="building")
         if _has_fresh_completed_refresh(existing):
             # Cache hit — a real completed brief within the window. No new spend.
+            # job_id=None: the overview is what matters, and the latest job may
+            # be a later failed/stale one whose status would mislead the poller.
             return TryResponse(
-                subject_id=existing, job_id=job["id"] if job else None, reused=True, status="ready"
+                subject_id=existing, job_id=None, reused=True, status="ready"
             )
         subject_id = existing
         is_new = False
@@ -312,7 +334,7 @@ async def create_try(req: TryRequest, request: Request) -> TryResponse:
         is_new = True
 
     # We're about to spend money (new subject, or stale/incomplete re-run) — gate it.
-    _enforce_limits(_client_ip(request))
+    _enforce_limits(request)
 
     # Always (re)infer setup_inputs so the refresh can complete — a bare {name}
     # leaves most prompts un-renderable → partial → empty brief.
@@ -330,10 +352,17 @@ async def create_try(req: TryRequest, request: Request) -> TryResponse:
                 setup_inputs=setup_inputs,
             )["id"]
         except ValueError:
-            # Lost a create race — fall back to the row the winner inserted.
+            # Lost a create race: the winner already inserted the row (and
+            # likely enqueued a refresh). Defer to its in-flight job instead of
+            # launching a second, redundant paid run.
             subject_id = _find_try_subject(topic)
             if subject_id is None:
                 raise HTTPException(status_code=409, detail="Could not start the demo, please retry.")
+            job = _latest_refresh_job(subject_id)
+            if job and job["status"] in ("queued", "running", "succeeded"):
+                return TryResponse(
+                    subject_id=subject_id, job_id=job["id"], reused=True, status="building"
+                )
     else:
         _update_setup_inputs(subject_id, setup_inputs)
 
@@ -345,6 +374,7 @@ async def create_try(req: TryRequest, request: Request) -> TryResponse:
 async def get_try_overview(subject_id: int, weeks: int = 12):
     """Overview JSON for a try-subject — scoped to the public org so this can
     never read a real customer's subject."""
+    weeks = max(1, min(weeks, 52))  # clamp — unauthenticated DB-work amplifier
     overview = get_subject_overview(subject_id, org_id=ORG_PUBLIC_TRY, weeks=weeks)
     if not overview:
         raise HTTPException(status_code=404, detail=f"try subject {subject_id} not found")

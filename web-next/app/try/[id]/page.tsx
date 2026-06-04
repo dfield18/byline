@@ -8,10 +8,11 @@ import { TryBuilding } from "./TryBuilding";
  * dashboard, fed by the public /api/try endpoints (no login).
  *
  * State machine:
- *   - has a completed refresh  → render the brief
- *   - latest job failed, no data → failure message (via TryBuilding)
- *   - otherwise (queued/running/none) → TryBuilding poller, which
- *     router.refresh()es this server component when the job succeeds.
+ *   - has a completed refresh        → render the brief
+ *   - job finished but still no data → terminal failure (a partial/failed run
+ *     produced no usable brief) — NOT an endless spinner
+ *   - otherwise (queued/running)     → TryBuilding poller, which
+ *     router.refresh()es this server component when the job finishes.
  */
 export default async function TryOverviewPage({
   params,
@@ -65,7 +66,27 @@ export default async function TryOverviewPage({
     );
   }
 
-  // No completed refresh yet — building (or failed with no prior data).
+  // No completed refresh yet. If the job has already FINISHED (failed, or
+  // succeeded-but-partial → no usable brief), this is terminal — show a failure
+  // state rather than polling forever.
+  if (status?.status === "failed" || status?.status === "succeeded") {
+    return (
+      <div className="try-state">
+        <div className="eyebrow">Live demo</div>
+        <h1>{overview.subject_name}</h1>
+        <p className="try-failed">
+          We couldn’t assemble a brief for this topic — there wasn’t enough
+          coverage across the assistants to score it reliably. Try a more
+          prominent person, organization, or issue.
+        </p>
+        <a href="/" className="dash-btn dash-btn-accent">
+          ← Try another topic
+        </a>
+      </div>
+    );
+  }
+
+  // Still queued/running — poll until it finishes.
   return (
     <TryBuilding subjectId={id} subjectName={overview.subject_name} />
   );

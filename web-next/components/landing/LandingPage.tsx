@@ -68,7 +68,6 @@ export default function LandingPage() {
     const consoleEl = root.querySelector<HTMLElement>("#console");
     const nextEl = root.querySelector<HTMLElement>("#lc-next");
     const askLbl = root.querySelector<HTMLElement>(".askrow .lbl");
-    const askLblDefault = askLbl?.textContent ?? "";
     const domEl = root.querySelector<HTMLElement>(".lc-head .dom");
     const domDefault = domEl?.textContent ?? "Cross-model readout";
     const updatedEl = root.querySelector<HTMLElement>(".lc-updated");
@@ -116,12 +115,9 @@ export default function LandingPage() {
     }
 
     let consoleVisible = true;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    let autoActive = false;
 
     async function autoLoop() {
       const id = ++runId;
-      autoActive = true;
       resumeBtn!.classList.remove("show");
       setResultMode(null); // back to ambient chrome
       heroInput!.value = "";
@@ -173,7 +169,6 @@ export default function LandingPage() {
       if (!raw) return;
       const safe = raw.replace(/[<>]/g, "").slice(0, 80);
       const id = ++runId; // cancels the auto loop
-      autoActive = false;
       if (askBtn) { askBtn.disabled = true; askBtn.textContent = "Starting…"; }
       resumeBtn!.classList.remove("show");
       ctaEl?.classList.remove("show");

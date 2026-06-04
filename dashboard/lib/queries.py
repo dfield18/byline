@@ -2136,10 +2136,11 @@ def _read_competitive_snapshot(
     setup_inputs: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the Competitive Snapshot table: the focal subject + the
-    top 4 competitor entities aggregated across all unnamed-layer
-    responses for this refresh. Returns up to 5 rows sorted by share-
+    top 6 competitor entities aggregated across all unnamed-layer
+    responses for this refresh. Returns up to 7 rows sorted by share-
     of-voice desc, with `is_subject` flag on the focal subject's row
-    so the UI can highlight it.
+    so the UI can highlight it. The subject itself (and its own
+    role/title from setup_inputs) is filtered out of the competitor set.
 
     SOV = share of unnamed-layer responses where the entity appears.
     Avg pos = mean rank when the entity is mentioned.
@@ -2210,10 +2211,11 @@ def _read_competitive_snapshot(
         for alias in subject_aliases:
             if n == alias:
                 return True
-            # Title overlap (e.g. "secretary of transportation" within
-            # "us secretary of transportation"). Length-guarded so short
-            # generic tokens can't trigger a false match.
-            if len(n) >= 6 and (n in alias or alias in n):
+            # Substring overlap ONLY for multi-word titles (e.g. "secretary of
+            # transportation" within "us secretary of transportation"). A
+            # single generic word ("senator", "ceo") must never drop every
+            # competitor that shares it, so we require a space in the alias.
+            if " " in alias and len(n) >= 6 and (n in alias or alias in n):
                 return True
         return False
 

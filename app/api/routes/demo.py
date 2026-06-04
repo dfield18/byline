@@ -63,17 +63,27 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-_LOOPBACK = {"127.0.0.1", "::1", "localhost", "unknown"}
+# Dev exemption keys on the REAL socket peer + an explicit dev flag — never the
+# spoofable X-Forwarded-For header (a remote client could forge loopback there
+# to bypass the cap).
+_DEV_LOOPBACK = {"127.0.0.1", "::1"}
 
 
-def _enforce_limits(ip: str) -> None:
-    # Local dev (browser → Next proxy → backend all on loopback) is exempt so
-    # the demo can be exercised freely. In production the visitor's real IP
-    # arrives via X-Forwarded-For, so the limits apply there.
-    if ip in _LOOPBACK:
+def _is_dev_exempt(request: Request) -> bool:
+    if os.environ.get("BYLINE_AUTH") != "disabled":
+        return False
+    peer = request.client.host if request.client else ""
+    return peer in _DEV_LOOPBACK
+
+
+def _enforce_limits(request: Request) -> None:
+    # Local dev (real loopback peer) is exempt so the demo can be exercised
+    # freely. In production the limits always apply.
+    if _is_dev_exempt(request):
         return
 
     now = time.monotonic()
+    ip = _client_ip(request)
 
     # Global daily cap (cost ceiling).
     day = int(time.time() // 86400)
@@ -106,7 +116,7 @@ async def demo_preview(req: DemoPreviewRequest, request: Request) -> DemoPreview
     if not topic:
         raise HTTPException(status_code=422, detail="topic is required")
 
-    _enforce_limits(_client_ip(request))
+    _enforce_limits(request)
 
     # Keep the ask tight: a short answer generates faster, which matters for a
     # hero interaction where the visitor is staring at a spinner. The landing
