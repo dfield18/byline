@@ -2330,9 +2330,22 @@ body {
   margin-bottom: 24px;
 }
 .alt-grid-top { grid-template-columns: 1.55fr 1fr; align-items: stretch; }
-/* Prompt themes (left) ║ Top sources (right) — two compact tables side by side */
-.alt-grid-themes { grid-template-columns: 1.1fr 1fr; align-items: start; }
+/* Prompt themes (left) ║ Top sources (right) — two compact tables side by side,
+   locked to equal height (no void under the shorter one) */
+.alt-grid-themes { grid-template-columns: 1.1fr 1fr; align-items: stretch; }
 @media (max-width: 940px) { .alt-grid-themes { grid-template-columns: 1fr; } }
+.alt-panel-themes { display: flex; flex-direction: column; }
+/* push the legend to the bottom so it fills the card when stretched */
+.alt-panel-themes .pt-matrix-legend { margin-top: auto; padding-top: 12px; }
+
+/* Sources section: Top sources (wider) ║ Source type mix (narrower). The donut
+   stacks above its bars in the narrow column so it never gets cramped. */
+.alt-grid-sources2 { grid-template-columns: 1.5fr 1fr; align-items: start; }
+@media (max-width: 880px) { .alt-grid-sources2 { grid-template-columns: 1fr; } }
+.alt-grid-sources2 .alt-donut-wrap-wide {
+  flex-direction: column; align-items: stretch; gap: 18px;
+}
+.alt-grid-sources2 .alt-donut-wrap-wide .donut-svg { align-self: center; }
 /* the chart card stretches to the ranking's height; its plot + legend center in
    the leftover space so there's no dead void under a short chart */
 .alt-panel-chart { display: flex; flex-direction: column; }
@@ -2369,11 +2382,14 @@ body {
 /* faint, dashed gridlines so the data reads louder than the grid */
 .trend-grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 5; opacity: 0.7; }
 .trend-ylabel, .trend-xlabel {
-  fill: var(--gray-light);
-  font-size: 10px;
+  fill: var(--gray);
+  font-size: 10.5px;
   font-family: var(--sans);
   font-variant-numeric: tabular-nums;
 }
+/* chart legend: a bit larger + more separation from the plot (readability) */
+.alt-chart-body .alt-legend { margin-top: 16px; }
+.alt-chart-body .alt-legend-item { font-size: 13px; }
 /* competitors: thin + dashed + recessive; the subject: bold, solid, on top */
 .trend-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; opacity: 0.6; stroke-dasharray: 5 4; }
 .trend-line.emphasis { stroke-width: 3; opacity: 1; stroke-dasharray: none; }
@@ -2495,12 +2511,24 @@ body {
 .alt-donut-legend .alt-legend-item { width: 100%; }
 .alt-legend-pct { margin-left: auto; color: var(--gray-light); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 
-/* full-width Source-types section (now below, donut moved out of the 2-col):
-   lay the donut + legend horizontally so it reads as a tidy source-mix strip */
-.alt-donut-wrap-wide { gap: 36px; }
-.alt-donut-legend-row { flex-direction: row; flex-wrap: wrap; gap: 9px 28px; }
-.alt-donut-legend-row .alt-legend-item { width: auto; }
-.alt-donut-legend-row .alt-legend-pct { margin-left: 4px; }
+/* full-width Source-types section: donut on the left, ranked per-type bars on
+   the right so the card fills its width instead of leaving a beige void */
+.alt-donut-wrap-wide { gap: 40px; align-items: center; }
+.alt-srctype-bars { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 13px; }
+.stb-row { display: grid; grid-template-columns: 116px 1fr auto; align-items: center; gap: 16px; }
+.stb-label {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; color: var(--ink-soft); white-space: nowrap;
+}
+.stb-label i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.stb-bar { height: 8px; border-radius: 5px; background: var(--bg-sand); overflow: hidden; min-width: 60px; }
+.stb-bar i { display: block; height: 100%; border-radius: 5px; }
+.stb-val {
+  display: inline-flex; align-items: baseline; gap: 9px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.stb-pct { font-size: 13px; font-weight: 700; color: var(--ink); }
+.stb-cites { font-size: 11.5px; color: var(--gray-light); }
 
 /* sources table */
 .alt-src { display: flex; flex-direction: column; }
@@ -2591,7 +2619,7 @@ body {
 
 /* Shorter KPI tiles: figures on the left, sparkline beside them. */
 .kpi.kpi-compact { padding: 14px 16px; box-shadow: none; }
-.kpi.kpi-compact .k { font-size: 10.5px; }
+.kpi.kpi-compact .k { font-size: 11px; color: var(--gray); }
 .kpi.kpi-compact .v { margin-top: 7px; font-size: 23px; gap: 7px; }
 .kpi.kpi-compact .delta { margin-top: 5px; }
 .kpi-compact .kpi-body {
@@ -2604,11 +2632,11 @@ body {
 .kpi-compact .kpi-spark {
   margin-top: 0;
   flex: 1 1 auto;
-  max-width: 78px;
+  max-width: 70px;
   display: flex;
   align-items: flex-end;
   /* recede behind the figure — the metric value reads first, the trend second */
-  opacity: 0.6;
+  opacity: 0.5;
 }
 .kpi-compact .kpi-spark .spark-plot { height: 30px; width: 100%; }
 
@@ -2696,22 +2724,24 @@ body {
 .alt-dash .kpi.kpi-compact { padding: 14px 16px; }
 .alt-dash .kpi.kpi-compact .v { margin-top: 7px; font-size: 23px; }
 
-/* tighter per-model pull-quotes */
+/* tighter per-model pull-quotes — this was the tallest, least-dense section */
 .alt-dash .alt-model-grid { gap: 12px; }
-.alt-dash .mq-card { padding: 14px 18px 12px 20px; }
-.alt-dash .mq-mark { font-size: 36px; height: 20px; }
-/* clamp the sample quote to a few lines so the two cards stay equal height
+.alt-dash .mq-card { padding: 12px 16px 10px 18px; }
+.alt-dash .mq-mark { font-size: 28px; height: 15px; }
+.alt-dash .mq-frame { margin-bottom: 7px; }
+.alt-dash .alt-model-takeaway { margin: 1px 0 11px; }
+/* clamp the sample quote to 3 lines so the cards stay short + equal height
    (the grid stretches them to match; without this the longest quote wins) */
 .alt-dash .mq-quote {
-  margin: 4px 0 14px;
-  font-size: 14.5px;
+  margin: 2px 0 11px;
+  font-size: 13.5px;
   line-height: 1.5;
   display: -webkit-box;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.alt-dash .mq-foot { padding-top: 11px; }
+.alt-dash .mq-foot { padding-top: 10px; }
 
 /* subject name + meta shown in the top Header bar (Overview Dashboard) */
 .dash-header-subject { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -2728,11 +2758,11 @@ body {
 
 /* Executive summary: bottom line · what changed · recommended focus (3 cols).
    Compact — small type and every column clamped so no unit runs long. */
-.vitals.vitals-exec { padding: 13px 22px; margin-bottom: 16px; }
-.vitals-exec .eyebrow { font-size: 9.5px; margin-bottom: 5px; }
-/* Bottom line stays a touch larger as the lead, but kept small + clamped. */
+.vitals.vitals-exec { padding: 16px 24px; margin-bottom: 16px; }
+.vitals-exec .eyebrow { font-size: 10px; margin-bottom: 7px; color: var(--gray); }
+/* Bottom line is the lead — a touch larger/heavier, still compact + clamped. */
 .vitals-exec .bottom-line {
-  font-size: 14px; line-height: 1.4; font-weight: 600; letter-spacing: -0.01em;
+  font-size: 15.5px; line-height: 1.5; font-weight: 650; letter-spacing: -0.012em;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 /* top-aligned columns so the three eyebrows line up; stretch keeps the
@@ -2746,10 +2776,10 @@ body {
 .vitals-exec .vexec-col { padding: 0 20px; }
 .vitals-exec .vexec-col:first-child { padding-left: 0; }
 .vitals-exec .vexec-col:last-child { padding-right: 0; }
-.vitals-exec .vexec-col:not(:last-child) { border-right: 1px solid var(--line); }
+.vitals-exec .vexec-col:not(:last-child) { border-right: 1px solid rgba(28, 24, 14, 0.06); }
 .vchanged-text,
 .vitals-exec .ftext {
-  margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink-soft);
+  margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-soft);
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 @media (max-width: 820px) {
@@ -2846,7 +2876,7 @@ body {
   grid-template-columns: minmax(0, 1fr) repeat(var(--ptm-cols, 2), 52px);
   align-items: center;
   gap: 10px;
-  padding: 4px 8px;
+  padding: 9px 8px;
   margin: 0 -8px;
   border-top: 1px solid var(--line);
   border-radius: 7px;
@@ -2897,9 +2927,37 @@ body {
   font-size: 11px; color: var(--gray);
 }
 .pt-matrix-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ptm-legend-text { line-height: 1.5; color: var(--gray-light); }
 .pt-matrix-legend .ptm-pip.hit.dot { width: 10px; height: 10px; }
 .pt-matrix-legend .ptm-pip.miss {
   min-width: 18px; height: 15px; padding: 0 4px; font-size: 9px;
+}
+
+/* ── Narrative gap card (What drives the gap, paired with Prompt themes) ──
+   Buckets each theme into Strong / Moderate / Weak / Missing associations. */
+.alt-panel-narrative { display: flex; flex-direction: column; }
+.ng-list { display: flex; flex-direction: column; margin-top: auto; }
+.ng-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 8px; margin: 0 -8px;
+  border-top: 1px solid var(--line);
+  border-radius: 7px;
+  transition: background 0.12s ease;
+}
+.ng-row:first-child { border-top: none; }
+.ng-row:hover { background: var(--bg-sand); }
+.ng-level {
+  flex: none; width: 72px; text-align: center;
+  padding: 3px 0; border-radius: 6px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.ng-strong { background: var(--pos-bg); color: var(--pos); }
+.ng-moderate { background: rgba(138, 109, 47, 0.13); color: var(--accent-bronze-deep); }
+.ng-weak { background: var(--neu-bg); color: var(--neu); }
+.ng-missing { background: var(--neg-bg); color: var(--neg); }
+.ng-theme {
+  min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 /* model frame label */
@@ -2954,7 +3012,7 @@ body {
   background: var(--accent-bronze);
   opacity: 0.85;
 }
-.alt-section-head .alt-section-title { display: block; margin: 0 0 5px; font-size: 15px; }
+.alt-section-head .alt-section-title { display: block; margin: 0 0 6px; font-size: 16px; }
 .alt-section-head .alt-section-sub { display: block; max-width: 92ch; line-height: 1.55; }
 
 /* item 10 polish: a touch more air between sections, more legible subtitles */
@@ -3068,6 +3126,103 @@ body {
 }
 .alt-priority-label { font-weight: 700; color: var(--accent-bronze-deep); }
 
+/* ── scope / control bar (top of the dashboard) ─────────────────────────
+   subject type · tracked models · date range — the analysis context, styled
+   like a SaaS filter strip. Reflects real scope (presentational, not filters). */
+.alt-controlbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--line);
+}
+.alt-cb-left { display: inline-flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.alt-cb-sep { width: 1px; height: 16px; background: var(--line-strong); }
+/* subject type is metadata — keep it quieter than the model chips (which carry
+   logos and read as the configurable scope) */
+.alt-cb-left .cat-badge {
+  font-size: 11px; font-weight: 600; padding: 3px 9px;
+  background: transparent; border-color: var(--line-strong); color: var(--gray);
+}
+.alt-cb-plabel {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--gray-light);
+}
+.alt-cb-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 5px; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--bg-card);
+  font-size: 12.5px; font-weight: 600; color: var(--ink-soft);
+}
+.alt-cb-right { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.alt-cb-range {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-soft);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.alt-cb-range svg { width: 14px; height: 14px; color: var(--gray-light); }
+.alt-cb-export {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--line-strong); background: var(--bg-card);
+  font-family: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink-soft);
+  cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease;
+}
+.alt-cb-export:hover { border-color: var(--ink); background: var(--bg-sand-soft); }
+.alt-cb-export svg { width: 14px; height: 14px; color: var(--gray); }
+
+/* print-only brief header (shown only when exporting to PDF) */
+.print-only { display: none; }
+.print-brief-head .pbh-brand {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--accent-bronze-deep);
+}
+.print-brief-head h1 {
+  margin: 6px 0 4px; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink);
+}
+.print-brief-head .pbh-meta { font-size: 12.5px; color: var(--gray); }
+
+/* ── print / PDF export ─────────────────────────────────────────────────
+   Strip the app chrome and lay the brief out cleanly for paper so it can be
+   forwarded as a one-pager. Colors are forced on so pills/bars/donut survive. */
+@media print {
+  .dash-sidebar,
+  .dash-header,
+  .alt-cb-export { display: none !important; }
+
+  .print-only { display: block !important; }
+  .print-brief-head { margin-bottom: 18px; }
+
+  body,
+  .dash-main-col:has(.alt-dash) { background: #fff !important; }
+  .dash-main { max-width: none; padding: 0; margin: 0; }
+
+  .alt-dash,
+  .alt-dash * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .alt-dash .vitals,
+  .alt-dash .alt-panel,
+  .alt-dash .kpi.kpi-compact {
+    box-shadow: none !important;
+    border: 1px solid #e2ddd2 !important;
+  }
+
+  /* keep cards/rows intact across page breaks */
+  .alt-panel,
+  .vitals,
+  .kpi,
+  .alt-grid,
+  .mq-card,
+  .alt-controlbar,
+  .print-brief-head { break-inside: avoid; }
+
+  /* drop the navigational CTAs — they're dead on paper */
+  .alt-panel-link,
+  .vexec-link { display: none !important; }
+
+  @page { margin: 1.4cm; }
+}
+
 /* ── navigable modules: panel "View →" links + clickable rows/cards ──────
    Each card drills into its full spoke (ranking → competitive, sources →
    sources, etc.); source rows open the actual external domain. Turns the
@@ -3104,11 +3259,16 @@ body {
    a step so the white cards visibly lift off it, and give every top-level card
    a soft, warm-tinted shadow + rounder corners. Scoped to the dashboard route
    via :has(.alt-dash), so the reading spokes and landing are untouched. */
-.dash-main-col:has(.alt-dash) { background: #efeae0; }
-/* the sticky header shares the warmed field so there's no hard white seam */
+/* warm off-white field — lighter than before so it reads premium, not tan,
+   while keeping enough warmth for the white cards to lift off it */
+.dash-main-col:has(.alt-dash) { background: #f4f1ea; }
+/* the sticky header shares the field so there's no hard white seam */
 .dash-main-col:has(.alt-dash) .dash-header {
-  background: rgba(239, 234, 224, 0.82);
+  background: rgba(244, 241, 234, 0.82);
 }
+/* a touch more width for the data-dense tables + chart on the dashboard */
+.dash-main-col:has(.alt-dash) .dash-main,
+.dash-main-col:has(.alt-dash) .dash-header-inner { max-width: 1224px; }
 .alt-dash .vitals,
 .alt-dash .alt-panel,
 .alt-dash .kpi.kpi-compact {

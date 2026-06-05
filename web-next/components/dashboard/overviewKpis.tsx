@@ -116,6 +116,14 @@ function KpiCard({
   let footer: ReactNode;
   if (!hasValue) {
     footer = <div className="delta empty">Not enough data</div>;
+  } else if (kpi.value === 0 && def.format === "pct" && !def.higherBetter) {
+    // A "lower is better" rate at 0 (e.g. risk framing) is a positive signal,
+    // not a dead "no change" — say so explicitly.
+    footer = (
+      <div className="delta good">
+        <span aria-hidden>✓</span> None detected
+      </div>
+    );
   } else if (kpi.delta === null) {
     footer = (
       <div className="delta" aria-hidden style={{ visibility: "hidden" }}>

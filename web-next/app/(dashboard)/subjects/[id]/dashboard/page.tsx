@@ -11,11 +11,13 @@ import { SourceDonut, type DonutSegment } from "@/components/dashboard/SourceDon
 import { VitalsBlock, KpiGrid } from "@/components/dashboard/overviewKpis";
 import { ModelLogo, modelBrandColor } from "@/components/dashboard/ModelLogo";
 import { SetHeaderTitle } from "@/components/dashboard/HeaderTitle";
+import { ExportButton } from "@/components/dashboard/ExportButton";
 import {
   buildWhatChangedSentence,
   buildVisibilityGap,
   buildSourceCopy,
   buildCoverageMatrix,
+  buildNarrativeGap,
   modelTakeaway,
   analyticalFrame,
 } from "@/lib/dashboardCopy";
@@ -37,6 +39,13 @@ const MODEL_NAMES: Record<string, string> = {
   gemini: "Gemini",
   claude: "Claude",
   perplexity: "Perplexity",
+};
+
+const NARRATIVE_LEVEL_LABEL: Record<string, string> = {
+  strong: "Strong",
+  moderate: "Moderate",
+  weak: "Weak",
+  missing: "Missing",
 };
 
 // Gold/bronze stays tied to the SUBJECT; competitors are neutral grays so the
@@ -108,7 +117,6 @@ export default async function AltDashboardPage({
     if (e instanceof Error && e.message.includes("404")) notFound();
     throw e;
   }
-  void subject;
 
   if (data.meta.latest_refresh_id === null) {
     return (
@@ -201,6 +209,7 @@ export default async function AltDashboardPage({
   const visGap = buildVisibilityGap(data);
   const sourceCopy = buildSourceCopy(data);
   const coverage = buildCoverageMatrix(data);
+  const narrativeGap = buildNarrativeGap(data);
   const modelTake = modelTakeaway(data);
   const rec = data.recommended_actions;
   const whyItMatters = rec?.primary?.why ?? null;
@@ -219,6 +228,56 @@ export default async function AltDashboardPage({
     <div className="alt-dash">
       {/* Push the subject name + meta up into the top Header bar. */}
       <SetHeaderTitle heading={data.subject_name} meta={headerMeta} />
+
+      {/* Print-only brief header (hidden on screen; shown when exporting to PDF
+          since the app chrome / sticky header are stripped for print). */}
+      <div className="print-only print-brief-head">
+        <div className="pbh-brand">Byline · AI Narrative Brief</div>
+        <h1>{data.subject_name}</h1>
+        <div className="pbh-meta">{headerMeta}</div>
+      </div>
+
+      {/* Scope bar: subject type · tracked models · date range — the analysis
+          context, styled as a SaaS control strip. */}
+      <div className="alt-controlbar">
+        <div className="alt-cb-left">
+          <span className={`cat-badge cat-${subject.category}`}>
+            {subject.category.charAt(0).toUpperCase() + subject.category.slice(1)}
+          </span>
+          {perModel.length > 0 && (
+            <>
+              <span className="alt-cb-sep" aria-hidden />
+              <span className="alt-cb-plabel">Tracking</span>
+              {perModel.map((m) => (
+                <span className="alt-cb-chip" key={m.slug} title={m.name}>
+                  <ModelLogo slug={m.slug} size={15} />
+                  {MODEL_NAMES[m.slug] ?? m.name}
+                </span>
+              ))}
+            </>
+          )}
+        </div>
+        <div className="alt-cb-right">
+          {dateRange && (
+            <span className="alt-cb-range">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <path d="M16 2v4M8 2v4M3 10h18" />
+              </svg>
+              {dateRange}
+            </span>
+          )}
+          <ExportButton />
+        </div>
+      </div>
 
       {/* Compact executive summary: bottom line · what changed · recommended
           focus (with the primary move + recommendations link in that column). */}
@@ -249,7 +308,6 @@ export default async function AltDashboardPage({
           <div className="alt-panel-head">
             <span className="alt-panel-title">Mention trend</span>
             <span className="alt-panel-sub">% of AI answers mentioning each entity</span>
-            {dateRange && <span className="alt-panel-range">{dateRange}</span>}
           </div>
           {hasTrend ? (
             <div className="alt-chart-body">
@@ -318,11 +376,18 @@ export default async function AltDashboardPage({
         </div>
       </div>
 
-      {/* Prompt-themes coverage matrix ║ Top sources — paired side by side so
-          neither wastes the full page width */}
+      {/* What drives the gap — prompt patterns (matrix) ║ missing associations
+          (narrative gap), the cause behind the visibility outcome above */}
+      <div className="alt-section-head">
+        <span className="alt-section-title">What drives the gap</span>
+        <span className="alt-section-sub">
+          Prompt patterns and missing associations explain where AI surfaces{" "}
+          {data.subject_name} — and where it leaves the subject out.
+        </span>
+      </div>
       <div className="alt-grid alt-grid-themes">
       {coverage.rows.length > 0 && coverage.platforms.length > 0 && (
-        <div className="alt-panel">
+        <div className="alt-panel alt-panel-themes">
           <div className="alt-panel-head">
             <span className="alt-panel-title">Prompt themes driving this result</span>
             <span className="alt-panel-sub">
@@ -392,51 +457,30 @@ export default async function AltDashboardPage({
             ))}
           </div>
           <div className="pt-matrix-legend">
-            <span><i className="ptm-pip hit dot" /> number = prominence percentile (100 = top of field)</span>
-            <span><span className="ptm-pip miss">0</span> not mentioned</span>
+            <span className="ptm-legend-text">
+              Scores show prominence percentile within AI answers. 100 = top of
+              field; 0 = not mentioned.
+            </span>
           </div>
         </div>
       )}
-      {data.sources.length > 0 && (
-        <div className="alt-panel">
+      {narrativeGap.rows.length > 0 && (
+        <div className="alt-panel alt-panel-narrative">
           <div className="alt-panel-head">
-            <span className="alt-panel-title">Top sources</span>
-            <span className="alt-panel-sub">Most-cited domains</span>
-            <Link href={`/subjects/${subjectId}/sources`} className="alt-panel-link">
-              View all sources →
-            </Link>
+            <span className="alt-panel-title">Narrative gap</span>
+            <span className="alt-panel-sub">
+              Which associations AI makes — and which it misses
+            </span>
           </div>
-          <div className="alt-src">
-            <div className="alt-src-row alt-src-head">
-              <span className="s-domain">Domain</span>
-              <span className="s-val">Used</span>
-              <span className="s-val">Cites</span>
-              <span className="s-type">Type</span>
-            </div>
-            {data.sources.map((s) => (
-              <a
-                className="alt-src-row alt-src-link"
-                key={s.name}
-                href={`https://${s.name}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`Open ${s.name} in a new tab`}
-              >
-                <span className="s-domain">
-                  <span className="s-domain-text">{s.name}</span>
-                  <span className="s-ext" aria-hidden>↗</span>
+          <p className="alt-model-takeaway">{narrativeGap.takeaway}</p>
+          <div className="ng-list">
+            {narrativeGap.rows.map((r, i) => (
+              <div className="ng-row" key={r.label + i} title={r.full}>
+                <span className={`ng-level ng-${r.level}`}>
+                  {NARRATIVE_LEVEL_LABEL[r.level]}
                 </span>
-                <span className="s-val">{pct0(s.response_coverage)}</span>
-                <span className="s-val">{s.n_citations}</span>
-                <span className="s-type">
-                  <span
-                    className="s-type-badge"
-                    style={{ color: typeColor(s.type), borderColor: typeColor(s.type) }}
-                  >
-                    {s.type}
-                  </span>
-                </span>
-              </a>
+                <span className="ng-theme">{r.label}</span>
+              </div>
             ))}
           </div>
         </div>
@@ -515,30 +559,78 @@ export default async function AltDashboardPage({
               </p>
             </div>
           )}
-          <div className="alt-panel alt-panel-srctypes">
+          <div className="alt-grid alt-grid-sources2">
+          <div className="alt-panel alt-panel-topsrc">
             <div className="alt-panel-head">
-              <span className="alt-panel-title">Source types</span>
-              <span className="alt-panel-sub">Citations across active models</span>
+              <span className="alt-panel-title">Top sources</span>
+              <span className="alt-panel-sub">Most-cited domains</span>
               <Link href={`/subjects/${subjectId}/sources`} className="alt-panel-link">
                 View all sources →
               </Link>
             </div>
+            <div className="alt-src">
+              <div className="alt-src-row alt-src-head">
+                <span className="s-domain">Domain</span>
+                <span className="s-val">Used</span>
+                <span className="s-val">Cites</span>
+                <span className="s-type">Type</span>
+              </div>
+              {data.sources.slice(0, 6).map((s) => (
+                <a
+                  className="alt-src-row alt-src-link"
+                  key={s.name}
+                  href={`https://${s.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Open ${s.name} in a new tab`}
+                >
+                  <span className="s-domain">
+                    <span className="s-domain-text">{s.name}</span>
+                    <span className="s-ext" aria-hidden>↗</span>
+                  </span>
+                  <span className="s-val">{pct0(s.response_coverage)}</span>
+                  <span className="s-val">{s.n_citations}</span>
+                  <span className="s-type">
+                    <span
+                      className="s-type-badge"
+                      style={{ color: typeColor(s.type), borderColor: typeColor(s.type) }}
+                    >
+                      {s.type}
+                    </span>
+                  </span>
+                </a>
+              ))}
+            </div>
+          </div>
+          <div className="alt-panel alt-panel-srctypes">
+            <div className="alt-panel-head">
+              <span className="alt-panel-title">Source type mix</span>
+              <span className="alt-panel-sub">Citations across active models</span>
+            </div>
             <div className="alt-donut-wrap alt-donut-wrap-wide">
               <SourceDonut segments={donutSegments} total={totalCitations} />
-              <div className="alt-donut-legend alt-donut-legend-row">
+              <div className="alt-srctype-bars">
                 {donutSegments.map((s) => {
                   const p = Math.round((s.value / (totalCitations || 1)) * 100);
                   return (
-                    <span className="alt-legend-item" key={s.label}>
-                      <i style={{ background: s.color }} />
-                      {s.label}
-                      <b>{s.value}</b>
-                      <span className="alt-legend-pct">{p}%</span>
-                    </span>
+                    <div className="stb-row" key={s.label}>
+                      <span className="stb-label">
+                        <i style={{ background: s.color }} />
+                        {s.label}
+                      </span>
+                      <span className="stb-bar" aria-hidden>
+                        <i style={{ width: `${p}%`, background: s.color }} />
+                      </span>
+                      <span className="stb-val">
+                        <span className="stb-pct">{p}%</span>
+                        <span className="stb-cites">{s.value} cites</span>
+                      </span>
+                    </div>
                   );
                 })}
               </div>
             </div>
+          </div>
           </div>
         </>
       )}

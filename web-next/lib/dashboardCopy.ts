@@ -258,6 +258,48 @@ export function buildCoverageMatrix(
   return { platforms, rows: rows.slice(0, 8) };
 }
 
+export type NarrativeLevel = "strong" | "moderate" | "weak" | "missing";
+export type NarrativeGapRow = { level: NarrativeLevel; label: string; full: string };
+
+/**
+ * "Narrative gap" — bucket each tracked theme by how strongly AI associates the
+ * subject with it, from the same per-prompt coverage. Strong = mentioned on
+ * every model and near the top; Moderate = on every model but lower; Weak =
+ * only some models; Missing = none. Summarizes what the prompt-themes matrix
+ * implies: which associations drive the visibility gap.
+ */
+export function buildNarrativeGap(
+  overview: SubjectOverview,
+): { takeaway: string; rows: NarrativeGapRow[] } {
+  const slugs = new Set<string>();
+  for (const p of overview.per_prompt_coverage)
+    for (const r of p.platform_results) slugs.add(r.slug);
+  const total = Math.max(1, slugs.size);
+
+  const rows: NarrativeGapRow[] = [];
+  for (const p of overview.per_prompt_coverage) {
+    const full = (p.rendered || p.template || "").trim();
+    if (!full) continue;
+    const hits = p.platform_results.filter((r) => r.mentioned === true);
+    const avgRank = hits.length
+      ? hits.reduce((a, r) => a + (r.rank ?? 99), 0) / hits.length
+      : null;
+    let level: NarrativeLevel;
+    if (hits.length === 0) level = "missing";
+    else if (hits.length >= total && avgRank !== null && avgRank <= 2) level = "strong";
+    else if (hits.length >= total) level = "moderate";
+    else level = "weak";
+    rows.push({ level, label: themeLabel(full, p.topic_label), full });
+  }
+  const order: Record<NarrativeLevel, number> = { strong: 0, moderate: 1, weak: 2, missing: 3 };
+  rows.sort((a, b) => order[a.level] - order[b.level]);
+
+  return {
+    takeaway: `AI associates ${overview.subject_name} with some themes far more than others — the weak and missing links below are what hold the visibility gap in place.`,
+    rows: rows.slice(0, 6),
+  };
+}
+
 /** Make a model frame_label read as an analytical "frame". */
 export function analyticalFrame(frame: string): string {
   const f = frame.trim().replace(/\s+frame$/i, "");
