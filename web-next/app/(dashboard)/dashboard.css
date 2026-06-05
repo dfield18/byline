@@ -2419,7 +2419,7 @@ body {
   gap: 14px;
 }
 .alt-model-card {
-  background: var(--bg-card);
+  background: var(--bg-sand-soft);
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 15px 16px;
@@ -2491,3 +2491,13 @@ body {
 .alt-rank-head .alt-rank-bar { background: transparent; }
 .alt-rank-bar i { display: block; height: 100%; border-radius: 4px; background: var(--gray-light); }
 .alt-rank-row.is-subject .alt-rank-bar i { background: var(--accent-bronze); }
+
+/* table row hover (ranking + sources) — matches the brief's interactive feel */
+.alt-rank-row:not(.alt-rank-head),
+.alt-src-row:not(.alt-src-head) {
+  transition: background 0.12s ease;
+}
+.alt-rank-row:not(.alt-rank-head):hover,
+.alt-src-row:not(.alt-src-head):hover {
+  background: var(--bg-sand);
+}

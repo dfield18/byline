@@ -10,7 +10,13 @@
 // path. Guarantees the curve passes through every point AND never
 // overshoots — so a 0..100% rate curve can't briefly dip below 0 or
 // peak above 100 the way a Catmull-Rom spline would.
-export function buildMonoCubicPath(points: { x: number; y: number }[]): string {
+// `handle` controls how far the bezier control points reach (curviness). The
+// 1/3 default matches a standard monotone cubic; a smaller value (e.g. 0.2)
+// hugs the straight path more, so a sparse, swingy series reads less swoopy.
+export function buildMonoCubicPath(
+  points: { x: number; y: number }[],
+  handle = 1 / 3,
+): string {
   if (points.length === 0) return "";
   if (points.length === 1) return `M${points[0].x},${points[0].y}`;
   if (points.length === 2) {
@@ -46,7 +52,7 @@ export function buildMonoCubicPath(points: { x: number; y: number }[]): string {
   }
   let d = `M${points[0].x},${points[0].y}`;
   for (let i = 0; i < n - 1; i++) {
-    const t = dx[i] / 3;
+    const t = dx[i] * handle;
     const x1 = points[i].x + t;
     const y1 = points[i].y + m[i] * t;
     const x2 = points[i + 1].x - t;

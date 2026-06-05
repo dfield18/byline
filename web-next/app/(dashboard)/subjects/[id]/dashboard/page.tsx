@@ -163,14 +163,27 @@ export default async function AltDashboardPage({
     .sort((a, b) => b[1] - a[1])
     .map(([label, value]) => ({ label, value, color: typeColor(label) }));
 
+  const updatedShort = data.meta.last_refresh_at
+    ? new Date(data.meta.last_refresh_at).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC",
+      })
+    : null;
+
   return (
     <>
       <div className="page-head">
         <div>
           <h1>{data.subject_name}</h1>
           <div className="meta-line">
-            <span>Dashboard view</span>
-            <span className="dot">·</span>
+            {updatedShort && (
+              <>
+                <span>Updated {updatedShort}</span>
+                <span className="dot">·</span>
+              </>
+            )}
             <span>
               {data.meta.n_responses} response
               {data.meta.n_responses === 1 ? "" : "s"} across{" "}
@@ -258,8 +271,15 @@ export default async function AltDashboardPage({
 
       {/* Row 2: per-LLM readout */}
       {perModel.length > 0 && (
-        <div style={{ marginBottom: 24 }}>
-          <div className="section-tag">How each model describes {data.subject_name}</div>
+        <div className="alt-panel" style={{ marginBottom: 24 }}>
+          <div className="alt-panel-head">
+            <span className="alt-panel-title">
+              How each model describes {data.subject_name}
+            </span>
+            <span className="alt-panel-sub">
+              Per-model sentiment, reach, and a sample quote
+            </span>
+          </div>
           <div className="alt-model-grid">
             {perModel.map((m) => {
               const tone = sentTone(m.avg_sentiment);

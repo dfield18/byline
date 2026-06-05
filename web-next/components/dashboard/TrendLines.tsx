@@ -107,7 +107,10 @@ export function TrendLines({
             <path
               key={si}
               className={`trend-line${s.emphasis ? " emphasis" : ""}`}
-              d={buildMonoCubicPath(seg.map((i) => ({ x: x(i), y: y(s.values[i] as number) })))}
+              d={buildMonoCubicPath(
+                seg.map((i) => ({ x: x(i), y: y(s.values[i] as number) })),
+                0.2, // gentler than the default — less swoopy on sparse data
+              )}
               style={{ stroke: s.color }}
             />
           ))}
