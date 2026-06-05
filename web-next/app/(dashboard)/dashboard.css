@@ -2599,7 +2599,24 @@ body {
 /* ── Overview Dashboard density pass (scoped to .alt-dash; brief unaffected) ── */
 /* Header region (bottom line + KPIs) keeps a little breathing room so the top
    doesn't feel crowded; the body grid below stays tight/dense. */
-.alt-dash .page-head { margin-bottom: 24px; }
+/* Dashboard page-head: a compact, low-chrome title bar — much smaller than the
+   reading views' big editorial header. */
+.alt-dash .page-head {
+  align-items: center;
+  margin-bottom: 16px;
+}
+.alt-dash .page-head h1 {
+  font-size: 20px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.alt-dash .page-head .meta-line { margin-top: 3px; font-size: 12px; }
+/* lighter, smaller snapshot button so the header reads clean, not heavy */
+.alt-dash .page-head .dash-btn {
+  padding: 7px 13px;
+  font-size: 13px;
+  border-radius: 8px;
+}
 .alt-dash .vitals { margin-bottom: 20px; padding: 17px 22px; }
 .alt-dash .kpi-grid { margin-bottom: 24px; gap: 16px; }
 .alt-dash .alt-grid { margin-bottom: 14px; gap: 14px; }
