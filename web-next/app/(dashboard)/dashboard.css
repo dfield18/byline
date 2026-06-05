@@ -2739,14 +2739,15 @@ body {
   border-radius: 8px;
 }
 .alt-dash .vitals { margin-bottom: 20px; padding: 17px 22px; }
-.alt-dash .kpi-grid { margin-bottom: 24px; gap: 16px; }
+.alt-dash .kpi-grid { margin-bottom: 24px; gap: 18px; }
 .alt-dash .alt-grid { margin-bottom: 14px; gap: 20px; }
 .alt-dash .alt-panel { padding: 18px 20px; }
 .alt-dash > .alt-panel { margin-bottom: 14px; } /* only the standalone per-model panel */
 
-/* KPI tiles */
-.alt-dash .kpi.kpi-compact { padding: 14px 16px; }
-.alt-dash .kpi.kpi-compact .v { margin-top: 7px; font-size: 23px; }
+/* KPI tiles — a touch roomier so label / value / delta / sparkline breathe */
+.alt-dash .kpi.kpi-compact { padding: 16px 18px; }
+.alt-dash .kpi.kpi-compact .v { margin-top: 9px; font-size: 23px; }
+.alt-dash .kpi-compact .kpi-body { gap: 16px; }
 
 /* tighter per-model pull-quotes — this was the tallest, least-dense section */
 .alt-dash .alt-model-grid { gap: 12px; }
@@ -2782,28 +2783,28 @@ body {
 
 /* Executive summary: bottom line · what changed · recommended focus (3 cols).
    Compact — small type and every column clamped so no unit runs long. */
-.vitals.vitals-exec { padding: 16px 24px; margin-bottom: 16px; }
-.vitals-exec .eyebrow { font-size: 10px; margin-bottom: 7px; color: var(--gray); }
+.vitals.vitals-exec { padding: 20px 28px; margin-bottom: 16px; }
+.vitals-exec .eyebrow { font-size: 10px; margin-bottom: 9px; color: var(--gray); }
 /* Bottom line is the lead — a touch larger/heavier, still compact + clamped. */
 .vitals-exec .bottom-line {
   font-size: 15.5px; line-height: 1.5; font-weight: 650; letter-spacing: -0.012em;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 /* top-aligned columns so the three eyebrows line up; stretch keeps the
-   dividers equal height. Recommended focus gets extra horizontal room. */
+   dividers equal height. Generous gutters so the three units don't crowd. */
 .vitals-exec .vexec-row {
   display: grid;
-  grid-template-columns: 1.55fr 0.9fr 1.5fr;
+  grid-template-columns: 1.45fr 1fr 1.4fr;
   column-gap: 0;
   align-items: stretch;
 }
-.vitals-exec .vexec-col { padding: 0 20px; }
+.vitals-exec .vexec-col { padding: 0 28px; }
 .vitals-exec .vexec-col:first-child { padding-left: 0; }
 .vitals-exec .vexec-col:last-child { padding-right: 0; }
 .vitals-exec .vexec-col:not(:last-child) { border-right: 1px solid rgba(28, 24, 14, 0.06); }
 .vchanged-text,
 .vitals-exec .ftext {
-  margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-soft);
+  margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-soft);
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 @media (max-width: 820px) {
@@ -2816,7 +2817,7 @@ body {
   }
 }
 
-.vitals-exec .ftext { font-size: 12px; line-height: 1.45; }
+.vitals-exec .ftext { font-size: 12.5px; line-height: 1.6; }
 
 /* ── Prompt-themes coverage matrix (theme × model) ──────────────────────
    One row per tracked prompt; one column per model. Each cell: a gold rank
@@ -3179,4 +3180,48 @@ body {
   box-shadow:
     0 1px 2px rgba(28, 24, 14, 0.045),
     0 12px 26px -16px rgba(28, 24, 14, 0.18);
+}
+
+/* ── Executive header: exec band + KPI tiles combined into ONE card ──────
+   The briefing band sits on top, a divider, then the four KPI tiles as a
+   borderless row separated by thin rules — so it reads as a single
+   at-a-glance unit instead of two stacked blocks. */
+.alt-dash .alt-summary {
+  background: var(--bg-card);
+  border: 1px solid #ebe6dc;
+  border-radius: 16px;
+  box-shadow:
+    0 1px 2px rgba(28, 24, 14, 0.045),
+    0 12px 26px -16px rgba(28, 24, 14, 0.18);
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+/* the exec band loses its own card chrome and becomes the top section */
+.alt-dash .alt-summary .vitals.vitals-exec {
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+/* the KPI tiles become a borderless, divider-separated row below */
+.alt-dash .alt-summary .kpi-grid { margin: 0; gap: 0; }
+.alt-dash .alt-summary .kpi.kpi-compact {
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  border-right: 1px solid var(--line);
+}
+.alt-dash .alt-summary .kpi.kpi-compact:last-child { border-right: none; }
+/* align the outer tiles' content to the card edge (matches the exec band) */
+.alt-dash .alt-summary .kpi.kpi-compact:first-child { padding-left: 28px; }
+.alt-dash .alt-summary .kpi.kpi-compact:last-child { padding-right: 28px; }
+/* on the 2-col fallback, fix the dividers so the grid still reads cleanly */
+@media (max-width: 860px) {
+  .alt-dash .alt-summary .kpi.kpi-compact:first-child { padding-left: 16px; }
+  .alt-dash .alt-summary .kpi.kpi-compact:nth-child(2) { border-right: none; padding-right: 16px; }
+  .alt-dash .alt-summary .kpi.kpi-compact:nth-child(1),
+  .alt-dash .alt-summary .kpi.kpi-compact:nth-child(2) { border-bottom: 1px solid var(--line); }
 }
