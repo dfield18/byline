@@ -17,7 +17,6 @@ import {
   buildVisibilityGap,
   buildSourceCopy,
   buildCoverageMatrix,
-  buildNarrativeGap,
   modelTakeaway,
   analyticalFrame,
 } from "@/lib/dashboardCopy";
@@ -90,13 +89,6 @@ function shortWeek(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
-function latestOf(values: (number | null)[]): number | null {
-  for (let i = values.length - 1; i >= 0; i--) {
-    if (values[i] !== null) return values[i];
-  }
-  return null;
-}
-
 export default async function AltDashboardPage({
   params,
 }: {
@@ -209,10 +201,11 @@ export default async function AltDashboardPage({
   const visGap = buildVisibilityGap(data);
   const sourceCopy = buildSourceCopy(data);
   const coverage = buildCoverageMatrix(data);
-  const narrativeGap = buildNarrativeGap(data);
-  const modelTake = modelTakeaway(data);
+  // "Where to focus" companion — the top prioritized actions, sourced from the
+  // same recommendations data as the exec-band focus and the Recommendations tab.
   const rec = data.recommended_actions;
-  const whyItMatters = rec?.primary?.why ?? null;
+  const focusActions = rec ? [rec.primary, ...rec.secondary].slice(0, 3) : [];
+  const modelTake = modelTakeaway(data);
   const dateRange =
     hasTrend && weeks.length > 0
       ? `${shortWeek(weeks[0])} – ${shortWeek(weeks[weeks.length - 1])}`
@@ -288,12 +281,6 @@ export default async function AltDashboardPage({
         recommendationsHref={`/subjects/${subjectId}/recommendations`}
         compact
       />
-      {whyItMatters && (
-        <p className="why-it-matters">
-          <span className="why-it-matters-tag">Why it matters</span>
-          {whyItMatters}
-        </p>
-      )}
       <KpiGrid kpis={data.kpis} trajectory={data.trajectory} compact />
 
       {/* Visibility gap — the chart + ranking tell one story */}
@@ -313,16 +300,12 @@ export default async function AltDashboardPage({
             <div className="alt-chart-body">
               <TrendLines labels={weeks.map(shortWeek)} series={trendSeries} height={240} />
               <div className="alt-legend">
-                {trendSeries.map((s) => {
-                  const latest = latestOf(s.values);
-                  return (
-                    <span className="alt-legend-item" key={s.name}>
-                      <i style={{ background: s.color }} />
-                      {s.name}
-                      {latest !== null && <b>{pct0(latest)}</b>}
-                    </span>
-                  );
-                })}
+                {trendSeries.map((s) => (
+                  <span className="alt-legend-item" key={s.name}>
+                    <i style={{ background: s.color }} />
+                    {s.name}
+                  </span>
+                ))}
               </div>
             </div>
           ) : (
@@ -376,29 +359,28 @@ export default async function AltDashboardPage({
         </div>
       </div>
 
-      {/* What drives the gap — prompt patterns (matrix) ║ missing associations
-          (narrative gap), the cause behind the visibility outcome above */}
+      {/* What drives the gap — prompt patterns (matrix) ║ gaps to close, the
+          cause behind the visibility outcome above */}
       <div className="alt-section-head">
         <span className="alt-section-title">What drives the gap</span>
         <span className="alt-section-sub">
-          Prompt patterns and missing associations explain where AI surfaces{" "}
-          {data.subject_name} — and where it leaves the subject out.
+          Where AI surfaces the subject — and where it doesn&apos;t.
         </span>
       </div>
-      <div className="alt-grid alt-grid-themes">
+      <div className="alt-grid alt-grid-drivers">
       {coverage.rows.length > 0 && coverage.platforms.length > 0 && (
-        <div className="alt-panel alt-panel-themes">
+        <div className="alt-panel">
           <div className="alt-panel-head">
             <span className="alt-panel-title">Prompt themes driving this result</span>
             <span className="alt-panel-sub">
-              Which models surface {data.subject_name} on each tracked theme
+              Per-model prominence and association strength
             </span>
             <Link href={`/subjects/${subjectId}/prompts`} className="alt-panel-link">
               View all prompts →
             </Link>
           </div>
           <div
-            className="pt-matrix"
+            className="pt-matrix pt-matrix-strength"
             style={{ ["--ptm-cols" as string]: coverage.platforms.length }}
           >
             <div className="pt-matrix-row pt-matrix-head">
@@ -408,6 +390,7 @@ export default async function AltDashboardPage({
                   <ModelLogo slug={p.slug} size={20} />
                 </span>
               ))}
+              <span className="ptm-cell ptm-strength-cell">Association</span>
             </div>
             {coverage.rows.map((row) => (
               <div
@@ -453,36 +436,47 @@ export default async function AltDashboardPage({
                     )}
                   </span>
                 ))}
+                <span className="ptm-cell ptm-strength-cell">
+                  <span className={`ng-level ng-${row.level}`}>
+                    {NARRATIVE_LEVEL_LABEL[row.level]}
+                  </span>
+                </span>
               </div>
             ))}
           </div>
           <div className="pt-matrix-legend">
             <span className="ptm-legend-text">
-              Scores show prominence percentile within AI answers. 100 = top of
-              field; 0 = not mentioned.
+              Prominence percentile (100 = top, 0 = not mentioned) · Association =
+              link strength.
             </span>
           </div>
         </div>
       )}
-      {narrativeGap.rows.length > 0 && (
-        <div className="alt-panel alt-panel-narrative">
+      {focusActions.length > 0 && (
+        <div className="alt-panel alt-panel-focus">
           <div className="alt-panel-head">
-            <span className="alt-panel-title">Narrative gap</span>
+            <span className="alt-panel-title">Where to focus</span>
             <span className="alt-panel-sub">
-              Which associations AI makes — and which it misses
+              Prioritized moves to close the gaps
             </span>
+            <Link
+              href={`/subjects/${subjectId}/recommendations`}
+              className="alt-panel-link"
+            >
+              View recommendations →
+            </Link>
           </div>
-          <p className="alt-model-takeaway">{narrativeGap.takeaway}</p>
-          <div className="ng-list">
-            {narrativeGap.rows.map((r, i) => (
-              <div className="ng-row" key={r.label + i} title={r.full}>
-                <span className={`ng-level ng-${r.level}`}>
-                  {NARRATIVE_LEVEL_LABEL[r.level]}
-                </span>
-                <span className="ng-theme">{r.label}</span>
-              </div>
+          <ol className="focus-list">
+            {focusActions.map((a, i) => (
+              <li className="focus-item" key={i}>
+                <span className="focus-num">{i + 1}</span>
+                <div className="focus-body">
+                  <span className="focus-label">{a.label}</span>
+                  <p className="focus-why">{a.why}</p>
+                </div>
+              </li>
             ))}
-          </div>
+          </ol>
         </div>
       )}
       </div>
@@ -563,7 +557,7 @@ export default async function AltDashboardPage({
           <div className="alt-panel alt-panel-topsrc">
             <div className="alt-panel-head">
               <span className="alt-panel-title">Top sources</span>
-              <span className="alt-panel-sub">Most-cited domains</span>
+              <span className="alt-panel-sub">Most-used domains</span>
               <Link href={`/subjects/${subjectId}/sources`} className="alt-panel-link">
                 View all sources →
               </Link>
@@ -575,7 +569,10 @@ export default async function AltDashboardPage({
                 <span className="s-val">Cites</span>
                 <span className="s-type">Type</span>
               </div>
-              {data.sources.slice(0, 6).map((s) => (
+              {[...data.sources]
+                .sort((a, b) => b.response_coverage - a.response_coverage)
+                .slice(0, 5)
+                .map((s) => (
                 <a
                   className="alt-src-row alt-src-link"
                   key={s.name}

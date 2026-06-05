@@ -2330,20 +2330,44 @@ body {
   margin-bottom: 24px;
 }
 .alt-grid-top { grid-template-columns: 1.55fr 1fr; align-items: stretch; }
-/* Prompt themes (left) ║ Top sources (right) — two compact tables side by side,
-   locked to equal height (no void under the shorter one) */
-.alt-grid-themes { grid-template-columns: 1.1fr 1fr; align-items: stretch; }
-@media (max-width: 940px) { .alt-grid-themes { grid-template-columns: 1fr; } }
-.alt-panel-themes { display: flex; flex-direction: column; }
-/* push the legend to the bottom so it fills the card when stretched */
-.alt-panel-themes .pt-matrix-legend { margin-top: auto; padding-top: 12px; }
 
-/* Sources section: Top sources (wider) ║ Source type mix (narrower). The donut
-   stacks above its bars in the narrow column so it never gets cramped. */
-.alt-grid-sources2 { grid-template-columns: 1.5fr 1fr; align-items: start; }
+/* What drives the gap: Prompt-themes matrix (wider) ║ Where-to-focus (narrower) */
+.alt-grid-drivers { grid-template-columns: 1.6fr 1fr; align-items: stretch; }
+@media (max-width: 940px) { .alt-grid-drivers { grid-template-columns: 1fr; } }
+/* Where-to-focus: the top prioritized actions (numbered), sourced from the
+   recommendations data. Spaced to fill the matrix's height. */
+.alt-panel-focus { display: flex; flex-direction: column; }
+.focus-list {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 14px;
+  justify-content: space-around; flex: 1;
+}
+.focus-item { display: flex; gap: 11px; }
+.focus-num {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(138, 109, 47, 0.13); color: var(--accent-bronze-deep);
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  display: grid; place-items: center; margin-top: 1px;
+}
+.focus-body { min-width: 0; }
+.focus-label {
+  display: block; font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--ink); line-height: 1.35;
+}
+.focus-why {
+  margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--gray);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* Sources section: Top sources (wider) ║ Source type mix (narrower), locked to
+   equal height. The donut stacks above its bars in the narrow column and the
+   whole block centers vertically so it fills the matched height cleanly. */
+.alt-grid-sources2 { grid-template-columns: 1.5fr 1fr; align-items: stretch; }
 @media (max-width: 880px) { .alt-grid-sources2 { grid-template-columns: 1fr; } }
+.alt-grid-sources2 .alt-panel-srctypes { display: flex; flex-direction: column; }
 .alt-grid-sources2 .alt-donut-wrap-wide {
-  flex-direction: column; align-items: stretch; gap: 18px;
+  flex: 1;
+  flex-direction: column; align-items: stretch; justify-content: center; gap: 18px;
 }
 .alt-grid-sources2 .alt-donut-wrap-wide .donut-svg { align-self: center; }
 /* the chart card stretches to the ranking's height; its plot + legend center in
@@ -2716,8 +2740,8 @@ body {
 }
 .alt-dash .vitals { margin-bottom: 20px; padding: 17px 22px; }
 .alt-dash .kpi-grid { margin-bottom: 24px; gap: 16px; }
-.alt-dash .alt-grid { margin-bottom: 14px; gap: 14px; }
-.alt-dash .alt-panel { padding: 15px 18px; }
+.alt-dash .alt-grid { margin-bottom: 14px; gap: 20px; }
+.alt-dash .alt-panel { padding: 18px 20px; }
 .alt-dash > .alt-panel { margin-bottom: 14px; } /* only the standalone per-model panel */
 
 /* KPI tiles */
@@ -2882,6 +2906,11 @@ body {
   border-radius: 7px;
   transition: background 0.12s ease;
 }
+/* variant with a trailing "Association" strength-badge column */
+.pt-matrix-strength .pt-matrix-row {
+  grid-template-columns: minmax(0, 1fr) repeat(var(--ptm-cols, 2), 52px) 108px;
+}
+.ptm-strength-cell .ng-level { width: 84px; }
 .pt-matrix-row:not(.pt-matrix-head) { text-decoration: none; }
 .pt-matrix-row:not(.pt-matrix-head):hover { background: var(--bg-sand); }
 .pt-matrix-head {
@@ -2933,20 +2962,11 @@ body {
   min-width: 18px; height: 15px; padding: 0 4px; font-size: 9px;
 }
 
-/* ── Narrative gap card (What drives the gap, paired with Prompt themes) ──
-   Buckets each theme into Strong / Moderate / Weak / Missing associations. */
-.alt-panel-narrative { display: flex; flex-direction: column; }
-.ng-list { display: flex; flex-direction: column; margin-top: auto; }
-.ng-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 9px 8px; margin: 0 -8px;
-  border-top: 1px solid var(--line);
-  border-radius: 7px;
-  transition: background 0.12s ease;
-}
-.ng-row:first-child { border-top: none; }
-.ng-row:hover { background: var(--bg-sand); }
+/* ── Association strength badges (Strong / Moderate / Weak / Missing) ──────
+   The "Association" column of the Prompt-themes matrix — how strongly AI links
+   the subject to each theme. Muted, accessible token colors. */
 .ng-level {
+  display: inline-block;
   flex: none; width: 72px; text-align: center;
   padding: 3px 0; border-radius: 6px;
   font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
@@ -2955,10 +2975,6 @@ body {
 .ng-moderate { background: rgba(138, 109, 47, 0.13); color: var(--accent-bronze-deep); }
 .ng-weak { background: var(--neu-bg); color: var(--neu); }
 .ng-missing { background: var(--neg-bg); color: var(--neg); }
-.ng-theme {
-  min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink-soft);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
 
 /* model frame label */
 .mq-frame {
@@ -3002,7 +3018,7 @@ body {
 }
 .alt-section-sub { font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
 
-.alt-section-head { margin: 6px 0 14px; }
+.alt-section-head { margin: 26px 0 15px; }
 .alt-section-head::before {
   content: "";
   display: block;
@@ -3015,9 +3031,9 @@ body {
 .alt-section-head .alt-section-title { display: block; margin: 0 0 6px; font-size: 16px; }
 .alt-section-head .alt-section-sub { display: block; max-width: 92ch; line-height: 1.55; }
 
-/* item 10 polish: a touch more air between sections, more legible subtitles */
+/* clear "chapter" breaks between sections so the page breathes */
 .alt-dash .alt-grid { margin-bottom: 18px; }
-.alt-dash > .alt-panel { margin-bottom: 18px; }
+.alt-dash > .alt-panel { margin: 26px 0 18px; } /* standalone per-model panel */
 .alt-dash .kpi-grid { margin-bottom: 18px; }
 .alt-panel-sub { font-size: 12.5px; color: var(--gray); }
 

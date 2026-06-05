@@ -21,30 +21,37 @@ function freqWord(p: number): string {
 }
 
 /**
- * "What changed" as a terse, scannable list with the actual numbers —
- * e.g. "Mention 80→50% · Citation 5→15% · Sentiment neutral". Arrow notation
- * keeps it compact for the dashboard's small summary column.
+ * "What changed" as ONE qualitative sentence — no numbers (the KPI delta chips
+ * already own the exact figures). Describes the direction/magnitude of the shift
+ * in plain language, e.g. "Mentions fell sharply while citations edged up."
  */
 export function buildWhatChangedSentence(kpis: SubjectOverview["kpis"]): string {
-  const move = (k: KpiValue, noun: string): string | null => {
+  // delta is in percentage points; `big` is the pp threshold for "sharp".
+  const dirWord = (k: KpiValue, big: number): string | null => {
     if (k.value === null) return null;
-    const cur = Math.round(k.value * 100);
-    if (k.delta === null || Math.round(k.delta) === 0) return `${noun} ${cur}%`;
-    const prior = cur - Math.round(k.delta);
-    return `${noun} ${prior}→${cur}%`;
+    if (k.delta === null || Math.round(k.delta) === 0) return "held steady";
+    const sharp = Math.abs(k.delta) >= big;
+    if (k.delta < 0) return sharp ? "fell sharply" : "slipped";
+    return sharp ? "climbed sharply" : "edged up";
   };
-  const parts = [
-    move(kpis.ai_recall, "Mention"),
-    move(kpis.citation_rate, "Citation"),
-  ].filter((p): p is string => p !== null);
+
+  const clauses: string[] = [];
+  const m = dirWord(kpis.ai_recall, 20);
+  if (m) clauses.push(`mentions ${m}`);
+  const c = dirWord(kpis.citation_rate, 20);
+  if (c) clauses.push(`citations ${c}`);
 
   const s = kpis.avg_sentiment;
-  const tone =
-    s.value === null ? null : s.value > 0.1 ? "positive" : s.value < -0.1 ? "negative" : "neutral";
-  if (tone) parts.push(`Sentiment ${tone}`);
+  if (s.value !== null) {
+    const tone = s.value > 0.1 ? "positive" : s.value < -0.1 ? "negative" : "neutral";
+    if (s.delta === null || Math.abs(s.delta) < 1) clauses.push(`sentiment stayed ${tone}`);
+    else clauses.push(`sentiment ${s.delta > 0 ? "edged up" : "edged down"}`);
+  }
 
-  if (parts.length === 0) return "Little change.";
-  return parts.join(" · ");
+  if (clauses.length === 0) return "Little movement since the last snapshot.";
+  const last = clauses.pop()!;
+  const head = clauses.length ? `${clauses.join(", ")} while ${last}` : last;
+  return `${head.charAt(0).toUpperCase()}${head.slice(1)}.`;
 }
 
 /** "What changed since last snapshot" — one bullet per KPI, from value+delta. */
@@ -188,6 +195,11 @@ function themeLabel(prompt: string, topic: string | null): string {
   return phrase.charAt(0).toUpperCase() + phrase.slice(1);
 }
 
+// How strongly AI associates the subject with a theme — shown as a badge column
+// in the coverage matrix. Strong = on every model and near the top; Moderate =
+// on every model but lower; Weak = only some models; Missing = none.
+export type NarrativeLevel = "strong" | "moderate" | "weak" | "missing";
+
 export type CoverageCell = {
   slug: string;
   mentioned: boolean; // the subject was mentioned on this model for this prompt
@@ -200,6 +212,7 @@ export type CoverageRow = {
   full: string; // full prompt (tooltip)
   cells: CoverageCell[]; // aligned to the platforms column order
   coverage: number; // how many models mentioned the subject (for sorting)
+  level: NarrativeLevel; // strength of association (badge column)
 };
 
 /**
@@ -231,6 +244,7 @@ export function buildCoverageMatrix(
     return Math.max(0, Math.min(100, p));
   };
 
+  const total = platforms.length;
   const rows: CoverageRow[] = [];
   for (const p of overview.per_prompt_coverage) {
     const full = (p.rendered || p.template || "").trim();
@@ -247,57 +261,26 @@ export function buildCoverageMatrix(
         percentile: r?.mentioned === true ? rankPercentile(rank) : null,
       };
     });
-    rows.push({
-      label: themeLabel(full, p.topic_label),
-      full,
-      cells,
-      coverage: cells.filter((c) => c.mentioned).length,
-    });
-  }
-  rows.sort((a, b) => b.coverage - a.coverage);
-  return { platforms, rows: rows.slice(0, 8) };
-}
-
-export type NarrativeLevel = "strong" | "moderate" | "weak" | "missing";
-export type NarrativeGapRow = { level: NarrativeLevel; label: string; full: string };
-
-/**
- * "Narrative gap" — bucket each tracked theme by how strongly AI associates the
- * subject with it, from the same per-prompt coverage. Strong = mentioned on
- * every model and near the top; Moderate = on every model but lower; Weak =
- * only some models; Missing = none. Summarizes what the prompt-themes matrix
- * implies: which associations drive the visibility gap.
- */
-export function buildNarrativeGap(
-  overview: SubjectOverview,
-): { takeaway: string; rows: NarrativeGapRow[] } {
-  const slugs = new Set<string>();
-  for (const p of overview.per_prompt_coverage)
-    for (const r of p.platform_results) slugs.add(r.slug);
-  const total = Math.max(1, slugs.size);
-
-  const rows: NarrativeGapRow[] = [];
-  for (const p of overview.per_prompt_coverage) {
-    const full = (p.rendered || p.template || "").trim();
-    if (!full) continue;
-    const hits = p.platform_results.filter((r) => r.mentioned === true);
+    const hits = cells.filter((c) => c.mentioned);
     const avgRank = hits.length
-      ? hits.reduce((a, r) => a + (r.rank ?? 99), 0) / hits.length
+      ? hits.reduce((a, c) => a + (c.rank ?? 99), 0) / hits.length
       : null;
     let level: NarrativeLevel;
     if (hits.length === 0) level = "missing";
     else if (hits.length >= total && avgRank !== null && avgRank <= 2) level = "strong";
     else if (hits.length >= total) level = "moderate";
     else level = "weak";
-    rows.push({ level, label: themeLabel(full, p.topic_label), full });
-  }
-  const order: Record<NarrativeLevel, number> = { strong: 0, moderate: 1, weak: 2, missing: 3 };
-  rows.sort((a, b) => order[a.level] - order[b.level]);
 
-  return {
-    takeaway: `AI associates ${overview.subject_name} with some themes far more than others — the weak and missing links below are what hold the visibility gap in place.`,
-    rows: rows.slice(0, 6),
-  };
+    rows.push({
+      label: themeLabel(full, p.topic_label),
+      full,
+      cells,
+      coverage: hits.length,
+      level,
+    });
+  }
+  rows.sort((a, b) => b.coverage - a.coverage);
+  return { platforms, rows: rows.slice(0, 8) };
 }
 
 /** Make a model frame_label read as an analytical "frame". */
@@ -318,5 +301,5 @@ export function modelOpportunity(overview: SubjectOverview): string {
  * leadership and power structures.
  */
 export function modelTakeaway(overview: SubjectOverview): string {
-  return `Models describe ${overview.subject_name} clearly, but split between biography and ideology rather than linking the subject to current leadership and power structures.`;
+  return `Models describe ${overview.subject_name} clearly but split between biography and ideology — rarely tying the subject to current leadership.`;
 }
