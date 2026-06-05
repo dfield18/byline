@@ -3,6 +3,8 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
+import { RefreshButton } from "@/app/(dashboard)/subjects/[id]/refresh-button";
+import { useHeaderTitle } from "@/components/dashboard/HeaderTitle";
 
 // Clerk's UserButton portal-mounts after hydration, so SSR-ing it would
 // produce a server/client markup mismatch. Loading it with ssr:false
@@ -27,12 +29,32 @@ function titleForPath(pathname: string): string {
 export function Header() {
   const pathname = usePathname();
   const title = titleForPath(pathname);
+  // A page can push its own heading + meta up here (e.g. the Overview Dashboard
+  // shows the subject name + snapshot meta on this top line).
+  const pageTitle = useHeaderTitle();
+
+  // On the Overview Dashboard, surface the snapshot action up here on the top
+  // line (next to New subject) rather than in the page body's header row.
+  const dashMatch = pathname.match(/^\/subjects\/(\d+)\/dashboard$/);
+  const dashboardSubjectId = dashMatch ? Number(dashMatch[1]) : null;
 
   return (
     <header className="dash-header">
       <div className="dash-header-inner">
-        <span className="title">{title}</span>
+        {pageTitle ? (
+          <div className="dash-header-subject">
+            <span className="dash-header-name">{pageTitle.heading}</span>
+            {pageTitle.meta && (
+              <span className="dash-header-meta">{pageTitle.meta}</span>
+            )}
+          </div>
+        ) : (
+          <span className="title">{title}</span>
+        )}
         <div className="actions">
+          {dashboardSubjectId !== null && (
+            <RefreshButton subjectId={dashboardSubjectId} />
+          )}
           <Link href="/subjects/new" className="dash-btn dash-btn-accent">
             <svg
               className="ico"

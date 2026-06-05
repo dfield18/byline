@@ -1,6 +1,7 @@
 import "./dashboard.css";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Header } from "@/components/dashboard/Header";
+import { HeaderTitleProvider } from "@/components/dashboard/HeaderTitle";
 
 // Persistent chrome for every authenticated route. Lives in a route
 // GROUP — `(dashboard)` adds no URL segment — so the marketing landing
@@ -17,12 +18,14 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="dash-root">
-      <Sidebar />
-      <div className="dash-main-col">
-        <Header />
-        <main className="dash-main">{children}</main>
+    <HeaderTitleProvider>
+      <div className="dash-root">
+        <Sidebar />
+        <div className="dash-main-col">
+          <Header />
+          <main className="dash-main">{children}</main>
+        </div>
       </div>
-    </div>
+    </HeaderTitleProvider>
   );
 }

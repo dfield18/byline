@@ -1,24 +1,33 @@
+"use client";
+
 /**
  * TrendLines — a small multi-series line chart, hand-rolled SVG (no chart lib,
- * matching the rest of the dashboard / Sparkline). Used by the alternate
- * dashboard's Visibility Trend panel to plot the subject's mention rate against
- * its top competitors over the tracked snapshots.
+ * matching the rest of the dashboard / Sparkline). Used by the Overview
+ * Dashboard's Visibility panel to plot the subject's mention rate against its
+ * top competitors over the tracked snapshots.
  *
- * Lines are smoothed with the same monotone-cubic interpolation as Sparkline
- * (never overshoots, so a rate curve can't peak above the axis). Null values
- * break the line (a gap) rather than interpolating across missing weeks.
+ * Interactive: hovering anywhere over the plot snaps to the nearest week and
+ * shows a crosshair + a tooltip listing every line's value at that week. Lines
+ * are monotone-cubic smoothed (never overshoots); null values break the line.
+ *
+ * Client component — so values are 0..1 rates formatted as percentages here
+ * (no function props pass the server/client boundary).
  */
+import { useState } from "react";
 import { buildMonoCubicPath } from "@/components/dashboard/Sparkline";
 
 export type TrendSeries = {
   name: string;
   values: (number | null)[]; // aligned to `labels`
   color: string;
-  emphasis?: boolean; // the focal subject — drawn thicker, with dots
+  emphasis?: boolean; // the focal subject — drawn thicker
 };
 
+function fmtPct(v: number): string {
+  return `${Math.round(v * 100)}%`;
+}
+
 function buildSegments(values: (number | null)[]): number[][] {
-  // Contiguous runs of non-null indices → each becomes its own polyline.
   const segments: number[][] = [];
   let cur: number[] = [];
   values.forEach((v, i) => {
@@ -36,14 +45,14 @@ function buildSegments(values: (number | null)[]): number[][] {
 export function TrendLines({
   labels,
   series,
-  format,
   height = 290,
 }: {
   labels: string[];
   series: TrendSeries[];
-  format: (v: number) => string;
   height?: number;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
+
   const W = 760;
   const H = height;
   const padL = 44;
@@ -52,9 +61,6 @@ export function TrendLines({
   const padB = 28;
   const n = labels.length;
 
-  // Values are 0..1 rates. Cap the axis at a clean 25%-multiple ceiling that
-  // never exceeds 100% (no more "115%"), and draw gridlines on the round 25%
-  // marks up to that ceiling.
   const allVals = series.flatMap((s) => s.values.filter((v): v is number => v !== null));
   const rawMax = allVals.length ? Math.max(...allVals) : 1;
   const yMax = Math.max(0.25, Math.min(1, Math.ceil((rawMax * 1.05) / 0.25) * 0.25));
@@ -63,72 +69,114 @@ export function TrendLines({
   const y = (v: number) => padT + (1 - v / yMax) * (H - padT - padB);
 
   const gridVals = [0, 0.25, 0.5, 0.75, 1].filter((v) => v <= yMax + 1e-9);
-
-  // x tick indices: first, middle, last (avoid crowding).
   const xTicks = n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
 
+  // Map a mouse position over the SVG to the nearest data index. The SVG keeps
+  // its viewBox aspect (width:100%, height:auto), so clientX maps linearly.
+  function onMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width === 0 || n <= 1) return;
+    const vbX = ((e.clientX - rect.left) / rect.width) * W;
+    const i = Math.round(((vbX - padL) / (W - padL - padR)) * (n - 1));
+    setHover(Math.max(0, Math.min(n - 1, i)));
+  }
+
+  // Tooltip horizontal position (% of the chart width), clamped from the edges.
+  const tipLeft =
+    hover === null ? 0 : Math.max(12, Math.min(88, (x(hover) / W) * 100));
+
   return (
-    <svg
-      className="trend-svg"
-      viewBox={`0 0 ${W} ${H}`}
-      role="img"
-      aria-label="Visibility trend over time"
-    >
-      {gridVals.map((gv, i) => (
-        <g key={i}>
-          <line
-            className="trend-grid"
-            x1={padL}
-            x2={W - padR}
-            y1={y(gv)}
-            y2={y(gv)}
-          />
-          <text className="trend-ylabel" x={padL - 8} y={y(gv) + 3} textAnchor="end">
-            {format(gv)}
+    <div className="trend-wrap">
+      <svg
+        className="trend-svg"
+        viewBox={`0 0 ${W} ${H}`}
+        role="img"
+        aria-label="Visibility trend over time"
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}
+      >
+        {gridVals.map((gv, i) => (
+          <g key={i}>
+            <line className="trend-grid" x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} />
+            <text className="trend-ylabel" x={padL - 8} y={y(gv) + 3} textAnchor="end">
+              {fmtPct(gv)}
+            </text>
+          </g>
+        ))}
+
+        {xTicks.map((ti) => (
+          <text
+            key={ti}
+            className="trend-xlabel"
+            x={x(ti)}
+            y={H - 8}
+            textAnchor={ti === 0 ? "start" : ti === n - 1 ? "end" : "middle"}
+          >
+            {labels[ti]}
           </text>
-        </g>
-      ))}
+        ))}
 
-      {xTicks.map((ti) => (
-        <text
-          key={ti}
-          className="trend-xlabel"
-          x={x(ti)}
-          y={H - 8}
-          textAnchor={ti === 0 ? "start" : ti === n - 1 ? "end" : "middle"}
-        >
-          {labels[ti]}
-        </text>
-      ))}
+        {/* crosshair at the hovered week */}
+        {hover !== null && (
+          <line
+            className="trend-cursor"
+            x1={x(hover)}
+            x2={x(hover)}
+            y1={padT}
+            y2={H - padB}
+          />
+        )}
 
-      {series.map((s) => (
-        <g key={s.name}>
-          {buildSegments(s.values).map((seg, si) => (
-            <path
-              key={si}
-              className={`trend-line${s.emphasis ? " emphasis" : ""}`}
-              d={buildMonoCubicPath(
-                seg.map((i) => ({ x: x(i), y: y(s.values[i] as number) })),
-                0.2, // gentler than the default — less swoopy on sparse data
-              )}
-              style={{ stroke: s.color }}
-            />
-          ))}
-          {s.emphasis &&
-            s.values.map((v, i) =>
+        {series.map((s) => (
+          <g key={s.name}>
+            {buildSegments(s.values).map((seg, si) => (
+              <path
+                key={si}
+                className={`trend-line${s.emphasis ? " emphasis" : ""}`}
+                d={buildMonoCubicPath(
+                  seg.map((i) => ({ x: x(i), y: y(s.values[i] as number) })),
+                  0.2,
+                )}
+                style={{ stroke: s.color }}
+              />
+            ))}
+            {/* point markers; the hovered week's marker is enlarged */}
+            {s.values.map((v, i) =>
               v === null ? null : (
                 <circle
                   key={i}
-                  className="trend-dot"
+                  className={`trend-dot${s.emphasis ? " emphasis" : ""}`}
                   cx={x(i)}
                   cy={y(v)}
-                  r={3}
+                  r={hover === i ? 4.5 : s.emphasis ? 3 : 2.4}
                   style={{ fill: s.color }}
                 />
               ),
             )}
-        </g>
-      ))}
-    </svg>
+          </g>
+        ))}
+      </svg>
+
+      {hover !== null && (
+        <div
+          className="trend-tip"
+          style={{ left: `${tipLeft}%` }}
+          aria-hidden
+        >
+          <div className="trend-tip-date">{labels[hover]}</div>
+          {series.map((s) => {
+            const v = s.values[hover];
+            if (v === null || v === undefined) return null;
+            return (
+              <div className="trend-tip-row" key={s.name}>
+                <i style={{ background: s.color }} />
+                <span className="trend-tip-name">{s.name}</span>
+                <b>{fmtPct(v)}</b>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

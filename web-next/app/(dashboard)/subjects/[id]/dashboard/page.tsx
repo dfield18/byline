@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import {
-  getSubjectOverview,
+  getSubjectOverviewCached,
   getSubject,
   type SubjectOverview,
   type SubjectDetail,
@@ -9,6 +9,7 @@ import { TrendLines, type TrendSeries } from "@/components/dashboard/TrendLines"
 import { SourceDonut, type DonutSegment } from "@/components/dashboard/SourceDonut";
 import { VitalsBlock, KpiGrid } from "@/components/dashboard/overviewKpis";
 import { ModelLogo, modelBrandColor } from "@/components/dashboard/ModelLogo";
+import { SetHeaderTitle } from "@/components/dashboard/HeaderTitle";
 import { RefreshButton } from "../refresh-button";
 
 /**
@@ -91,7 +92,7 @@ export default async function AltDashboardPage({
   let subject: SubjectDetail;
   try {
     [data, subject] = await Promise.all([
-      getSubjectOverview(subjectId),
+      getSubjectOverviewCached(subjectId),
       getSubject(subjectId),
     ]);
   } catch (e) {
@@ -173,28 +174,19 @@ export default async function AltDashboardPage({
       })
     : null;
 
+  const nResp = data.meta.n_responses;
+  const nPlat = data.meta.n_platforms;
+  const headerMeta = [
+    updatedShort ? `Updated ${updatedShort}` : null,
+    `${nResp} response${nResp === 1 ? "" : "s"} across ${nPlat} platform${nPlat === 1 ? "" : "s"}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div className="alt-dash">
-      <div className="page-head">
-        <div>
-          <h1>{data.subject_name}</h1>
-          <div className="meta-line">
-            {updatedShort && (
-              <>
-                <span>Updated {updatedShort}</span>
-                <span className="dot">·</span>
-              </>
-            )}
-            <span>
-              {data.meta.n_responses} response
-              {data.meta.n_responses === 1 ? "" : "s"} across{" "}
-              {data.meta.n_platforms} platform
-              {data.meta.n_platforms === 1 ? "" : "s"}
-            </span>
-          </div>
-        </div>
-        <RefreshButton subjectId={subjectId} />
-      </div>
+      {/* Push the subject name + meta up into the top Header bar. */}
+      <SetHeaderTitle heading={data.subject_name} meta={headerMeta} />
 
       {/* Bottom line + recommended focus, then the four headline KPIs —
           shared with the Overview brief. */}
@@ -214,7 +206,7 @@ export default async function AltDashboardPage({
           </div>
           {hasTrend ? (
             <>
-              <TrendLines labels={weeks.map(shortWeek)} series={trendSeries} format={pct0} height={250} />
+              <TrendLines labels={weeks.map(shortWeek)} series={trendSeries} height={175} />
               <div className="alt-legend">
                 {trendSeries.map((s) => {
                   const latest = latestOf(s.values);

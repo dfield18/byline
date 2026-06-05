@@ -2368,7 +2368,66 @@ body {
 }
 .trend-line { fill: none; stroke-width: 1.9; stroke-linejoin: round; stroke-linecap: round; opacity: 0.9; }
 .trend-line.emphasis { stroke-width: 2.8; opacity: 1; }
-.trend-dot { stroke: var(--bg-card); stroke-width: 1.5; }
+.trend-dot { stroke: var(--bg-card); stroke-width: 1.5; pointer-events: none; }
+/* interactive crosshair + hover tooltip */
+/* compact by default; pops forward (scales up) on hover. transform-based so it
+   doesn't reflow the page and the crosshair tooltip keeps mapping correctly. */
+.trend-wrap {
+  position: relative;
+  border-radius: 10px;
+  transform-origin: center top;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.trend-wrap:hover {
+  transform: scale(1.45);
+  z-index: 30;
+  background: var(--bg-card);
+  box-shadow: 0 16px 46px rgba(20, 18, 12, 0.22);
+}
+.trend-svg { cursor: crosshair; }
+.trend-cursor {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+.trend-tip {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 5;
+  min-width: 124px;
+  padding: 8px 11px;
+  background: var(--bg-card);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: var(--shadow-card);
+  font-size: 12px;
+}
+.trend-tip-date {
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gray);
+}
+.trend-tip-row { display: flex; align-items: center; gap: 7px; line-height: 1.7; }
+.trend-tip-row i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.trend-tip-name {
+  color: var(--ink-soft);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trend-tip-row b {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
 
 .alt-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
 .alt-legend-item {
@@ -2633,3 +2692,14 @@ body {
 .alt-dash .mq-mark { font-size: 36px; height: 20px; }
 .alt-dash .mq-quote { margin: 4px 0 14px; font-size: 14.5px; line-height: 1.5; }
 .alt-dash .mq-foot { padding-top: 11px; }
+
+/* subject name + meta shown in the top Header bar (Overview Dashboard) */
+.dash-header-subject { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dash-header-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  line-height: 1.15;
+}
+.dash-header-meta { font-size: 11.5px; color: var(--gray-light); line-height: 1.2; }
