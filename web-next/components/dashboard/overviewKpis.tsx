@@ -54,28 +54,28 @@ export const KPI_DEFS: KpiDef[] = [
     label: "AI Mention Rate",
     format: "pct",
     higherBetter: true,
-    help: "Percent of AI answers that mention this subject.",
+    help: "Share of AI answers that mention this subject at all. Higher means the subject surfaces more often when these prompts are asked.",
   },
   {
     key: "avg_sentiment",
     label: "Avg Sentiment",
     format: "score",
     higherBetter: true,
-    help: "Average sentiment score across sampled AI responses.",
+    help: "Average tone of AI answers about this subject, scored from −1 (negative) to +1 (positive). Around 0 is neutral.",
   },
   {
     key: "risk_frame_rate",
     label: "Risk Framing",
     format: "pct",
     higherBetter: false,
-    help: "Percent of responses framing the subject around controversy, scandal, extremism, or reputational risk.",
+    help: "Share of answers that frame the subject around controversy, scandal, extremism, or reputational risk. Lower is better.",
   },
   {
     key: "citation_rate",
     label: "Citation Rate",
     format: "pct",
     higherBetter: true,
-    help: "Percent of answers that cite or reference external sources.",
+    help: "Share of AI answers that cite or link an external source when discussing this subject.",
   },
 ];
 
@@ -161,7 +161,10 @@ function KpiCard({
       <div className="kpi kpi-compact">
         <div className="k">
           {def.label}
-          <span className="kpi-info" title={def.help} aria-label={def.help}>i</span>
+          <span className="kpi-info" tabIndex={0} aria-label={def.help}>
+            i
+            <span className="kpi-tip" role="tooltip">{def.help}</span>
+          </span>
         </div>
         <div className="kpi-body">
           <div className="kpi-figures">
@@ -178,7 +181,10 @@ function KpiCard({
     <div className="kpi">
       <div className="k">
           {def.label}
-          <span className="kpi-info" title={def.help} aria-label={def.help}>i</span>
+          <span className="kpi-info" tabIndex={0} aria-label={def.help}>
+            i
+            <span className="kpi-tip" role="tooltip">{def.help}</span>
+          </span>
         </div>
       {valueEl}
       {footer}

@@ -2330,6 +2330,9 @@ body {
   margin-bottom: 24px;
 }
 .alt-grid-top { grid-template-columns: 1.55fr 1fr; align-items: stretch; }
+/* Prompt themes (left) ║ Top sources (right) — two compact tables side by side */
+.alt-grid-themes { grid-template-columns: 1.1fr 1fr; align-items: start; }
+@media (max-width: 940px) { .alt-grid-themes { grid-template-columns: 1fr; } }
 /* the chart card stretches to the ranking's height; its plot + legend center in
    the leftover space so there's no dead void under a short chart */
 .alt-panel-chart { display: flex; flex-direction: column; }
@@ -2377,20 +2380,12 @@ body {
 .trend-area { stroke: none; pointer-events: none; }
 .trend-dot { stroke: var(--bg-card); stroke-width: 1.5; pointer-events: none; opacity: 0.7; }
 .trend-dot.emphasis { opacity: 1; }
-/* interactive crosshair + hover tooltip */
-/* compact by default; pops forward (scales up) on hover. transform-based so it
-   doesn't reflow the page and the crosshair tooltip keeps mapping correctly. */
+/* interactive crosshair + hover tooltip (no zoom — the chart stays put) */
 .trend-wrap {
   position: relative;
   border-radius: 10px;
-  transform-origin: center top;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-.trend-wrap:hover {
-  transform: scale(1.06);
-  z-index: 30;
-}
-.trend-svg { cursor: crosshair; }
+.trend-svg { cursor: default; }
 .trend-cursor {
   stroke: var(--line-strong);
   stroke-width: 1;
@@ -2499,6 +2494,13 @@ body {
 .alt-donut-legend { display: flex; flex-direction: column; gap: 9px; min-width: 160px; flex: 1; }
 .alt-donut-legend .alt-legend-item { width: 100%; }
 .alt-legend-pct { margin-left: auto; color: var(--gray-light); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+/* full-width Source-types section (now below, donut moved out of the 2-col):
+   lay the donut + legend horizontally so it reads as a tidy source-mix strip */
+.alt-donut-wrap-wide { gap: 36px; }
+.alt-donut-legend-row { flex-direction: row; flex-wrap: wrap; gap: 9px 28px; }
+.alt-donut-legend-row .alt-legend-item { width: auto; }
+.alt-donut-legend-row .alt-legend-pct { margin-left: 4px; }
 
 /* sources table */
 .alt-src { display: flex; flex-direction: column; }
@@ -2724,24 +2726,32 @@ body {
 
 /* ── executive briefing additions (Overview Dashboard) ──────────────── */
 
-/* Executive summary: bottom line · what changed · recommended focus (3 cols) */
-.vitals.vitals-exec { padding: 18px 24px; margin-bottom: 16px; }
-/* Bottom line is the dominant element — larger, serif-weight presence — with
-   "what changed" and "recommended focus" as smaller supporting columns. */
-.vitals-exec .bottom-line { font-size: 19px; line-height: 1.38; font-weight: 600; letter-spacing: -0.015em; }
+/* Executive summary: bottom line · what changed · recommended focus (3 cols).
+   Compact — small type and every column clamped so no unit runs long. */
+.vitals.vitals-exec { padding: 13px 22px; margin-bottom: 16px; }
+.vitals-exec .eyebrow { font-size: 9.5px; margin-bottom: 5px; }
+/* Bottom line stays a touch larger as the lead, but kept small + clamped. */
+.vitals-exec .bottom-line {
+  font-size: 14px; line-height: 1.4; font-weight: 600; letter-spacing: -0.01em;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* top-aligned columns so the three eyebrows line up; stretch keeps the
+   dividers equal height. Recommended focus gets extra horizontal room. */
 .vitals-exec .vexec-row {
   display: grid;
-  grid-template-columns: 1.85fr 1fr 1.15fr;
+  grid-template-columns: 1.55fr 0.9fr 1.5fr;
   column-gap: 0;
-  align-items: center;
+  align-items: stretch;
 }
-.vitals-exec .vexec-bottomline .eyebrow { color: var(--accent-bronze-deep); }
-.vitals-exec .vexec-col { padding: 0 24px; }
+.vitals-exec .vexec-col { padding: 0 20px; }
 .vitals-exec .vexec-col:first-child { padding-left: 0; }
 .vitals-exec .vexec-col:last-child { padding-right: 0; }
 .vitals-exec .vexec-col:not(:last-child) { border-right: 1px solid var(--line); }
 .vchanged-text,
-.vitals-exec .ftext { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
+.vitals-exec .ftext {
+  margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink-soft);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
 @media (max-width: 820px) {
   .vitals-exec .vexec-row { grid-template-columns: 1fr; row-gap: 14px; }
   .vitals-exec .vexec-col { padding: 0; }
@@ -2789,7 +2799,7 @@ body {
   background: var(--accent-bronze);
   opacity: 0.55;
 }
-.vitals-exec .ftext { font-size: 13.5px; line-height: 1.55; }
+.vitals-exec .ftext { font-size: 12px; line-height: 1.45; }
 
 /* interpretive sentence under a panel head; date-range pill */
 .alt-interp {
@@ -2827,29 +2837,70 @@ body {
 .rec-action { margin-top: 2px; font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
 .rec-why { margin-top: 3px; font-size: 12px; line-height: 1.5; color: var(--gray-light); }
 
-/* Prompt themes */
-.pt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-@media (max-width: 760px) { .pt-grid { grid-template-columns: 1fr; gap: 16px; } }
-.pt-head {
-  display: flex; align-items: center; gap: 7px;
-  margin-bottom: 10px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--ink-soft);
+/* ── Prompt-themes coverage matrix (theme × model) ──────────────────────
+   One row per tracked prompt; one column per model. Each cell: a gold rank
+   pip (mentioned), a hollow pip (missed), or a faint dot (not asked). */
+.pt-matrix { display: flex; flex-direction: column; }
+.pt-matrix-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(var(--ptm-cols, 2), 52px);
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  margin: 0 -8px;
+  border-top: 1px solid var(--line);
+  border-radius: 7px;
+  transition: background 0.12s ease;
 }
-.pt-head::before { content: ""; width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.pt-head-in::before { background: var(--pos); }
-.pt-head-out::before { background: var(--gray-light); }
-.pt-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.pt-list li {
-  padding: 9px 12px;
-  font-size: 13px; line-height: 1.45; color: var(--ink-soft);
-  background: var(--bg-sand-soft);
-  border: 1px solid var(--line);
-  border-radius: 9px;
+.pt-matrix-row:not(.pt-matrix-head) { text-decoration: none; }
+.pt-matrix-row:not(.pt-matrix-head):hover { background: var(--bg-sand); }
+.pt-matrix-head {
+  border-top: none;
+  padding-bottom: 5px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--gray-light); font-weight: 700;
 }
-.pt-empty { margin: 0; font-size: 12.5px; font-style: italic; color: var(--gray-light); }
-/* data-backed count beside each theme label ("· 3 prompts") */
-.pt-count { color: var(--gray-light); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ptm-theme { min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+.pt-matrix-head .ptm-theme { font-weight: 700; }
+.ptm-theme-text { display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptm-cell { display: grid; place-items: center; }
+
+/* cell pips — compact */
+.ptm-pip {
+  display: inline-grid; place-items: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+/* gold pill holds the prominence percentile (up to 3 digits) */
+.ptm-pip.hit {
+  background: var(--accent-bronze); color: #fff;
+  width: auto; min-width: 26px; height: 18px;
+  padding: 0 6px; border-radius: 9px;
+}
+.ptm-pip.hit.dot { width: 9px; min-width: 0; height: 9px; padding: 0; border-radius: 50%; }
+/* "not mentioned" = an explicit 0 on the same scale, but muted (outline) so the
+   gold filled pills clearly stand out as the real signal */
+.ptm-pip.miss {
+  width: auto; min-width: 26px; height: 18px;
+  padding: 0 6px; border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  color: var(--gray-light);
+  background: transparent;
+}
+.ptm-pip.na { color: var(--gray-light); font-weight: 400; background: transparent; }
+
+/* legend — inline, no divider */
+.pt-matrix-legend {
+  display: flex; gap: 16px; flex-wrap: wrap;
+  margin-top: 9px;
+  font-size: 11px; color: var(--gray);
+}
+.pt-matrix-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.pt-matrix-legend .ptm-pip.hit.dot { width: 10px; height: 10px; }
+.pt-matrix-legend .ptm-pip.miss {
+  min-width: 18px; height: 15px; padding: 0 4px; font-size: 9px;
+}
 
 /* model frame label */
 .mq-frame {
@@ -2912,12 +2963,15 @@ body {
 .alt-dash .kpi-grid { margin-bottom: 18px; }
 .alt-panel-sub { font-size: 12.5px; color: var(--gray); }
 
-/* KPI info icon (hover for the metric definition) */
+/* KPI info icon (hover/focus for the metric definition). On the dashboard's
+   compact cards it's pinned to the TOP-RIGHT corner; a styled tooltip below it
+   shows the full definition. */
 .kpi .k { display: flex; align-items: center; }
 .kpi-info {
+  position: relative;
   display: inline-grid;
   place-items: center;
-  width: 13px; height: 13px;
+  width: 14px; height: 14px;
   margin-left: 5px;
   border-radius: 50%;
   border: 1px solid var(--line-strong);
@@ -2925,11 +2979,40 @@ body {
   font-size: 9px; font-weight: 700; font-style: normal; line-height: 1;
   text-transform: none;
   cursor: help;
+  outline: none;
 }
-.kpi-info:hover { color: var(--ink-soft); border-color: var(--ink-soft); }
+.kpi-info:hover,
+.kpi-info:focus-visible { color: var(--ink-soft); border-color: var(--ink-soft); }
+/* push the icon to the card's top-right on the compact (dashboard) tiles */
+.kpi-compact .kpi-info { margin-left: auto; }
 
-/* prompt-themes: amber/warning accent for the "missing" column */
-.pt-head-out::before { background: #c8983c; }
+/* the definition tooltip — hidden until the icon is hovered/focused */
+.kpi-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: -3px;
+  width: 200px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: var(--ink);
+  color: #f3f1ec;
+  font-size: 11.5px; font-weight: 500; line-height: 1.45;
+  letter-spacing: 0; text-transform: none; text-align: left;
+  box-shadow: 0 12px 28px -10px rgba(16, 16, 26, 0.5);
+  opacity: 0; visibility: hidden; transform: translateY(-3px);
+  transition: opacity 0.13s ease, transform 0.13s ease, visibility 0.13s ease;
+  z-index: 60; pointer-events: none;
+}
+/* small caret pointing up at the icon */
+.kpi-tip::before {
+  content: "";
+  position: absolute;
+  bottom: 100%; right: 6px;
+  border: 5px solid transparent;
+  border-bottom-color: var(--ink);
+}
+.kpi-info:hover .kpi-tip,
+.kpi-info:focus-visible .kpi-tip { opacity: 1; visibility: visible; transform: translateY(0); }
 
 /* priority text folded into the Sources section header */
 .alt-section-priority { color: var(--accent-bronze-deep); font-weight: 600; }

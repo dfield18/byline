@@ -15,7 +15,7 @@ import {
   buildWhatChangedSentence,
   buildVisibilityGap,
   buildSourceCopy,
-  buildPromptThemes,
+  buildCoverageMatrix,
   modelTakeaway,
   analyticalFrame,
 } from "@/lib/dashboardCopy";
@@ -151,9 +151,13 @@ export default async function AltDashboardPage({
     }),
   ];
 
-  // ── Industry ranking ─────────────────────────────────────────────────
-  const ranking = [...data.competitive].sort((a, b) => b.sov - a.sov);
-  const maxSov = Math.max(...ranking.map((c) => c.sov), 0.0001);
+  // ── Competitive landscape ─────────────────────────────────────────────
+  const rankingAll = [...data.competitive].sort((a, b) => b.sov - a.sov);
+  const maxSov = Math.max(...rankingAll.map((c) => c.sov), 0.0001);
+  // Show the top five; always keep the subject's own row even if it ranks lower.
+  const ranking = rankingAll.slice(0, 5);
+  const subjectRow = rankingAll.find((c) => c.is_subject);
+  if (subjectRow && !ranking.includes(subjectRow)) ranking.push(subjectRow);
 
   // ── Per-LLM readout: recall + sentiment + a representative quote ──────
   const perModel = [...data.per_platform_kpis]
@@ -196,7 +200,7 @@ export default async function AltDashboardPage({
   const whatChanged = buildWhatChangedSentence(data.kpis);
   const visGap = buildVisibilityGap(data);
   const sourceCopy = buildSourceCopy(data);
-  const promptThemes = buildPromptThemes(data);
+  const coverage = buildCoverageMatrix(data);
   const modelTake = modelTakeaway(data);
   const rec = data.recommended_actions;
   const whyItMatters = rec?.primary?.why ?? null;
@@ -272,7 +276,7 @@ export default async function AltDashboardPage({
 
         <div className="alt-panel">
           <div className="alt-panel-head">
-            <span className="alt-panel-title">Field ranking</span>
+            <span className="alt-panel-title">Competitive landscape</span>
             <span className="alt-panel-sub">How the field stacks up in AI answers</span>
             <Link href={`/subjects/${subjectId}/competition`} className="alt-panel-link">
               View competitive →
@@ -291,13 +295,13 @@ export default async function AltDashboardPage({
                 Top answer
               </span>
             </div>
-            {ranking.map((c, i) => (
+            {ranking.map((c) => (
               <Link
                 href={`/subjects/${subjectId}/competition`}
                 className={`alt-rank-row alt-rank-link${c.is_subject ? " is-subject" : ""}`}
                 key={c.name}
               >
-                <span className="r-num">{i + 1}</span>
+                <span className="r-num">{rankingAll.indexOf(c) + 1}</span>
                 <span className="r-name" title={c.name}>
                   <span className="r-name-text">{c.name}</span>
                   {c.is_subject && <span className="you">You</span>}
@@ -314,61 +318,130 @@ export default async function AltDashboardPage({
         </div>
       </div>
 
-      {/* Prompt themes — which tracked prompts surface the subject vs miss it */}
-      {(promptThemes.appears.length > 0 || promptThemes.missing.length > 0) && (
+      {/* Prompt-themes coverage matrix ║ Top sources — paired side by side so
+          neither wastes the full page width */}
+      <div className="alt-grid alt-grid-themes">
+      {coverage.rows.length > 0 && coverage.platforms.length > 0 && (
         <div className="alt-panel">
           <div className="alt-panel-head">
             <span className="alt-panel-title">Prompt themes driving this result</span>
             <span className="alt-panel-sub">
-              Where {data.subject_name}
-              {" shows up — and where it’s missing"}
+              Which models surface {data.subject_name} on each tracked theme
             </span>
             <Link href={`/subjects/${subjectId}/prompts`} className="alt-panel-link">
               View all prompts →
             </Link>
           </div>
-          <div className="pt-grid">
-            <div className="pt-col">
-              <div className="pt-head pt-head-in">
-                Where {data.subject_name} appears
-              </div>
-              {promptThemes.appears.length > 0 ? (
-                <ul className="pt-list">
-                  {promptThemes.appears.map((t, i) => (
-                    <li key={i} title={t.full} tabIndex={0} aria-label={t.full}>
-                      {t.label}
-                      <span className="pt-count">
-                        · {t.count} prompt{t.count === 1 ? "" : "s"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="pt-empty">Not surfaced in any tracked prompt yet.</p>
-              )}
+          <div
+            className="pt-matrix"
+            style={{ ["--ptm-cols" as string]: coverage.platforms.length }}
+          >
+            <div className="pt-matrix-row pt-matrix-head">
+              <span className="ptm-theme">Theme</span>
+              {coverage.platforms.map((p) => (
+                <span className="ptm-cell" key={p.slug} title={p.name}>
+                  <ModelLogo slug={p.slug} size={20} />
+                </span>
+              ))}
             </div>
-            <div className="pt-col">
-              <div className="pt-head pt-head-out">
-                Where {data.subject_name} is missing
-              </div>
-              {promptThemes.missing.length > 0 ? (
-                <ul className="pt-list">
-                  {promptThemes.missing.map((t, i) => (
-                    <li key={i} title={t.full} tabIndex={0} aria-label={t.full}>
-                      {t.label}
-                      <span className="pt-count">
-                        · {t.count} prompt{t.count === 1 ? "" : "s"}
+            {coverage.rows.map((row) => (
+              <div
+                className="pt-matrix-row"
+                key={row.label + row.full}
+                title={row.full}
+                tabIndex={0}
+                aria-label={row.full}
+              >
+                <span className="ptm-theme">
+                  <span className="ptm-theme-text">{row.label}</span>
+                </span>
+                {row.cells.map((c) => (
+                  <span className="ptm-cell" key={c.slug}>
+                    {c.mentioned ? (
+                      c.percentile !== null ? (
+                        <span
+                          className="ptm-pip hit"
+                          title={`${MODEL_NAMES[c.slug] ?? c.slug}: mentioned · prominence percentile ${c.percentile} (rank ${c.rank})`}
+                        >
+                          {c.percentile}
+                        </span>
+                      ) : (
+                        <span
+                          className="ptm-pip hit dot"
+                          title={`${MODEL_NAMES[c.slug] ?? c.slug}: mentioned`}
+                        />
+                      )
+                    ) : c.present ? (
+                      <span
+                        className="ptm-pip miss"
+                        title={`${MODEL_NAMES[c.slug] ?? c.slug}: not mentioned (0)`}
+                      >
+                        0
                       </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="pt-empty">Surfaced in every tracked prompt.</p>
-              )}
-            </div>
+                    ) : (
+                      <span
+                        className="ptm-pip na"
+                        title={`${MODEL_NAMES[c.slug] ?? c.slug}: not asked`}
+                      >
+                        ·
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="pt-matrix-legend">
+            <span><i className="ptm-pip hit dot" /> number = prominence percentile (100 = top of field)</span>
+            <span><span className="ptm-pip miss">0</span> not mentioned</span>
           </div>
         </div>
       )}
+      {data.sources.length > 0 && (
+        <div className="alt-panel">
+          <div className="alt-panel-head">
+            <span className="alt-panel-title">Top sources</span>
+            <span className="alt-panel-sub">Most-cited domains</span>
+            <Link href={`/subjects/${subjectId}/sources`} className="alt-panel-link">
+              View all sources →
+            </Link>
+          </div>
+          <div className="alt-src">
+            <div className="alt-src-row alt-src-head">
+              <span className="s-domain">Domain</span>
+              <span className="s-val">Used</span>
+              <span className="s-val">Cites</span>
+              <span className="s-type">Type</span>
+            </div>
+            {data.sources.map((s) => (
+              <a
+                className="alt-src-row alt-src-link"
+                key={s.name}
+                href={`https://${s.name}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Open ${s.name} in a new tab`}
+              >
+                <span className="s-domain">
+                  <span className="s-domain-text">{s.name}</span>
+                  <span className="s-ext" aria-hidden>↗</span>
+                </span>
+                <span className="s-val">{pct0(s.response_coverage)}</span>
+                <span className="s-val">{s.n_citations}</span>
+                <span className="s-type">
+                  <span
+                    className="s-type-badge"
+                    style={{ color: typeColor(s.type), borderColor: typeColor(s.type) }}
+                  >
+                    {s.type}
+                  </span>
+                </span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+      </div>
 
       {/* Row 2: per-LLM readout */}
       {perModel.length > 0 && (
@@ -442,74 +515,30 @@ export default async function AltDashboardPage({
               </p>
             </div>
           )}
-          <div className="alt-grid alt-grid-sources">
-          <div className="alt-panel alt-panel-fill">
+          <div className="alt-panel alt-panel-srctypes">
             <div className="alt-panel-head">
               <span className="alt-panel-title">Source types</span>
               <span className="alt-panel-sub">Citations across active models</span>
-            </div>
-            <div className="alt-srctypes-body">
-              <div className="alt-donut-wrap">
-                <SourceDonut segments={donutSegments} total={totalCitations} />
-                <div className="alt-donut-legend">
-                  {donutSegments.map((s) => {
-                    const p = Math.round((s.value / (totalCitations || 1)) * 100);
-                    return (
-                      <span className="alt-legend-item" key={s.label}>
-                        <i style={{ background: s.color }} />
-                        {s.label}
-                        <b>{s.value}</b>
-                        <span className="alt-legend-pct">{p}%</span>
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="alt-panel">
-            <div className="alt-panel-head">
-              <span className="alt-panel-title">Top sources</span>
-              <span className="alt-panel-sub">Most-cited domains</span>
               <Link href={`/subjects/${subjectId}/sources`} className="alt-panel-link">
                 View all sources →
               </Link>
             </div>
-            <div className="alt-src">
-              <div className="alt-src-row alt-src-head">
-                <span className="s-domain">Domain</span>
-                <span className="s-val">Used</span>
-                <span className="s-val">Cites</span>
-                <span className="s-type">Type</span>
-              </div>
-              {data.sources.map((s) => (
-                <a
-                  className="alt-src-row alt-src-link"
-                  key={s.name}
-                  href={`https://${s.name}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={`Open ${s.name} in a new tab`}
-                >
-                  <span className="s-domain">
-                    <span className="s-domain-text">{s.name}</span>
-                    <span className="s-ext" aria-hidden>↗</span>
-                  </span>
-                  <span className="s-val">{pct0(s.response_coverage)}</span>
-                  <span className="s-val">{s.n_citations}</span>
-                  <span className="s-type">
-                    <span
-                      className="s-type-badge"
-                      style={{ color: typeColor(s.type), borderColor: typeColor(s.type) }}
-                    >
-                      {s.type}
+            <div className="alt-donut-wrap alt-donut-wrap-wide">
+              <SourceDonut segments={donutSegments} total={totalCitations} />
+              <div className="alt-donut-legend alt-donut-legend-row">
+                {donutSegments.map((s) => {
+                  const p = Math.round((s.value / (totalCitations || 1)) * 100);
+                  return (
+                    <span className="alt-legend-item" key={s.label}>
+                      <i style={{ background: s.color }} />
+                      {s.label}
+                      <b>{s.value}</b>
+                      <span className="alt-legend-pct">{p}%</span>
                     </span>
-                  </span>
-                </a>
-              ))}
+                  );
+                })}
+              </div>
             </div>
-          </div>
           </div>
         </>
       )}

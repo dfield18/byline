@@ -20,29 +20,31 @@ function freqWord(p: number): string {
   return "few";
 }
 
-/** "What changed" as one compact prose sentence, WITH the actual numbers. */
+/**
+ * "What changed" as a terse, scannable list with the actual numbers —
+ * e.g. "Mention 80→50% · Citation 5→15% · Sentiment neutral". Arrow notation
+ * keeps it compact for the dashboard's small summary column.
+ */
 export function buildWhatChangedSentence(kpis: SubjectOverview["kpis"]): string {
-  const move = (k: KpiValue, noun: string, up: string, down: string): string | null => {
+  const move = (k: KpiValue, noun: string): string | null => {
     if (k.value === null) return null;
     const cur = Math.round(k.value * 100);
-    if (k.delta === null || Math.round(k.delta) === 0) return `${noun} held at ${cur}%`;
+    if (k.delta === null || Math.round(k.delta) === 0) return `${noun} ${cur}%`;
     const prior = cur - Math.round(k.delta);
-    return `${noun} ${k.delta < 0 ? down : up} from ${prior}% to ${cur}%`;
+    return `${noun} ${prior}→${cur}%`;
   };
   const parts = [
-    move(kpis.ai_recall, "mention rate", "rose", "fell"),
-    move(kpis.citation_rate, "citation rate", "rose", "fell"),
+    move(kpis.ai_recall, "Mention"),
+    move(kpis.citation_rate, "Citation"),
   ].filter((p): p is string => p !== null);
 
   const s = kpis.avg_sentiment;
   const tone =
     s.value === null ? null : s.value > 0.1 ? "positive" : s.value < -0.1 ? "negative" : "neutral";
-  if (tone) parts.push(`sentiment stayed ${tone}`);
+  if (tone) parts.push(`Sentiment ${tone}`);
 
-  if (parts.length === 0) return "Little movement since the last snapshot.";
-  const last = parts.pop()!;
-  const head = parts.length ? `${parts.join(", ")}, and ${last}` : last;
-  return `${head.charAt(0).toUpperCase()}${head.slice(1)}.`;
+  if (parts.length === 0) return "Little change.";
+  return parts.join(" · ");
 }
 
 /** "What changed since last snapshot" — one bullet per KPI, from value+delta. */
@@ -186,35 +188,74 @@ function themeLabel(prompt: string, topic: string | null): string {
   return phrase.charAt(0).toUpperCase() + phrase.slice(1);
 }
 
-export type PromptTheme = { label: string; full: string; count: number };
+export type CoverageCell = {
+  slug: string;
+  mentioned: boolean; // the subject was mentioned on this model for this prompt
+  present: boolean; // the prompt was actually run on this model
+  rank: number | null; // position when mentioned (1 = first)
+  percentile: number | null; // prominence percentile vs the field (100 = top), null if no rank
+};
+export type CoverageRow = {
+  label: string; // short theme label
+  full: string; // full prompt (tooltip)
+  cells: CoverageCell[]; // aligned to the platforms column order
+  coverage: number; // how many models mentioned the subject (for sorting)
+};
 
 /**
- * Prompt themes — short labels with a count of how many tracked prompts fall
- * under each (so the labels read as data-backed, not editorial). Prompts that
- * collapse to the same short label are grouped; every underlying prompt is kept
- * in `full` (newline-joined) for the hover tooltip.
+ * Coverage matrix for the Prompt-themes panel: one row per tracked prompt
+ * (short theme label), one column per model, each cell carrying whether the
+ * subject was mentioned and at what rank. Surfaces the per-platform results the
+ * old two-column "appears / missing" view threw away. Rows are sorted strongest
+ * coverage first so the matrix reads top = owns it, bottom = blind spots.
  */
-export function buildPromptThemes(
+export function buildCoverageMatrix(
   overview: SubjectOverview,
-): { appears: PromptTheme[]; missing: PromptTheme[] } {
-  const collect = (mentioned: boolean): PromptTheme[] => {
-    const groups = new Map<string, string[]>();
-    for (const p of overview.per_prompt_coverage) {
-      const full = (p.rendered || p.template || "").trim();
-      if (!full) continue;
-      const isMentioned = p.platform_results.some((r) => r.mentioned === true);
-      if (isMentioned !== mentioned) continue;
-      const label = themeLabel(full, p.topic_label);
-      const fulls = groups.get(label) ?? [];
-      fulls.push(full);
-      groups.set(label, fulls);
+): { platforms: { slug: string; name: string }[]; rows: CoverageRow[] } {
+  // Columns = union of models seen across prompts, in first-seen order.
+  const platMap = new Map<string, string>();
+  for (const p of overview.per_prompt_coverage) {
+    for (const r of p.platform_results) {
+      if (!platMap.has(r.slug)) platMap.set(r.slug, r.name);
     }
-    return [...groups.entries()]
-      .map(([label, fulls]) => ({ label, full: fulls.join("\n"), count: fulls.length }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
+  }
+  const platforms = [...platMap.entries()].map(([slug, name]) => ({ slug, name }));
+
+  // Prominence percentile: where the subject placed vs the tracked field, so a
+  // raw rank ("2") becomes a self-explanatory "how near the top" score. rank 1
+  // → 100, last place → 0. Field size = the competitive set (subject + rivals).
+  const fieldSize = Math.max(2, overview.competitive.length);
+  const rankPercentile = (rank: number | null): number | null => {
+    if (rank === null) return null;
+    const p = Math.round(((fieldSize - rank) / (fieldSize - 1)) * 100);
+    return Math.max(0, Math.min(100, p));
   };
-  return { appears: collect(true), missing: collect(false) };
+
+  const rows: CoverageRow[] = [];
+  for (const p of overview.per_prompt_coverage) {
+    const full = (p.rendered || p.template || "").trim();
+    if (!full) continue;
+    const bySlug = new Map(p.platform_results.map((r) => [r.slug, r]));
+    const cells: CoverageCell[] = platforms.map(({ slug }) => {
+      const r = bySlug.get(slug);
+      const rank = r?.rank ?? null;
+      return {
+        slug,
+        mentioned: r?.mentioned === true,
+        present: r?.present === true,
+        rank,
+        percentile: r?.mentioned === true ? rankPercentile(rank) : null,
+      };
+    });
+    rows.push({
+      label: themeLabel(full, p.topic_label),
+      full,
+      cells,
+      coverage: cells.filter((c) => c.mentioned).length,
+    });
+  }
+  rows.sort((a, b) => b.coverage - a.coverage);
+  return { platforms, rows: rows.slice(0, 8) };
 }
 
 /** Make a model frame_label read as an analytical "frame". */
