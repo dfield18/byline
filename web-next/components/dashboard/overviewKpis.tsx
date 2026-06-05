@@ -68,11 +68,13 @@ function KpiCard({
   kpi,
   unit,
   spark,
+  compact = false,
 }: {
   def: KpiDef;
   kpi: KpiValue;
   unit: string;
   spark?: KpiSpark;
+  compact?: boolean;
 }) {
   const hasValue = kpi.value !== null;
   const tone = hasValue && def.format === "score" ? sentimentTone(kpi.value) : null;
@@ -108,25 +110,47 @@ function KpiCard({
   const showSpark =
     spark && spark.values.filter((v): v is number => v !== null).length >= 2;
 
+  const valueEl = (
+    <div className="v">
+      {def.format === "pct" ? formatPct(kpi.value) : formatScore(kpi.value)}
+      {tone && <span className={`tone-pill ${tone.cls}`}>{tone.word}</span>}
+    </div>
+  );
+  const sparkEl = showSpark ? (
+    <div className="kpi-spark">
+      <Sparkline
+        values={spark!.values}
+        isHistorical={spark!.isHistorical}
+        labels={spark!.labels}
+        format={def.format === "pct" ? formatPct : formatScore}
+        ariaLabel={`${def.label} trend`}
+      />
+    </div>
+  ) : null;
+
+  // Compact (Overview Dashboard): figures on the left, sparkline beside them on
+  // the right, so the card gets shorter rather than taller.
+  if (compact) {
+    return (
+      <div className="kpi kpi-compact">
+        <div className="k">{def.label}</div>
+        <div className="kpi-body">
+          <div className="kpi-figures">
+            {valueEl}
+            {footer}
+          </div>
+          {sparkEl}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="kpi">
       <div className="k">{def.label}</div>
-      <div className="v">
-        {def.format === "pct" ? formatPct(kpi.value) : formatScore(kpi.value)}
-        {tone && <span className={`tone-pill ${tone.cls}`}>{tone.word}</span>}
-      </div>
+      {valueEl}
       {footer}
-      {showSpark && (
-        <div className="kpi-spark">
-          <Sparkline
-            values={spark!.values}
-            isHistorical={spark!.isHistorical}
-            labels={spark!.labels}
-            format={def.format === "pct" ? formatPct : formatScore}
-            ariaLabel={`${def.label} trend`}
-          />
-        </div>
-      )}
+      {sparkEl}
     </div>
   );
 }
@@ -139,9 +163,11 @@ function KpiCard({
 export function KpiGrid({
   kpis,
   trajectory,
+  compact = false,
 }: {
   kpis: SubjectOverview["kpis"];
   trajectory?: SubjectOverview["trajectory"];
+  compact?: boolean;
 }) {
   return (
     <div className="kpi-grid">
@@ -151,6 +177,7 @@ export function KpiGrid({
           def={def}
           kpi={kpis[def.key]}
           unit={def.format === "score" ? "pts" : "pp"}
+          compact={compact}
           spark={
             trajectory
               ? {
@@ -166,22 +193,28 @@ export function KpiGrid({
   );
 }
 
-/** Bottom-line verdict + recommended focus. Renders nothing if both are empty. */
+/**
+ * Bottom-line verdict + recommended focus. Renders nothing if both are empty.
+ * `compact` (Overview Dashboard) lays the two side-by-side in a denser card; the
+ * brief leaves it stacked and roomy.
+ */
 export function VitalsBlock({
   bottomLine,
   recommendedFocus,
+  compact = false,
 }: {
   bottomLine: string | null;
   recommendedFocus: string | null;
+  compact?: boolean;
 }) {
   if (!bottomLine && !recommendedFocus) return null;
   return (
-    <div className="vitals">
+    <div className={`vitals${compact ? " vitals-compact" : ""}`}>
       {bottomLine && (
-        <>
+        <div className="vline">
           <div className="eyebrow">Bottom line</div>
           <p className="bottom-line">{bottomLine}</p>
-        </>
+        </div>
       )}
       {recommendedFocus && (
         <div className="focus">

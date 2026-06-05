@@ -8,6 +8,7 @@ import {
 import { TrendLines, type TrendSeries } from "@/components/dashboard/TrendLines";
 import { SourceDonut, type DonutSegment } from "@/components/dashboard/SourceDonut";
 import { VitalsBlock, KpiGrid } from "@/components/dashboard/overviewKpis";
+import { ModelLogo, modelBrandColor } from "@/components/dashboard/ModelLogo";
 import { RefreshButton } from "../refresh-button";
 
 /**
@@ -200,8 +201,9 @@ export default async function AltDashboardPage({
       <VitalsBlock
         bottomLine={data.bottom_line}
         recommendedFocus={data.recommended_focus}
+        compact
       />
-      <KpiGrid kpis={data.kpis} trajectory={data.trajectory} />
+      <KpiGrid kpis={data.kpis} trajectory={data.trajectory} compact />
 
       {/* Row 1: visibility trend + industry ranking */}
       <div className="alt-grid alt-grid-top">
@@ -284,25 +286,33 @@ export default async function AltDashboardPage({
             {perModel.map((m) => {
               const tone = sentTone(m.avg_sentiment);
               const quote = excerptFor(m.slug);
+              const brand = modelBrandColor(m.slug);
               return (
-                <div className="alt-model-card" key={m.slug}>
-                  <div className="alt-model-head">
-                    <span className="alt-model-name">{MODEL_NAMES[m.slug] ?? m.name}</span>
+                <div className="mq-card" key={m.slug}>
+                  <span className="mq-accent" style={{ background: brand }} aria-hidden />
+                  <span className="mq-mark" style={{ color: brand }} aria-hidden>
+                    “
+                  </span>
+                  {quote ? (
+                    <p className="mq-quote">{quote}</p>
+                  ) : (
+                    <p className="mq-quote muted">No representative quote surfaced yet.</p>
+                  )}
+                  <div className="mq-foot">
+                    <ModelLogo slug={m.slug} size={30} />
+                    <div className="mq-attr">
+                      <span className="mq-name">{MODEL_NAMES[m.slug] ?? m.name}</span>
+                      <span className="mq-stat">
+                        Mentions in {pct(m.mention_rate)}
+                        {m.avg_rank !== null ? ` · avg rank ${m.avg_rank.toFixed(1)}` : ""}
+                      </span>
+                    </div>
                     {tone && (
                       <span className={`tone-pill ${tone.cls}`}>
                         {tone.word} {sentVal(m.avg_sentiment)}
                       </span>
                     )}
                   </div>
-                  <div className="alt-model-stat">
-                    Mentions the subject in <b>{pct(m.mention_rate)}</b> of answers
-                    {m.avg_rank !== null ? ` · avg rank ${m.avg_rank.toFixed(1)}` : ""}
-                  </div>
-                  {quote ? (
-                    <p className="alt-model-quote">“{quote}”</p>
-                  ) : (
-                    <p className="alt-model-quote muted">No representative quote surfaced.</p>
-                  )}
                 </div>
               );
             })}
