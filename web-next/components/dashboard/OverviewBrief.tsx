@@ -179,7 +179,7 @@ export function OverviewBrief({
       {/* AI Recall by platform */}
       {data.platform_recall.length > 0 && (
         <div style={{ marginBottom: 24 }}>
-          <div className="section-tag">AI Recall by platform</div>
+          <div className="section-tag">AI Mention Rate by platform</div>
           <div className="platform-list">
             {data.platform_recall.map((p) => {
               const pct = p.value ?? 0;

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getSubjectOverviewCached,
@@ -10,6 +11,14 @@ import { SourceDonut, type DonutSegment } from "@/components/dashboard/SourceDon
 import { VitalsBlock, KpiGrid } from "@/components/dashboard/overviewKpis";
 import { ModelLogo, modelBrandColor } from "@/components/dashboard/ModelLogo";
 import { SetHeaderTitle } from "@/components/dashboard/HeaderTitle";
+import {
+  buildWhatChangedSentence,
+  buildVisibilityGap,
+  buildSourceCopy,
+  buildPromptThemes,
+  modelTakeaway,
+  analyticalFrame,
+} from "@/lib/dashboardCopy";
 import { RefreshButton } from "../refresh-button";
 
 /**
@@ -30,10 +39,10 @@ const MODEL_NAMES: Record<string, string> = {
   perplexity: "Perplexity",
 };
 
-// Subject line + two competitor overlays. Subject is the bronze accent; the
-// competitor hues are picked for legibility against the subject and each other.
+// Gold/bronze stays tied to the SUBJECT; competitors are neutral grays so the
+// accent reads as "you" and rivals recede.
 const SUBJECT_COLOR = "#8a6d2f";
-const COMP_COLORS = ["#5f7a52", "#7a818c"];
+const COMP_COLORS = ["#9aa0a6", "#c2c6cb"];
 
 // Source-type → donut/legend color. Falls back to a neutral for unmapped types.
 const TYPE_COLORS: Record<string, string> = {
@@ -183,30 +192,64 @@ export default async function AltDashboardPage({
     .filter(Boolean)
     .join(" · ");
 
+  // ── Plain-English interpretation (from the real payload) ─────────────
+  const whatChanged = buildWhatChangedSentence(data.kpis);
+  const visGap = buildVisibilityGap(data);
+  const sourceCopy = buildSourceCopy(data);
+  const promptThemes = buildPromptThemes(data);
+  const modelTake = modelTakeaway(data);
+  const rec = data.recommended_actions;
+  const whyItMatters = rec?.primary?.why ?? null;
+  const dateRange =
+    hasTrend && weeks.length > 0
+      ? `${shortWeek(weeks[0])} – ${shortWeek(weeks[weeks.length - 1])}`
+      : null;
+  function frameFor(slug: string): string | null {
+    const card = data.evidence_cards.find(
+      (e) => e.model_slug === slug && e.frame_label,
+    );
+    return card?.frame_label ?? null;
+  }
+
   return (
     <div className="alt-dash">
       {/* Push the subject name + meta up into the top Header bar. */}
       <SetHeaderTitle heading={data.subject_name} meta={headerMeta} />
 
-      {/* Bottom line + recommended focus, then the four headline KPIs —
-          shared with the Overview brief. */}
+      {/* Compact executive summary: bottom line · what changed · recommended
+          focus (with the primary move + recommendations link in that column). */}
       <VitalsBlock
         bottomLine={data.bottom_line}
         recommendedFocus={data.recommended_focus}
+        whatChanged={whatChanged}
+        recommendationsHref={`/subjects/${subjectId}/recommendations`}
         compact
       />
+      {whyItMatters && (
+        <p className="why-it-matters">
+          <span className="why-it-matters-tag">Why it matters</span>
+          {whyItMatters}
+        </p>
+      )}
       <KpiGrid kpis={data.kpis} trajectory={data.trajectory} compact />
 
-      {/* Row 1: visibility trend + industry ranking */}
+      {/* Visibility gap — the chart + ranking tell one story */}
+      {visGap && (
+        <div className="alt-section-head">
+          <span className="alt-section-title">Visibility gap</span>
+          <span className="alt-section-sub">{visGap}</span>
+        </div>
+      )}
       <div className="alt-grid alt-grid-top">
-        <div className="alt-panel">
+        <div className="alt-panel alt-panel-chart">
           <div className="alt-panel-head">
-            <span className="alt-panel-title">Visibility</span>
-            <span className="alt-panel-sub">Percentage of answers mentioning each entity</span>
+            <span className="alt-panel-title">Mention trend</span>
+            <span className="alt-panel-sub">% of AI answers mentioning each entity</span>
+            {dateRange && <span className="alt-panel-range">{dateRange}</span>}
           </div>
           {hasTrend ? (
-            <>
-              <TrendLines labels={weeks.map(shortWeek)} series={trendSeries} height={175} />
+            <div className="alt-chart-body">
+              <TrendLines labels={weeks.map(shortWeek)} series={trendSeries} height={240} />
               <div className="alt-legend">
                 {trendSeries.map((s) => {
                   const latest = latestOf(s.values);
@@ -219,7 +262,7 @@ export default async function AltDashboardPage({
                   );
                 })}
               </div>
-            </>
+            </div>
           ) : (
             <div className="alt-empty">
               Not enough history yet — the trend appears after a second snapshot.
@@ -229,21 +272,29 @@ export default async function AltDashboardPage({
 
         <div className="alt-panel">
           <div className="alt-panel-head">
-            <span className="alt-panel-title">Industry ranking</span>
-            <span className="alt-panel-sub">Entities by visibility</span>
+            <span className="alt-panel-title">Field ranking</span>
+            <span className="alt-panel-sub">How the field stacks up in AI answers</span>
+            <Link href={`/subjects/${subjectId}/competition`} className="alt-panel-link">
+              View competitive →
+            </Link>
           </div>
           <div className="alt-rank">
             <div className="alt-rank-row alt-rank-head">
               <span className="r-num">#</span>
               <span className="r-name">Entity</span>
               <span className="alt-rank-bar" aria-hidden />
-              <span className="r-val">Vis.</span>
-              <span className="r-val">Pos.</span>
-              <span className="r-val">1st</span>
+              <span className="r-val" title="% of AI answers that mention this entity">
+                Mentioned
+              </span>
+              <span className="r-val" title="Average position when mentioned">Avg rank</span>
+              <span className="r-val" title="% of answers where this entity is the first mentioned">
+                Top answer
+              </span>
             </div>
             {ranking.map((c, i) => (
-              <div
-                className={`alt-rank-row${c.is_subject ? " is-subject" : ""}`}
+              <Link
+                href={`/subjects/${subjectId}/competition`}
+                className={`alt-rank-row alt-rank-link${c.is_subject ? " is-subject" : ""}`}
                 key={c.name}
               >
                 <span className="r-num">{i + 1}</span>
@@ -257,11 +308,67 @@ export default async function AltDashboardPage({
                 <span className="r-val">{pct0(c.sov)}</span>
                 <span className="r-val">{c.avg_rank !== null ? c.avg_rank.toFixed(1) : "—"}</span>
                 <span className="r-val">{pct0(c.first_mention_rate)}</span>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
       </div>
+
+      {/* Prompt themes — which tracked prompts surface the subject vs miss it */}
+      {(promptThemes.appears.length > 0 || promptThemes.missing.length > 0) && (
+        <div className="alt-panel">
+          <div className="alt-panel-head">
+            <span className="alt-panel-title">Prompt themes driving this result</span>
+            <span className="alt-panel-sub">
+              Where {data.subject_name}
+              {" shows up — and where it’s missing"}
+            </span>
+            <Link href={`/subjects/${subjectId}/prompts`} className="alt-panel-link">
+              View all prompts →
+            </Link>
+          </div>
+          <div className="pt-grid">
+            <div className="pt-col">
+              <div className="pt-head pt-head-in">
+                Where {data.subject_name} appears
+              </div>
+              {promptThemes.appears.length > 0 ? (
+                <ul className="pt-list">
+                  {promptThemes.appears.map((t, i) => (
+                    <li key={i} title={t.full} tabIndex={0} aria-label={t.full}>
+                      {t.label}
+                      <span className="pt-count">
+                        · {t.count} prompt{t.count === 1 ? "" : "s"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="pt-empty">Not surfaced in any tracked prompt yet.</p>
+              )}
+            </div>
+            <div className="pt-col">
+              <div className="pt-head pt-head-out">
+                Where {data.subject_name} is missing
+              </div>
+              {promptThemes.missing.length > 0 ? (
+                <ul className="pt-list">
+                  {promptThemes.missing.map((t, i) => (
+                    <li key={i} title={t.full} tabIndex={0} aria-label={t.full}>
+                      {t.label}
+                      <span className="pt-count">
+                        · {t.count} prompt{t.count === 1 ? "" : "s"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="pt-empty">Surfaced in every tracked prompt.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Row 2: per-LLM readout */}
       {perModel.length > 0 && (
@@ -273,15 +380,25 @@ export default async function AltDashboardPage({
             <span className="alt-panel-sub">
               Per-model sentiment, reach, and a sample quote
             </span>
+            <Link href={`/subjects/${subjectId}/narrative`} className="alt-panel-link">
+              View narrative →
+            </Link>
           </div>
+          <p className="alt-model-takeaway">{modelTake}</p>
           <div className="alt-model-grid">
             {perModel.map((m) => {
               const tone = sentTone(m.avg_sentiment);
               const quote = excerptFor(m.slug);
               const brand = modelBrandColor(m.slug);
+              const frame = frameFor(m.slug);
               return (
-                <div className="mq-card" key={m.slug}>
+                <Link
+                  href={`/subjects/${subjectId}/narrative`}
+                  className="mq-card mq-card-link"
+                  key={m.slug}
+                >
                   <span className="mq-accent" style={{ background: brand }} aria-hidden />
+                  {frame && <span className="mq-frame">{analyticalFrame(frame)}</span>}
                   <span className="mq-mark" style={{ color: brand }} aria-hidden>
                     “
                   </span>
@@ -305,7 +422,7 @@ export default async function AltDashboardPage({
                       </span>
                     )}
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>
@@ -314,7 +431,18 @@ export default async function AltDashboardPage({
 
       {/* Row 3: source types + top sources */}
       {data.sources.length > 0 && (
-        <div className="alt-grid alt-grid-sources">
+        <>
+          {sourceCopy && (
+            <div className="alt-section-head alt-section-sources">
+              <span className="alt-section-title">Sources AI relies on</span>
+              <p className="alt-section-explain">{sourceCopy.takeaway}</p>
+              <p className="alt-section-priority-line">
+                <span className="alt-priority-label">Priority:</span>{" "}
+                {sourceCopy.priority}
+              </p>
+            </div>
+          )}
+          <div className="alt-grid alt-grid-sources">
           <div className="alt-panel alt-panel-fill">
             <div className="alt-panel-head">
               <span className="alt-panel-title">Source types</span>
@@ -337,18 +465,6 @@ export default async function AltDashboardPage({
                   })}
                 </div>
               </div>
-              <div className="alt-typebar" aria-hidden>
-                {donutSegments.map((s) => (
-                  <span
-                    key={s.label}
-                    className="alt-typebar-seg"
-                    style={{
-                      width: `${(s.value / (totalCitations || 1)) * 100}%`,
-                      background: s.color,
-                    }}
-                  />
-                ))}
-              </div>
             </div>
           </div>
 
@@ -356,6 +472,9 @@ export default async function AltDashboardPage({
             <div className="alt-panel-head">
               <span className="alt-panel-title">Top sources</span>
               <span className="alt-panel-sub">Most-cited domains</span>
+              <Link href={`/subjects/${subjectId}/sources`} className="alt-panel-link">
+                View all sources →
+              </Link>
             </div>
             <div className="alt-src">
               <div className="alt-src-row alt-src-head">
@@ -365,9 +484,17 @@ export default async function AltDashboardPage({
                 <span className="s-type">Type</span>
               </div>
               {data.sources.map((s) => (
-                <div className="alt-src-row" key={s.name}>
-                  <span className="s-domain" title={s.name}>
+                <a
+                  className="alt-src-row alt-src-link"
+                  key={s.name}
+                  href={`https://${s.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Open ${s.name} in a new tab`}
+                >
+                  <span className="s-domain">
                     <span className="s-domain-text">{s.name}</span>
+                    <span className="s-ext" aria-hidden>↗</span>
                   </span>
                   <span className="s-val">{pct0(s.response_coverage)}</span>
                   <span className="s-val">{s.n_citations}</span>
@@ -379,11 +506,12 @@ export default async function AltDashboardPage({
                       {s.type}
                     </span>
                   </span>
-                </div>
+                </a>
               ))}
             </div>
           </div>
-        </div>
+          </div>
+        </>
       )}
     </div>
   );

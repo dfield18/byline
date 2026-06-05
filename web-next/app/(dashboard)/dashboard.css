@@ -2329,7 +2329,11 @@ body {
   gap: 18px;
   margin-bottom: 24px;
 }
-.alt-grid-top { grid-template-columns: 1.55fr 1fr; align-items: start; }
+.alt-grid-top { grid-template-columns: 1.55fr 1fr; align-items: stretch; }
+/* the chart card stretches to the ranking's height; its plot + legend center in
+   the leftover space so there's no dead void under a short chart */
+.alt-panel-chart { display: flex; flex-direction: column; }
+.alt-chart-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
 .alt-grid-sources { grid-template-columns: 1fr 1.55fr; }
 @media (max-width: 940px) {
   .alt-grid-top, .alt-grid-sources { grid-template-columns: 1fr; }
@@ -2359,16 +2363,20 @@ body {
 
 /* trend chart */
 .trend-svg { width: 100%; height: auto; display: block; }
-.trend-grid { stroke: var(--line); stroke-width: 1; }
+/* faint, dashed gridlines so the data reads louder than the grid */
+.trend-grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 5; opacity: 0.7; }
 .trend-ylabel, .trend-xlabel {
   fill: var(--gray-light);
   font-size: 10px;
   font-family: var(--sans);
   font-variant-numeric: tabular-nums;
 }
-.trend-line { fill: none; stroke-width: 1.9; stroke-linejoin: round; stroke-linecap: round; opacity: 0.9; }
-.trend-line.emphasis { stroke-width: 2.8; opacity: 1; }
-.trend-dot { stroke: var(--bg-card); stroke-width: 1.5; pointer-events: none; }
+/* competitors: thin + dashed + recessive; the subject: bold, solid, on top */
+.trend-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; opacity: 0.6; stroke-dasharray: 5 4; }
+.trend-line.emphasis { stroke-width: 3; opacity: 1; stroke-dasharray: none; }
+.trend-area { stroke: none; pointer-events: none; }
+.trend-dot { stroke: var(--bg-card); stroke-width: 1.5; pointer-events: none; opacity: 0.7; }
+.trend-dot.emphasis { opacity: 1; }
 /* interactive crosshair + hover tooltip */
 /* compact by default; pops forward (scales up) on hover. transform-based so it
    doesn't reflow the page and the crosshair tooltip keeps mapping correctly. */
@@ -2379,10 +2387,8 @@ body {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .trend-wrap:hover {
-  transform: scale(1.45);
+  transform: scale(1.06);
   z-index: 30;
-  background: var(--bg-card);
-  box-shadow: 0 16px 46px rgba(20, 18, 12, 0.22);
 }
 .trend-svg { cursor: crosshair; }
 .trend-cursor {
@@ -2459,12 +2465,14 @@ body {
   font-weight: 700;
   padding-bottom: 6px;
 }
-.alt-rank-row.is-subject { background: rgba(138, 109, 47, 0.06); border-radius: 8px; border-top-color: transparent; }
+.alt-rank-row.is-subject { background: rgba(138, 109, 47, 0.1); border-radius: 8px; border-top-color: transparent; }
 .alt-rank .r-num { width: 16px; flex: none; text-align: right; color: var(--gray-light); font-variant-numeric: tabular-nums; }
 .alt-rank .r-name { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 7px; font-weight: 600; color: var(--ink-soft); }
 .alt-rank .r-name-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .alt-rank-row.is-subject .r-name { color: var(--accent-bronze-deep); }
 .alt-rank .r-val { width: 42px; flex: none; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+/* selected subject's own figures read bolder so the row is easy to find */
+.alt-rank-row.is-subject .r-val { font-weight: 700; color: var(--ink); }
 .alt-rank-row.alt-rank-head .r-val { color: var(--gray-light); }
 .r-name .you {
   font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
@@ -2491,8 +2499,6 @@ body {
 .alt-donut-legend { display: flex; flex-direction: column; gap: 9px; min-width: 160px; flex: 1; }
 .alt-donut-legend .alt-legend-item { width: 100%; }
 .alt-legend-pct { margin-left: auto; color: var(--gray-light); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.alt-typebar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--bg-sand); }
-.alt-typebar-seg { height: 100%; }
 
 /* sources table */
 .alt-src { display: flex; flex-direction: column; }
@@ -2596,9 +2602,11 @@ body {
 .kpi-compact .kpi-spark {
   margin-top: 0;
   flex: 1 1 auto;
-  max-width: 92px;
+  max-width: 78px;
   display: flex;
   align-items: flex-end;
+  /* recede behind the figure — the metric value reads first, the trend second */
+  opacity: 0.6;
 }
 .kpi-compact .kpi-spark .spark-plot { height: 30px; width: 100%; }
 
@@ -2690,7 +2698,17 @@ body {
 .alt-dash .alt-model-grid { gap: 12px; }
 .alt-dash .mq-card { padding: 14px 18px 12px 20px; }
 .alt-dash .mq-mark { font-size: 36px; height: 20px; }
-.alt-dash .mq-quote { margin: 4px 0 14px; font-size: 14.5px; line-height: 1.5; }
+/* clamp the sample quote to a few lines so the two cards stay equal height
+   (the grid stretches them to match; without this the longest quote wins) */
+.alt-dash .mq-quote {
+  margin: 4px 0 14px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .alt-dash .mq-foot { padding-top: 11px; }
 
 /* subject name + meta shown in the top Header bar (Overview Dashboard) */
@@ -2703,3 +2721,318 @@ body {
   line-height: 1.15;
 }
 .dash-header-meta { font-size: 11.5px; color: var(--gray-light); line-height: 1.2; }
+
+/* ── executive briefing additions (Overview Dashboard) ──────────────── */
+
+/* Executive summary: bottom line · what changed · recommended focus (3 cols) */
+.vitals.vitals-exec { padding: 18px 24px; margin-bottom: 16px; }
+/* Bottom line is the dominant element — larger, serif-weight presence — with
+   "what changed" and "recommended focus" as smaller supporting columns. */
+.vitals-exec .bottom-line { font-size: 19px; line-height: 1.38; font-weight: 600; letter-spacing: -0.015em; }
+.vitals-exec .vexec-row {
+  display: grid;
+  grid-template-columns: 1.85fr 1fr 1.15fr;
+  column-gap: 0;
+  align-items: center;
+}
+.vitals-exec .vexec-bottomline .eyebrow { color: var(--accent-bronze-deep); }
+.vitals-exec .vexec-col { padding: 0 24px; }
+.vitals-exec .vexec-col:first-child { padding-left: 0; }
+.vitals-exec .vexec-col:last-child { padding-right: 0; }
+.vitals-exec .vexec-col:not(:last-child) { border-right: 1px solid var(--line); }
+.vchanged-text,
+.vitals-exec .ftext { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
+@media (max-width: 820px) {
+  .vitals-exec .vexec-row { grid-template-columns: 1fr; row-gap: 14px; }
+  .vitals-exec .vexec-col { padding: 0; }
+  .vitals-exec .vexec-col:not(:last-child) {
+    border-right: none;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+/* Recommended-focus card: one primary move + a link to the full list */
+.rec-primary { display: flex; flex-direction: column; gap: 4px; }
+.rec-primary-tag {
+  align-self: flex-start;
+  margin-bottom: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(138, 109, 47, 0.12);
+  color: var(--accent-bronze-deep);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+}
+.rec-primary-label { font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
+.rec-primary-action { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
+.rec-viewall {
+  display: inline-block;
+  margin-top: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-bronze-deep);
+}
+.rec-viewall:hover { text-decoration: underline; }
+.vchanged { margin: 0; padding: 0; list-style: none; }
+.vchanged li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+.vchanged li::before {
+  content: "";
+  position: absolute;
+  left: 1px; top: 9px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent-bronze);
+  opacity: 0.55;
+}
+.vitals-exec .ftext { font-size: 13.5px; line-height: 1.55; }
+
+/* interpretive sentence under a panel head; date-range pill */
+.alt-interp {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+.alt-panel-range {
+  margin-left: auto;
+  align-self: center;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--gray-light);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Recommended actions */
+.rec-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 13px; }
+.rec-item { display: flex; gap: 12px; }
+.rec-num {
+  flex: none;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(138, 109, 47, 0.13);
+  color: var(--accent-bronze-deep);
+  font-size: 12px; font-weight: 700;
+  display: grid; place-items: center;
+  margin-top: 1px;
+}
+.rec-label { font-weight: 700; font-size: 13.5px; letter-spacing: -0.01em; color: var(--ink); }
+.rec-action { margin-top: 2px; font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
+.rec-why { margin-top: 3px; font-size: 12px; line-height: 1.5; color: var(--gray-light); }
+
+/* Prompt themes */
+.pt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+@media (max-width: 760px) { .pt-grid { grid-template-columns: 1fr; gap: 16px; } }
+.pt-head {
+  display: flex; align-items: center; gap: 7px;
+  margin-bottom: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.pt-head::before { content: ""; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.pt-head-in::before { background: var(--pos); }
+.pt-head-out::before { background: var(--gray-light); }
+.pt-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.pt-list li {
+  padding: 9px 12px;
+  font-size: 13px; line-height: 1.45; color: var(--ink-soft);
+  background: var(--bg-sand-soft);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.pt-empty { margin: 0; font-size: 12.5px; font-style: italic; color: var(--gray-light); }
+/* data-backed count beside each theme label ("· 3 prompts") */
+.pt-count { color: var(--gray-light); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* model frame label */
+.mq-frame {
+  align-self: flex-start;
+  margin-bottom: 9px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--bg-sand);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+  color: var(--gray);
+}
+
+/* one-line analytical takeaway under the per-model section title (above the
+   quote cards) — subtle, matching the existing section subtitles */
+.alt-model-takeaway {
+  margin: 2px 0 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  max-width: 92ch;
+}
+
+/* opportunity + priority callouts (gold left-rule) */
+.alt-opportunity,
+.alt-priority {
+  margin: 14px 0 0;
+  padding: 11px 14px;
+  background: rgba(138, 109, 47, 0.06);
+  border-left: 3px solid var(--accent-bronze);
+  border-radius: 0 8px 8px 0;
+  font-size: 13px; line-height: 1.55; color: var(--ink-soft);
+}
+
+/* ── unified page-level section header ──────────────────────────────────
+   One consistent treatment for the bare-text headers that introduce a card
+   ROW (Visibility gap, Sources): a small muted-gold tick, a bold title on its
+   own line, then a supporting sentence below. This replaces the old mix where
+   "Visibility gap" was an inline title+sentence and "Sources" was stacked. */
+.alt-section-title {
+  font-size: 14px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink);
+}
+.alt-section-sub { font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
+
+.alt-section-head { margin: 6px 0 14px; }
+.alt-section-head::before {
+  content: "";
+  display: block;
+  width: 22px; height: 2px;
+  margin-bottom: 11px;
+  border-radius: 2px;
+  background: var(--accent-bronze);
+  opacity: 0.85;
+}
+.alt-section-head .alt-section-title { display: block; margin: 0 0 5px; font-size: 15px; }
+.alt-section-head .alt-section-sub { display: block; max-width: 92ch; line-height: 1.55; }
+
+/* item 10 polish: a touch more air between sections, more legible subtitles */
+.alt-dash .alt-grid { margin-bottom: 18px; }
+.alt-dash > .alt-panel { margin-bottom: 18px; }
+.alt-dash .kpi-grid { margin-bottom: 18px; }
+.alt-panel-sub { font-size: 12.5px; color: var(--gray); }
+
+/* KPI info icon (hover for the metric definition) */
+.kpi .k { display: flex; align-items: center; }
+.kpi-info {
+  display: inline-grid;
+  place-items: center;
+  width: 13px; height: 13px;
+  margin-left: 5px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  color: var(--gray-light);
+  font-size: 9px; font-weight: 700; font-style: normal; line-height: 1;
+  text-transform: none;
+  cursor: help;
+}
+.kpi-info:hover { color: var(--ink-soft); border-color: var(--ink-soft); }
+
+/* prompt-themes: amber/warning accent for the "missing" column */
+.pt-head-out::before { background: #c8983c; }
+
+/* priority text folded into the Sources section header */
+.alt-section-priority { color: var(--accent-bronze-deep); font-weight: 600; }
+
+/* standalone "view all recommendations" link (the focus card was removed) */
+.rec-viewall-row { display: flex; justify-content: flex-end; margin: 0 0 18px; }
+.rec-viewall-row .rec-viewall { margin-top: 0; }
+
+/* Recommended-focus column: primary move + link to all recommendations.
+   Tight stack — small gap between the focus sentence, the move, and the link
+   so the whole column reads as one compact briefing block. */
+.vexec-move { margin-top: 7px; }
+.vexec-move-tag {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--accent-bronze-deep);
+}
+.vexec-move p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-soft); }
+.vexec-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px; font-weight: 500;
+  color: var(--accent-bronze-deep);
+}
+.vexec-link:hover { text-decoration: underline; }
+
+/* "Why it matters" — a subtle explanatory note, not a card. Borderless and
+   lighter than the KPI row so it reads as a quiet implication line under the
+   top summary rather than competing with it. */
+.why-it-matters {
+  margin: 0 0 16px;
+  padding: 0 2px;
+  background: none;
+  border: none;
+  font-size: 12.5px; line-height: 1.55; color: var(--gray);
+  max-width: 96ch;
+}
+.why-it-matters-tag { font-weight: 700; color: var(--ink-soft); }
+.why-it-matters-tag::after { content: ": "; color: var(--ink-soft); font-weight: 700; }
+
+/* Sources header — stacked title / explanation / priority with room to breathe.
+   The priority line gets a subtle gold left-rule to set it apart without
+   bringing back the old detached full-width strip. */
+.alt-section-sources { margin-bottom: 16px; }
+.alt-section-sources .alt-section-title { display: block; margin: 0 0 7px; font-size: 15px; }
+.alt-section-explain { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-soft); max-width: 92ch; }
+.alt-section-priority-line {
+  margin: 10px 0 0;
+  padding-left: 11px;
+  border-left: 2px solid var(--accent-bronze);
+  font-size: 13px; line-height: 1.55; color: var(--ink-soft);
+}
+.alt-priority-label { font-weight: 700; color: var(--accent-bronze-deep); }
+
+/* ── navigable modules: panel "View →" links + clickable rows/cards ──────
+   Each card drills into its full spoke (ranking → competitive, sources →
+   sources, etc.); source rows open the actual external domain. Turns the
+   dashboard from a static report into the hub it implies. */
+.alt-panel-link {
+  margin-left: auto;
+  align-self: center;
+  font-size: 12px; font-weight: 600;
+  color: var(--accent-bronze-deep);
+  white-space: nowrap;
+}
+.alt-panel-link:hover { text-decoration: underline; }
+
+/* rows/cards that became links keep their row/card look (no underline/blue) */
+.alt-rank-link,
+.alt-src-link,
+.mq-card-link { text-decoration: none; color: inherit; cursor: pointer; }
+
+/* external-link cue on source rows — faint, appears on hover */
+.alt-src .s-domain { display: flex; align-items: center; gap: 6px; }
+.s-ext { flex: none; color: var(--gray-light); font-size: 11px; opacity: 0; transition: opacity 0.12s ease; }
+.alt-src-link:hover .s-ext { opacity: 1; }
+
+/* model card hover lift (the whole card is now clickable) */
+.mq-card-link { transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease; }
+.mq-card-link:hover {
+  border-color: var(--line-strong);
+  box-shadow: 0 8px 20px -12px rgba(28, 24, 14, 0.22);
+  transform: translateY(-1px);
+}
+
+/* ── Foundation: contrast + elevation (Overview Dashboard only) ──────────
+   The single biggest perceived-quality move: warm the field behind the cards
+   a step so the white cards visibly lift off it, and give every top-level card
+   a soft, warm-tinted shadow + rounder corners. Scoped to the dashboard route
+   via :has(.alt-dash), so the reading spokes and landing are untouched. */
+.dash-main-col:has(.alt-dash) { background: #efeae0; }
+/* the sticky header shares the warmed field so there's no hard white seam */
+.dash-main-col:has(.alt-dash) .dash-header {
+  background: rgba(239, 234, 224, 0.82);
+}
+.alt-dash .vitals,
+.alt-dash .alt-panel,
+.alt-dash .kpi.kpi-compact {
+  background: var(--bg-card);
+  border-color: #ebe6dc;
+  border-radius: 16px;
+  box-shadow:
+    0 1px 2px rgba(28, 24, 14, 0.045),
+    0 12px 26px -16px rgba(28, 24, 14, 0.18);
+}

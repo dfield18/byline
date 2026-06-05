@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import type { SubjectOverview, KpiValue } from "@/lib/api";
 import { Sparkline } from "@/components/dashboard/Sparkline";
 
@@ -44,13 +45,38 @@ export type KpiDef = {
   label: string;
   format: "pct" | "score";
   higherBetter: boolean;
+  help: string; // shown as a hover tooltip on the card label
 };
 
 export const KPI_DEFS: KpiDef[] = [
-  { key: "ai_recall", label: "AI Recall", format: "pct", higherBetter: true },
-  { key: "avg_sentiment", label: "Avg Sentiment", format: "score", higherBetter: true },
-  { key: "risk_frame_rate", label: "Risk Framing", format: "pct", higherBetter: false },
-  { key: "citation_rate", label: "Citation Rate", format: "pct", higherBetter: true },
+  {
+    key: "ai_recall",
+    label: "AI Mention Rate",
+    format: "pct",
+    higherBetter: true,
+    help: "Percent of AI answers that mention this subject.",
+  },
+  {
+    key: "avg_sentiment",
+    label: "Avg Sentiment",
+    format: "score",
+    higherBetter: true,
+    help: "Average sentiment score across sampled AI responses.",
+  },
+  {
+    key: "risk_frame_rate",
+    label: "Risk Framing",
+    format: "pct",
+    higherBetter: false,
+    help: "Percent of responses framing the subject around controversy, scandal, extremism, or reputational risk.",
+  },
+  {
+    key: "citation_rate",
+    label: "Citation Rate",
+    format: "pct",
+    higherBetter: true,
+    help: "Percent of answers that cite or reference external sources.",
+  },
 ];
 
 function deltaClass(kpi: KpiValue, higherBetter: boolean): string {
@@ -133,7 +159,10 @@ function KpiCard({
   if (compact) {
     return (
       <div className="kpi kpi-compact">
-        <div className="k">{def.label}</div>
+        <div className="k">
+          {def.label}
+          <span className="kpi-info" title={def.help} aria-label={def.help}>i</span>
+        </div>
         <div className="kpi-body">
           <div className="kpi-figures">
             {valueEl}
@@ -147,7 +176,10 @@ function KpiCard({
 
   return (
     <div className="kpi">
-      <div className="k">{def.label}</div>
+      <div className="k">
+          {def.label}
+          <span className="kpi-info" title={def.help} aria-label={def.help}>i</span>
+        </div>
       {valueEl}
       {footer}
       {sparkEl}
@@ -194,20 +226,63 @@ export function KpiGrid({
 }
 
 /**
- * Bottom-line verdict + recommended focus. Renders nothing if both are empty.
- * `compact` (Overview Dashboard) lays the two side-by-side in a denser card; the
- * brief leaves it stacked and roomy.
+ * The top executive-summary module: Bottom line, What changed, Recommended
+ * focus. Renders nothing if there's nothing to say.
+ *  - brief: stacked bottom line + focus (roomy reading layout).
+ *  - dashboard (`compact`): bottom line up top, then a "what changed" /
+ *    "recommended focus" two-column row beneath a divider — the interpretive
+ *    anchor of the page.
  */
 export function VitalsBlock({
   bottomLine,
   recommendedFocus,
+  whatChanged,
+  recommendationsHref,
   compact = false,
 }: {
   bottomLine: string | null;
   recommendedFocus: string | null;
+  whatChanged?: string | null; // one compact prose sentence (dashboard)
+  recommendationsHref?: string; // link out to the full Recommendations tab
   compact?: boolean;
 }) {
-  if (!bottomLine && !recommendedFocus) return null;
+  const hasChanged = !!whatChanged;
+  if (!bottomLine && !recommendedFocus && !hasChanged) return null;
+
+  // Dashboard: compact 3-part executive summary — bottom line · what changed ·
+  // recommended focus, each a short sentence (no long bullet lists). The focus
+  // column also carries the one primary move + a link to all recommendations.
+  if (compact && hasChanged) {
+    return (
+      <div className="vitals vitals-exec">
+        <div className="vexec-row">
+          {bottomLine && (
+            <div className="vexec-col vexec-bottomline">
+              <div className="eyebrow">Bottom line</div>
+              <p className="bottom-line">{bottomLine}</p>
+            </div>
+          )}
+          <div className="vexec-col">
+            <div className="eyebrow">What changed</div>
+            <p className="vchanged-text">{whatChanged}</p>
+          </div>
+          {recommendedFocus && (
+            <div className="vexec-col">
+              <div className="eyebrow">Recommended focus</div>
+              <p className="ftext">{recommendedFocus}</p>
+              {recommendationsHref && (
+                <Link href={recommendationsHref} className="vexec-link">
+                  View all recommendations →
+                </Link>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Brief: stacked bottom line + focus.
   return (
     <div className={`vitals${compact ? " vitals-compact" : ""}`}>
       {bottomLine && (

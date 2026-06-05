@@ -67,6 +67,10 @@ export function TrendLines({
 
   const x = (i: number) => padL + (n <= 1 ? 0 : (i / (n - 1)) * (W - padL - padR));
   const y = (v: number) => padT + (1 - v / yMax) * (H - padT - padB);
+  const baseY = y(0);
+
+  // The focal subject's color seeds the soft area-fill gradient under its line.
+  const emphasisColor = series.find((s) => s.emphasis)?.color ?? "#8a6d2f";
 
   const gridVals = [0, 0.25, 0.5, 0.75, 1].filter((v) => v <= yMax + 1e-9);
   const xTicks = n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
@@ -95,6 +99,13 @@ export function TrendLines({
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
       >
+        <defs>
+          <linearGradient id="trendAreaFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={emphasisColor} stopOpacity={0.2} />
+            <stop offset="100%" stopColor={emphasisColor} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+
         {gridVals.map((gv, i) => (
           <g key={i}>
             <line className="trend-grid" x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} />
@@ -126,6 +137,28 @@ export function TrendLines({
             y2={H - padB}
           />
         )}
+
+        {/* soft area fill under the focal subject's line (drawn first, behind
+            every line so competitor lines stay readable on top of it) */}
+        {series
+          .filter((s) => s.emphasis)
+          .map((s) =>
+            buildSegments(s.values).map((seg, si) => {
+              const pts = seg.map((i) => ({ x: x(i), y: y(s.values[i] as number) }));
+              if (pts.length === 0) return null;
+              const line = buildMonoCubicPath(pts, 0.2);
+              const last = pts[pts.length - 1];
+              const first = pts[0];
+              return (
+                <path
+                  key={`area-${s.name}-${si}`}
+                  className="trend-area"
+                  d={`${line} L${last.x},${baseY} L${first.x},${baseY} Z`}
+                  fill="url(#trendAreaFill)"
+                />
+              );
+            }),
+          )}
 
         {series.map((s) => (
           <g key={s.name}>
