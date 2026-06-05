@@ -141,8 +141,13 @@ function KpiCard({
     );
   }
 
+  // Hide the sparkline when it would just be visual clutter: a flat-at-zero
+  // metric (e.g. Risk Framing at 0%) or one without enough history to plot.
+  const isZeroPct = def.format === "pct" && kpi.value === 0;
   const showSpark =
-    spark && spark.values.filter((v): v is number => v !== null).length >= 2;
+    spark &&
+    !isZeroPct &&
+    spark.values.filter((v): v is number => v !== null).length >= 2;
 
   const valueEl = (
     <div className="v">

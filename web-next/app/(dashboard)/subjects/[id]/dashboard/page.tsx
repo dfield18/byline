@@ -272,18 +272,17 @@ export default async function AltDashboardPage({
         </div>
       </div>
 
-      {/* Executive header — one card: the briefing band (bottom line · what
-          changed · recommended focus) above the four KPI tiles. */}
-      <div className="alt-summary">
-        <VitalsBlock
-          bottomLine={data.bottom_line}
-          recommendedFocus={data.recommended_focus}
-          whatChanged={whatChanged}
-          recommendationsHref={`/subjects/${subjectId}/recommendations`}
-          compact
-        />
-        <KpiGrid kpis={data.kpis} trajectory={data.trajectory} compact />
-      </div>
+      {/* Row 1 — four KPI cards on the page background */}
+      <KpiGrid kpis={data.kpis} trajectory={data.trajectory} compact />
+
+      {/* Row 2 — text summary (bottom line · what changed · recommended focus) */}
+      <VitalsBlock
+        bottomLine={data.bottom_line}
+        recommendedFocus={data.recommended_focus}
+        whatChanged={whatChanged}
+        recommendationsHref={`/subjects/${subjectId}/recommendations`}
+        compact
+      />
 
       {/* Visibility gap — the chart + ranking tell one story */}
       {visGap && (

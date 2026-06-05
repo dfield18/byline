@@ -2486,7 +2486,7 @@ body {
 .alt-rank-row {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 9px;
   padding: 9px 0;
   border-top: 1px solid var(--line);
   font-size: 13px;
@@ -2505,7 +2505,7 @@ body {
 .alt-rank .r-name { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 7px; font-weight: 600; color: var(--ink-soft); }
 .alt-rank .r-name-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .alt-rank-row.is-subject .r-name { color: var(--accent-bronze-deep); }
-.alt-rank .r-val { width: 42px; flex: none; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+.alt-rank .r-val { width: 40px; flex: none; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
 /* selected subject's own figures read bolder so the row is easy to find */
 .alt-rank-row.is-subject .r-val { font-weight: 700; color: var(--ink); }
 .alt-rank-row.alt-rank-head .r-val { color: var(--gray-light); }
@@ -2588,7 +2588,7 @@ body {
 
 /* visibility data-bar in the industry-ranking table */
 .alt-rank .alt-rank-bar {
-  width: 60px;
+  width: 50px;
   flex: none;
   height: 6px;
   border-radius: 4px;
@@ -2836,8 +2836,11 @@ body {
 }
 /* variant with a trailing "Association" strength-badge column */
 .pt-matrix-strength .pt-matrix-row {
-  grid-template-columns: minmax(0, 1fr) repeat(var(--ptm-cols, 2), 52px) 108px;
+  grid-template-columns: minmax(0, 1fr) repeat(var(--ptm-cols, 2), 52px) 124px;
 }
+/* extra breathing room (~16px) between the model icons and the Association
+   badge so the right edge of the matrix doesn't look cramped */
+.ptm-strength-cell { justify-items: start; padding-left: 16px; }
 .ptm-strength-cell .ng-level { width: 84px; }
 .pt-matrix-row:not(.pt-matrix-head) { text-decoration: none; }
 .pt-matrix-row:not(.pt-matrix-head):hover { background: var(--bg-sand); }
@@ -2912,7 +2915,7 @@ body {
   border-radius: 5px;
   background: var(--bg-sand);
   font-size: 10px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
-  color: var(--gray);
+  color: var(--ink-soft);
 }
 
 /* one-line analytical takeaway under the per-model section title (above the
@@ -2935,16 +2938,8 @@ body {
 }
 .alt-section-sub { font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
 
-.alt-section-head { margin: 26px 0 15px; }
-.alt-section-head::before {
-  content: "";
-  display: block;
-  width: 22px; height: 2px;
-  margin-bottom: 11px;
-  border-radius: 2px;
-  background: var(--accent-bronze);
-  opacity: 0.85;
-}
+/* sections are separated by whitespace alone (no divider rule) — modern + calm */
+.alt-section-head { margin: 38px 0 15px; }
 .alt-section-head .alt-section-title { display: block; margin: 0 0 6px; font-size: 16px; }
 .alt-section-head .alt-section-sub { display: block; max-width: 92ch; line-height: 1.55; }
 
@@ -3182,46 +3177,9 @@ body {
     0 12px 26px -16px rgba(28, 24, 14, 0.18);
 }
 
-/* ── Executive header: exec band + KPI tiles combined into ONE card ──────
-   The briefing band sits on top, a divider, then the four KPI tiles as a
-   borderless row separated by thin rules — so it reads as a single
-   at-a-glance unit instead of two stacked blocks. */
-.alt-dash .alt-summary {
-  background: var(--bg-card);
-  border: 1px solid #ebe6dc;
-  border-radius: 16px;
-  box-shadow:
-    0 1px 2px rgba(28, 24, 14, 0.045),
-    0 12px 26px -16px rgba(28, 24, 14, 0.18);
-  margin-bottom: 24px;
-  overflow: hidden;
+/* "Where to focus" is the action card — a faint brand tint prioritizes it */
+.alt-dash .alt-panel-focus {
+  background: rgba(138, 109, 47, 0.05);
+  border-color: rgba(138, 109, 47, 0.18);
 }
-/* the exec band loses its own card chrome and becomes the top section */
-.alt-dash .alt-summary .vitals.vitals-exec {
-  background: none;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  margin: 0;
-  border-bottom: 1px solid var(--line);
-}
-/* the KPI tiles become a borderless, divider-separated row below */
-.alt-dash .alt-summary .kpi-grid { margin: 0; gap: 0; }
-.alt-dash .alt-summary .kpi.kpi-compact {
-  background: none;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  border-right: 1px solid var(--line);
-}
-.alt-dash .alt-summary .kpi.kpi-compact:last-child { border-right: none; }
-/* align the outer tiles' content to the card edge (matches the exec band) */
-.alt-dash .alt-summary .kpi.kpi-compact:first-child { padding-left: 28px; }
-.alt-dash .alt-summary .kpi.kpi-compact:last-child { padding-right: 28px; }
-/* on the 2-col fallback, fix the dividers so the grid still reads cleanly */
-@media (max-width: 860px) {
-  .alt-dash .alt-summary .kpi.kpi-compact:first-child { padding-left: 16px; }
-  .alt-dash .alt-summary .kpi.kpi-compact:nth-child(2) { border-right: none; padding-right: 16px; }
-  .alt-dash .alt-summary .kpi.kpi-compact:nth-child(1),
-  .alt-dash .alt-summary .kpi.kpi-compact:nth-child(2) { border-bottom: 1px solid var(--line); }
-}
+
