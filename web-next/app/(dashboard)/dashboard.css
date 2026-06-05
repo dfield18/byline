@@ -2816,80 +2816,7 @@ body {
   }
 }
 
-/* Recommended-focus card: one primary move + a link to the full list */
-.rec-primary { display: flex; flex-direction: column; gap: 4px; }
-.rec-primary-tag {
-  align-self: flex-start;
-  margin-bottom: 4px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: rgba(138, 109, 47, 0.12);
-  color: var(--accent-bronze-deep);
-  font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-}
-.rec-primary-label { font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
-.rec-primary-action { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
-.rec-viewall {
-  display: inline-block;
-  margin-top: 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent-bronze-deep);
-}
-.rec-viewall:hover { text-decoration: underline; }
-.vchanged { margin: 0; padding: 0; list-style: none; }
-.vchanged li {
-  position: relative;
-  padding-left: 16px;
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--ink-soft);
-}
-.vchanged li::before {
-  content: "";
-  position: absolute;
-  left: 1px; top: 9px;
-  width: 5px; height: 5px; border-radius: 50%;
-  background: var(--accent-bronze);
-  opacity: 0.55;
-}
 .vitals-exec .ftext { font-size: 12px; line-height: 1.45; }
-
-/* interpretive sentence under a panel head; date-range pill */
-.alt-interp {
-  margin: 0 0 12px;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--ink-soft);
-}
-.alt-panel-range {
-  margin-left: auto;
-  align-self: center;
-  padding: 2px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--gray-light);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* Recommended actions */
-.rec-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 13px; }
-.rec-item { display: flex; gap: 12px; }
-.rec-num {
-  flex: none;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: rgba(138, 109, 47, 0.13);
-  color: var(--accent-bronze-deep);
-  font-size: 12px; font-weight: 700;
-  display: grid; place-items: center;
-  margin-top: 1px;
-}
-.rec-label { font-weight: 700; font-size: 13.5px; letter-spacing: -0.01em; color: var(--ink); }
-.rec-action { margin-top: 2px; font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
-.rec-why { margin-top: 3px; font-size: 12px; line-height: 1.5; color: var(--gray-light); }
 
 /* ── Prompt-themes coverage matrix (theme × model) ──────────────────────
    One row per tracked prompt; one column per model. Each cell: a gold rank
@@ -2997,17 +2924,6 @@ body {
   max-width: 92ch;
 }
 
-/* opportunity + priority callouts (gold left-rule) */
-.alt-opportunity,
-.alt-priority {
-  margin: 14px 0 0;
-  padding: 11px 14px;
-  background: rgba(138, 109, 47, 0.06);
-  border-left: 3px solid var(--accent-bronze);
-  border-radius: 0 8px 8px 0;
-  font-size: 13px; line-height: 1.55; color: var(--ink-soft);
-}
-
 /* ── unified page-level section header ──────────────────────────────────
    One consistent treatment for the bare-text headers that introduce a card
    ROW (Visibility gap, Sources): a small muted-gold tick, a bold title on its
@@ -3052,7 +2968,7 @@ body {
   color: var(--gray-light);
   font-size: 9px; font-weight: 700; font-style: normal; line-height: 1;
   text-transform: none;
-  cursor: help;
+  cursor: default;
   outline: none;
 }
 .kpi-info:hover,
@@ -3088,24 +3004,7 @@ body {
 .kpi-info:hover .kpi-tip,
 .kpi-info:focus-visible .kpi-tip { opacity: 1; visibility: visible; transform: translateY(0); }
 
-/* priority text folded into the Sources section header */
-.alt-section-priority { color: var(--accent-bronze-deep); font-weight: 600; }
-
-/* standalone "view all recommendations" link (the focus card was removed) */
-.rec-viewall-row { display: flex; justify-content: flex-end; margin: 0 0 18px; }
-.rec-viewall-row .rec-viewall { margin-top: 0; }
-
-/* Recommended-focus column: primary move + link to all recommendations.
-   Tight stack — small gap between the focus sentence, the move, and the link
-   so the whole column reads as one compact briefing block. */
-.vexec-move { margin-top: 7px; }
-.vexec-move-tag {
-  display: block;
-  margin-bottom: 2px;
-  font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--accent-bronze-deep);
-}
-.vexec-move p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-soft); }
+/* Recommended-focus column: link to the full recommendations list */
 .vexec-link {
   display: inline-block;
   margin-top: 8px;
@@ -3113,20 +3012,6 @@ body {
   color: var(--accent-bronze-deep);
 }
 .vexec-link:hover { text-decoration: underline; }
-
-/* "Why it matters" — a subtle explanatory note, not a card. Borderless and
-   lighter than the KPI row so it reads as a quiet implication line under the
-   top summary rather than competing with it. */
-.why-it-matters {
-  margin: 0 0 16px;
-  padding: 0 2px;
-  background: none;
-  border: none;
-  font-size: 12.5px; line-height: 1.55; color: var(--gray);
-  max-width: 96ch;
-}
-.why-it-matters-tag { font-weight: 700; color: var(--ink-soft); }
-.why-it-matters-tag::after { content: ": "; color: var(--ink-soft); font-weight: 700; }
 
 /* Sources header — stacked title / explanation / priority with room to breathe.
    The priority line gets a subtle gold left-rule to set it apart without

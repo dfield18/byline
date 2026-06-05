@@ -22,7 +22,14 @@ export function SourceDonut({
   const circ = 2 * Math.PI * r;
   const sum = segments.reduce((acc, s) => acc + s.value, 0) || 1;
 
-  let offset = 0;
+  // Precompute each arc's length + offset without mutating a render-scoped
+  // variable (the offset is the sum of all preceding segments' arc lengths).
+  const arcs = segments.map((s, i) => ({
+    seg: s,
+    dash: (s.value / sum) * circ,
+    offset: segments.slice(0, i).reduce((acc, p) => acc + (p.value / sum) * circ, 0),
+  }));
+
   return (
     <svg className="donut-svg" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Source types">
       <circle
@@ -33,26 +40,20 @@ export function SourceDonut({
         fill="none"
         strokeWidth={stroke}
       />
-      {segments.map((s) => {
-        const frac = s.value / sum;
-        const dash = frac * circ;
-        const el = (
-          <circle
-            key={s.label}
-            cx={c}
-            cy={c}
-            r={r}
-            fill="none"
-            stroke={s.color}
-            strokeWidth={stroke}
-            strokeDasharray={`${dash} ${circ - dash}`}
-            strokeDashoffset={-offset}
-            transform={`rotate(-90 ${c} ${c})`}
-          />
-        );
-        offset += dash;
-        return el;
-      })}
+      {arcs.map(({ seg, dash, offset }) => (
+        <circle
+          key={seg.label}
+          cx={c}
+          cy={c}
+          r={r}
+          fill="none"
+          stroke={seg.color}
+          strokeWidth={stroke}
+          strokeDasharray={`${dash} ${circ - dash}`}
+          strokeDashoffset={-offset}
+          transform={`rotate(-90 ${c} ${c})`}
+        />
+      ))}
       <text className="donut-total" x={c} y={c - 2} textAnchor="middle">
         {total.toLocaleString()}
       </text>

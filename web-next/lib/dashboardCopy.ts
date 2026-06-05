@@ -7,19 +7,6 @@
  */
 import type { SubjectOverview, KpiValue } from "@/lib/api";
 
-function pct(v: number | null): number | null {
-  return v === null ? null : Math.round(v * 100);
-}
-
-// Qualitative frequency word for a 0..100 mention rate.
-function freqWord(p: number): string {
-  if (p >= 90) return "nearly all";
-  if (p >= 66) return "most";
-  if (p >= 45) return "about half";
-  if (p >= 25) return "a minority";
-  return "few";
-}
-
 /**
  * "What changed" as ONE qualitative sentence — no numbers (the KPI delta chips
  * already own the exact figures). Describes the direction/magnitude of the shift
@@ -52,76 +39,6 @@ export function buildWhatChangedSentence(kpis: SubjectOverview["kpis"]): string 
   const last = clauses.pop()!;
   const head = clauses.length ? `${clauses.join(", ")} while ${last}` : last;
   return `${head.charAt(0).toUpperCase()}${head.slice(1)}.`;
-}
-
-/** "What changed since last snapshot" — one bullet per KPI, from value+delta. */
-export function buildWhatChanged(kpis: SubjectOverview["kpis"]): string[] {
-  const rate = (label: string, k: KpiValue): string => {
-    const cur = pct(k.value);
-    if (cur === null) return `${label}: not enough data yet.`;
-    if (k.delta === null) return `${label} is ${cur}% (no prior snapshot to compare).`;
-    if (Math.round(k.delta) === 0) return `${label} held steady at ${cur}%.`;
-    const prior = cur - Math.round(k.delta);
-    return `${label} ${k.delta < 0 ? "dropped" : "rose"} from ${prior}% to ${cur}%.`;
-  };
-
-  const sentiment = (k: KpiValue): string => {
-    if (k.value === null) return "Sentiment: not enough data yet.";
-    const tone = k.value > 0.1 ? "positive" : k.value < -0.1 ? "negative" : "neutral";
-    if (k.delta === null || Math.abs(k.delta) < 1) return `Sentiment stayed ${tone}.`;
-    return `Sentiment ${k.delta > 0 ? "improved" : "softened"} but remains ${tone}.`;
-  };
-
-  return [
-    rate("AI mention rate", kpis.ai_recall),
-    rate("Citation rate", kpis.citation_rate),
-    sentiment(kpis.avg_sentiment),
-    rate("Risk framing", kpis.risk_frame_rate),
-  ];
-}
-
-/**
- * Chart takeaway connecting the trend to the ranking: when the subject ranks
- * well but is mentioned less than rivals, frame it as "reach, not rank".
- */
-export function buildVisibilityInterp(
-  overview: SubjectOverview,
-): string | null {
-  const rows = [...overview.competitive].sort((a, b) => b.sov - a.sov);
-  const subject = rows.find((r) => r.is_subject);
-  if (!subject) return null;
-  const s = Math.round(subject.sov * 100);
-  const trailsOnReach = rows.some((r) => !r.is_subject && r.sov > subject.sov);
-  const ranksWell = subject.avg_rank !== null && subject.avg_rank <= 3;
-
-  if (trailsOnReach && ranksWell) {
-    return `${overview.subject_name}'s issue is reach, not rank: appears in ${freqWord(s)} of answers (${s}%), but ranks highly when mentioned.`;
-  }
-  const rivals = rows.filter((r) => !r.is_subject).slice(0, 2);
-  if (rivals.length === 0) return null;
-  const tail = rivals
-    .map((r) => `${r.name} in ${freqWord(Math.round(r.sov * 100))}`)
-    .join(" and ");
-  return `${overview.subject_name} appears in ${freqWord(s)} of AI answers (${s}%), vs ${tail}.`;
-}
-
-/** Ranking insight — frame the gap as frequency vs position when that's true. */
-export function buildRankingInsight(
-  overview: SubjectOverview,
-): string | null {
-  const rows = [...overview.competitive].sort((a, b) => b.sov - a.sov);
-  const subject = rows.find((r) => r.is_subject);
-  if (!subject) return null;
-  const ahead = rows.filter((r) => !r.is_subject && r.sov > subject.sov);
-  const ranksWell = subject.avg_rank !== null && subject.avg_rank <= 3;
-  if (ahead.length > 0 && ranksWell) {
-    const names = ahead.slice(0, 2).map((r) => r.name).join(" and ");
-    return `${overview.subject_name} is mentioned less often than ${names}, but when it appears it ranks near the top (avg rank ${subject.avg_rank!.toFixed(1)}) — the gap is frequency, not position.`;
-  }
-  if (ahead.length === 0) {
-    return `${overview.subject_name} leads the field on how often AI answers mention it.`;
-  }
-  return `${overview.subject_name} trails the field on both how often it's mentioned and where it ranks when it appears.`;
 }
 
 /** Source-mix takeaway + a priority line, from the real source types/domains. */
@@ -287,11 +204,6 @@ export function buildCoverageMatrix(
 export function analyticalFrame(frame: string): string {
   const f = frame.trim().replace(/\s+frame$/i, "");
   return `${f} frame`;
-}
-
-/** A short, honest opportunity prompt for the per-model framing section. */
-export function modelOpportunity(overview: SubjectOverview): string {
-  return `Opportunity: models describe ${overview.subject_name}'s ideology and role, but connect them less consistently to specific leaders, institutions, and current power dynamics — the framing AI reaches for first.`;
 }
 
 /**
