@@ -9,6 +9,7 @@
  * the backend runs with `BYLINE_AUTH=disabled` and accepts any bearer.
  */
 import { auth } from "@clerk/nextjs/server";
+import { unstable_cache } from "next/cache";
 
 const API_URL = process.env.BYLINE_API_URL ?? "http://localhost:8000";
 const DEV_TOKEN_OVERRIDE = process.env.BYLINE_API_TOKEN ?? "";
@@ -25,8 +26,16 @@ async function bearerToken(): Promise<string> {
   return token;
 }
 
-async function apiGet<T>(path: string): Promise<T> {
-  const token = await bearerToken();
+// Tenancy key for any cross-request cache: the caller's org (the backend scopes
+// every query by it). Caching MUST be keyed by this so one org can never be
+// served another's cached payload. Dev (shared bearer) collapses to one scope.
+async function orgScopeKey(): Promise<string> {
+  if (DEV_TOKEN_OVERRIDE) return "dev";
+  const { orgId, userId } = await auth();
+  return orgId ?? `user:${userId ?? "anon"}`;
+}
+
+async function apiGetWith<T>(path: string, token: string): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
@@ -38,6 +47,10 @@ async function apiGet<T>(path: string): Promise<T> {
     );
   }
   return (await res.json()) as T;
+}
+
+async function apiGet<T>(path: string): Promise<T> {
+  return apiGetWith<T>(path, await bearerToken());
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
@@ -877,6 +890,40 @@ export const getSubjectOverview = async (
     `/api/subjects/${subjectId}/overview?weeks=${weeks}`,
   );
   return { ...raw, trajectory: normalizeTrajectory(raw.trajectory) };
+};
+
+/** Cache tag for a subject's overview — revalidate this after a snapshot. */
+export function subjectOverviewTag(subjectId: number): string {
+  return `subject-overview-${subjectId}`;
+}
+
+const OVERVIEW_TTL_SECONDS = 60 * 60 * 24 * 7; // 1 week
+
+/**
+ * Same data as getSubjectOverview, but cached in the Next Data Cache for a week
+ * so the Overview brief and Overview Dashboard (which share this payload) don't
+ * re-query the backend on every tab switch. Keyed per-org (orgScopeKey) so it's
+ * tenancy-safe, and tagged so a new snapshot busts it (see actions.ts /
+ * subjectOverviewTag). The auth lookup happens OUTSIDE the cached function; the
+ * cached body only does the (org-identical) fetch with the passed token.
+ */
+export const getSubjectOverviewCached = async (
+  subjectId: number,
+  weeks = 12,
+): Promise<SubjectOverview> => {
+  const [orgKey, token] = await Promise.all([orgScopeKey(), bearerToken()]);
+  const load = unstable_cache(
+    async () => {
+      const raw = await apiGetWith<SubjectOverview>(
+        `/api/subjects/${subjectId}/overview?weeks=${weeks}`,
+        token,
+      );
+      return { ...raw, trajectory: normalizeTrajectory(raw.trajectory) };
+    },
+    ["subject-overview", orgKey, String(subjectId), String(weeks)],
+    { revalidate: OVERVIEW_TTL_SECONDS, tags: [subjectOverviewTag(subjectId)] },
+  );
+  return load();
 };
 
 // Per-platform full response text for a single prompt on the

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  getSubjectOverview,
+  getSubjectOverviewCached,
   getSubject,
   type SubjectOverview,
   type SubjectDetail,
@@ -35,7 +35,7 @@ export default async function SubjectOverviewPage({
   let subject: SubjectDetail;
   try {
     [data, subject] = await Promise.all([
-      getSubjectOverview(subjectId),
+      getSubjectOverviewCached(subjectId),
       getSubject(subjectId),
     ]);
   } catch (e) {

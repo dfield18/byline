@@ -1,9 +1,10 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import {
   triggerRefresh,
   regenerateRecommendedActions,
+  subjectOverviewTag,
   type Job,
 } from "@/lib/api";
 
@@ -23,7 +24,11 @@ export async function triggerRefreshAction(subjectId: number): Promise<Job> {
  * successful refresh).
  */
 export async function revalidateSubjectPage(subjectId: number): Promise<void> {
+  // Bust the 1-week overview cache so the new snapshot is reflected on both the
+  // Overview brief and the Overview Dashboard, then revalidate the routes.
+  updateTag(subjectOverviewTag(subjectId));
   revalidatePath(`/subjects/${subjectId}`);
+  revalidatePath(`/subjects/${subjectId}/dashboard`);
 }
 
 /**
@@ -37,6 +42,8 @@ export async function regenerateRecommendedAction(
   subjectId: number,
 ): Promise<void> {
   await regenerateRecommendedActions(subjectId);
+  updateTag(subjectOverviewTag(subjectId));
   revalidatePath(`/subjects/${subjectId}`);
+  revalidatePath(`/subjects/${subjectId}/dashboard`);
   revalidatePath(`/subjects/${subjectId}/recommendations`);
 }
