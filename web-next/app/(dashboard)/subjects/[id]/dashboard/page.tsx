@@ -174,7 +174,7 @@ export default async function AltDashboardPage({
     : null;
 
   return (
-    <>
+    <div className="alt-dash">
       <div className="page-head">
         <div>
           <h1>{data.subject_name}</h1>
@@ -214,7 +214,7 @@ export default async function AltDashboardPage({
           </div>
           {hasTrend ? (
             <>
-              <TrendLines labels={weeks.map(shortWeek)} series={trendSeries} format={pct0} />
+              <TrendLines labels={weeks.map(shortWeek)} series={trendSeries} format={pct0} height={250} />
               <div className="alt-legend">
                 {trendSeries.map((s) => {
                   const latest = latestOf(s.values);
@@ -273,7 +273,7 @@ export default async function AltDashboardPage({
 
       {/* Row 2: per-LLM readout */}
       {perModel.length > 0 && (
-        <div className="alt-panel" style={{ marginBottom: 24 }}>
+        <div className="alt-panel">
           <div className="alt-panel-head">
             <span className="alt-panel-title">
               How each model describes {data.subject_name}
@@ -393,6 +393,6 @@ export default async function AltDashboardPage({
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
