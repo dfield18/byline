@@ -5,12 +5,17 @@ field contains an instruction (rendered with the subject's setup_inputs),
 and this helper sends that instruction to a small, fast LLM to produce the
 actual question that gets sent to measurement providers.
 
+Grounding is ON: the generator runs a live web search so the question reflects
+the subject's most recent activity at refresh time (rather than rephrasing a
+pre-cached recent_news summary). The generated templates should therefore tell
+the model to ground its question in the latest news it can find.
+
 Intentionally:
-- No grounding (the meta-LLM shouldn't add web facts; it just rephrases what
-  it's given).
+- Grounding enabled (web search for the most recent info).
 - No reasoning (saves cost; the task is generation, not analysis).
 - Low temperature (some reproducibility, but generated prompts are not
-  expected to be byte-identical across runs).
+  expected to be byte-identical across runs — and even less so now that they
+  draw on a live search).
 """
 from __future__ import annotations
 
@@ -39,7 +44,7 @@ async def generate_natural_prompt(instruction: str) -> str | None:
         response = await provider.query(
             instruction,
             {"temperature": 0.3},
-            enable_grounding=False,
+            enable_grounding=True,
             reasoning_enabled=False,
         )
     except Exception:
