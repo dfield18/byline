@@ -255,36 +255,30 @@ export function KpiGrid({
 export function VitalsBlock({
   bottomLine,
   recommendedFocus,
-  whatChanged,
   recommendationsHref,
+  extra,
   compact = false,
 }: {
   bottomLine: string | null;
   recommendedFocus: string | null;
-  whatChanged?: string | null; // one compact prose sentence (dashboard)
   recommendationsHref?: string; // link out to the full Recommendations tab
+  extra?: ReactNode; // an additional card stacked under Recommended focus (dashboard)
   compact?: boolean;
 }) {
-  const hasChanged = !!whatChanged;
-  if (!bottomLine && !recommendedFocus && !hasChanged) return null;
+  if (!bottomLine && !recommendedFocus && !extra) return null;
 
-  // Dashboard: compact 3-part executive summary — bottom line · what changed ·
-  // recommended focus, each a short sentence (no long bullet lists). The focus
-  // column also carries the one primary move + a link to all recommendations.
-  if (compact && hasChanged) {
+  // Dashboard: Bottom line as a full-width banner, then Recommended focus + an
+  // optional extra card (e.g. "Where to focus") side by side beneath it.
+  if (compact) {
     return (
       <div className="vitals vitals-exec">
-        <div className="vexec-row">
-          {bottomLine && (
-            <div className="vexec-col vexec-bottomline">
-              <div className="eyebrow">Bottom line</div>
-              <p className="bottom-line">{bottomLine}</p>
-            </div>
-          )}
-          <div className="vexec-col">
-            <div className="eyebrow">What changed</div>
-            <p className="vchanged-text">{whatChanged}</p>
+        {bottomLine && (
+          <div className="vexec-col vexec-banner">
+            <div className="eyebrow">Bottom line</div>
+            <p className="bottom-line">{bottomLine}</p>
           </div>
+        )}
+        <div className="vexec-row">
           {recommendedFocus && (
             <div className="vexec-col">
               <div className="eyebrow">Recommended focus</div>
@@ -296,6 +290,7 @@ export function VitalsBlock({
               )}
             </div>
           )}
+          {extra}
         </div>
       </div>
     );

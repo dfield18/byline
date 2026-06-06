@@ -13,9 +13,7 @@ import { ModelLogo, modelBrandColor } from "@/components/dashboard/ModelLogo";
 import { SetHeaderTitle } from "@/components/dashboard/HeaderTitle";
 import { ExportButton } from "@/components/dashboard/ExportButton";
 import {
-  buildWhatChangedSentence,
   buildVisibilityGap,
-  buildSourceCopy,
   buildCoverageMatrix,
   modelTakeaway,
   analyticalFrame,
@@ -67,10 +65,6 @@ function typeColor(t: string): string {
   return TYPE_COLORS[t.toLowerCase()] ?? "#bdb6a6";
 }
 
-function pct(v: number | null): string {
-  if (v === null) return "—";
-  return `${Math.round(v * 100)}%`;
-}
 function pct0(v: number): string {
   return `${Math.round(v * 100)}%`;
 }
@@ -197,9 +191,7 @@ export default async function AltDashboardPage({
     .join(" · ");
 
   // ── Plain-English interpretation (from the real payload) ─────────────
-  const whatChanged = buildWhatChangedSentence(data.kpis);
   const visGap = buildVisibilityGap(data);
-  const sourceCopy = buildSourceCopy(data);
   const coverage = buildCoverageMatrix(data);
   // "Where to focus" companion — the top prioritized actions, sourced from the
   // same recommendations data as the exec-band focus and the Recommendations tab.
@@ -275,12 +267,35 @@ export default async function AltDashboardPage({
       {/* Row 1 — four KPI cards on the page background */}
       <KpiGrid kpis={data.kpis} trajectory={data.trajectory} compact />
 
-      {/* Row 2 — text summary (bottom line · what changed · recommended focus) */}
+      {/* Row 2 — Bottom line (left) · Recommended focus + Where to focus (right) */}
       <VitalsBlock
         bottomLine={data.bottom_line}
         recommendedFocus={data.recommended_focus}
-        whatChanged={whatChanged}
         recommendationsHref={`/subjects/${subjectId}/recommendations`}
+        extra={
+          focusActions.length > 0 ? (
+            <div className="vexec-col vexec-focus">
+              <div className="eyebrow">Where to focus</div>
+              <ol className="focus-list">
+                {focusActions.map((a, i) => (
+                  <li className="focus-item" key={i}>
+                    <span className="focus-num">{i + 1}</span>
+                    <div className="focus-body">
+                      <span className="focus-label">{a.label}</span>
+                      <p className="focus-why">{a.why}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <Link
+                href={`/subjects/${subjectId}/recommendations`}
+                className="vexec-link"
+              >
+                View recommendations →
+              </Link>
+            </div>
+          ) : null
+        }
         compact
       />
 
@@ -330,7 +345,7 @@ export default async function AltDashboardPage({
               <span className="r-name">Entity</span>
               <span className="alt-rank-bar" aria-hidden />
               <span className="r-val" title="% of AI answers that mention this entity">
-                Mentioned
+                Mention %
               </span>
               <span className="r-val" title="Average position when mentioned">Avg rank</span>
               <span className="r-val" title="% of answers where this entity is the first mentioned">
@@ -368,7 +383,7 @@ export default async function AltDashboardPage({
           Where AI surfaces the subject — and where it doesn&apos;t.
         </span>
       </div>
-      <div className="alt-grid alt-grid-drivers">
+      <div className="alt-grid alt-grid-themesrc">
       {coverage.rows.length > 0 && coverage.platforms.length > 0 && (
         <div className="alt-panel">
           <div className="alt-panel-head">
@@ -453,31 +468,38 @@ export default async function AltDashboardPage({
           </div>
         </div>
       )}
-      {focusActions.length > 0 && (
-        <div className="alt-panel alt-panel-focus">
+      {data.sources.length > 0 && (
+        <div className="alt-panel alt-panel-srctypes">
           <div className="alt-panel-head">
-            <span className="alt-panel-title">Where to focus</span>
-            <span className="alt-panel-sub">
-              Prioritized moves to close the gaps
-            </span>
-            <Link
-              href={`/subjects/${subjectId}/recommendations`}
-              className="alt-panel-link"
-            >
-              View recommendations →
+            <span className="alt-panel-title">Source type mix</span>
+            <span className="alt-panel-sub">Citations across active models</span>
+            <Link href={`/subjects/${subjectId}/sources`} className="alt-panel-link">
+              View all sources →
             </Link>
           </div>
-          <ol className="focus-list">
-            {focusActions.map((a, i) => (
-              <li className="focus-item" key={i}>
-                <span className="focus-num">{i + 1}</span>
-                <div className="focus-body">
-                  <span className="focus-label">{a.label}</span>
-                  <p className="focus-why">{a.why}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
+          <div className="alt-donut-wrap alt-donut-wrap-wide">
+            <SourceDonut segments={donutSegments} total={totalCitations} />
+            <div className="alt-srctype-bars">
+              {donutSegments.map((s) => {
+                const p = Math.round((s.value / (totalCitations || 1)) * 100);
+                return (
+                  <div className="stb-row" key={s.label}>
+                    <span className="stb-label">
+                      <i style={{ background: s.color }} />
+                      {s.label}
+                    </span>
+                    <span className="stb-bar" aria-hidden>
+                      <i style={{ width: `${p}%`, background: s.color }} />
+                    </span>
+                    <span className="stb-val">
+                      <span className="stb-pct">{p}%</span>
+                      <span className="stb-cites">{s.value} cites</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
       </div>
@@ -523,10 +545,9 @@ export default async function AltDashboardPage({
                     <ModelLogo slug={m.slug} size={30} />
                     <div className="mq-attr">
                       <span className="mq-name">{MODEL_NAMES[m.slug] ?? m.name}</span>
-                      <span className="mq-stat">
-                        Mentions in {pct(m.mention_rate)}
-                        {m.avg_rank !== null ? ` · avg rank ${m.avg_rank.toFixed(1)}` : ""}
-                      </span>
+                      {m.avg_rank !== null && (
+                        <span className="mq-stat">avg rank {m.avg_rank.toFixed(1)}</span>
+                      )}
                     </div>
                     {tone && (
                       <span className={`tone-pill ${tone.cls}`}>
@@ -538,100 +559,35 @@ export default async function AltDashboardPage({
               );
             })}
           </div>
+          {/* One slim row for any models not yet tracked, instead of N empty cards */}
+          {(() => {
+            const untracked = Object.keys(MODEL_NAMES).filter(
+              (slug) => !perModel.some((m) => m.slug === slug),
+            );
+            if (untracked.length === 0) return null;
+            return (
+              <div className="mq-untracked">
+                <span className="mq-untracked-icons" aria-hidden>
+                  {untracked.map((slug) => (
+                    <ModelLogo key={slug} slug={slug} size={16} />
+                  ))}
+                </span>
+                <span className="mq-untracked-text">
+                  Add {untracked.map((slug) => MODEL_NAMES[slug]).join(", ")} to
+                  compare how they describe {data.subject_name}.
+                </span>
+                <Link
+                  href={`/subjects/${subjectId}/narrative`}
+                  className="mq-untracked-cta"
+                >
+                  Add models →
+                </Link>
+              </div>
+            );
+          })()}
         </div>
       )}
 
-      {/* Row 3: source types + top sources */}
-      {data.sources.length > 0 && (
-        <>
-          {sourceCopy && (
-            <div className="alt-section-head alt-section-sources">
-              <span className="alt-section-title">Sources AI relies on</span>
-              <p className="alt-section-explain">{sourceCopy.takeaway}</p>
-              <p className="alt-section-priority-line">
-                <span className="alt-priority-label">Priority:</span>{" "}
-                {sourceCopy.priority}
-              </p>
-            </div>
-          )}
-          <div className="alt-grid alt-grid-sources2">
-          <div className="alt-panel alt-panel-topsrc">
-            <div className="alt-panel-head">
-              <span className="alt-panel-title">Top sources</span>
-              <span className="alt-panel-sub">Most-used domains</span>
-              <Link href={`/subjects/${subjectId}/sources`} className="alt-panel-link">
-                View all sources →
-              </Link>
-            </div>
-            <div className="alt-src">
-              <div className="alt-src-row alt-src-head">
-                <span className="s-domain">Domain</span>
-                <span className="s-val">Used</span>
-                <span className="s-val">Cites</span>
-                <span className="s-type">Type</span>
-              </div>
-              {[...data.sources]
-                .sort((a, b) => b.response_coverage - a.response_coverage)
-                .slice(0, 5)
-                .map((s) => (
-                <a
-                  className="alt-src-row alt-src-link"
-                  key={s.name}
-                  href={`https://${s.name}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={`Open ${s.name} in a new tab`}
-                >
-                  <span className="s-domain">
-                    <span className="s-domain-text">{s.name}</span>
-                    <span className="s-ext" aria-hidden>↗</span>
-                  </span>
-                  <span className="s-val">{pct0(s.response_coverage)}</span>
-                  <span className="s-val">{s.n_citations}</span>
-                  <span className="s-type">
-                    <span
-                      className="s-type-badge"
-                      style={{ color: typeColor(s.type), borderColor: typeColor(s.type) }}
-                    >
-                      {s.type}
-                    </span>
-                  </span>
-                </a>
-              ))}
-            </div>
-          </div>
-          <div className="alt-panel alt-panel-srctypes">
-            <div className="alt-panel-head">
-              <span className="alt-panel-title">Source type mix</span>
-              <span className="alt-panel-sub">Citations across active models</span>
-            </div>
-            <div className="alt-donut-wrap alt-donut-wrap-wide">
-              <SourceDonut segments={donutSegments} total={totalCitations} />
-              <div className="alt-srctype-bars">
-                {donutSegments.map((s) => {
-                  const p = Math.round((s.value / (totalCitations || 1)) * 100);
-                  return (
-                    <div className="stb-row" key={s.label}>
-                      <span className="stb-label">
-                        <i style={{ background: s.color }} />
-                        {s.label}
-                      </span>
-                      <span className="stb-bar" aria-hidden>
-                        <i style={{ width: `${p}%`, background: s.color }} />
-                      </span>
-                      <span className="stb-val">
-                        <span className="stb-pct">{p}%</span>
-                        <span className="stb-cites">{s.value} cites</span>
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          </div>
-        </>
-      )}
     </div>
   );
 }

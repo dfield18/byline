@@ -5,41 +5,7 @@
  * shows — kept here, out of the JSX, so the wording is easy to tune and could be
  * unit-tested. Nothing here is hardcoded to a specific subject.
  */
-import type { SubjectOverview, KpiValue } from "@/lib/api";
-
-/**
- * "What changed" as ONE qualitative sentence — no numbers (the KPI delta chips
- * already own the exact figures). Describes the direction/magnitude of the shift
- * in plain language, e.g. "Mentions fell sharply while citations edged up."
- */
-export function buildWhatChangedSentence(kpis: SubjectOverview["kpis"]): string {
-  // delta is in percentage points; `big` is the pp threshold for "sharp".
-  const dirWord = (k: KpiValue, big: number): string | null => {
-    if (k.value === null) return null;
-    if (k.delta === null || Math.round(k.delta) === 0) return "held steady";
-    const sharp = Math.abs(k.delta) >= big;
-    if (k.delta < 0) return sharp ? "fell sharply" : "slipped";
-    return sharp ? "climbed sharply" : "edged up";
-  };
-
-  const clauses: string[] = [];
-  const m = dirWord(kpis.ai_recall, 20);
-  if (m) clauses.push(`mentions ${m}`);
-  const c = dirWord(kpis.citation_rate, 20);
-  if (c) clauses.push(`citations ${c}`);
-
-  const s = kpis.avg_sentiment;
-  if (s.value !== null) {
-    const tone = s.value > 0.1 ? "positive" : s.value < -0.1 ? "negative" : "neutral";
-    if (s.delta === null || Math.abs(s.delta) < 1) clauses.push(`sentiment stayed ${tone}`);
-    else clauses.push(`sentiment ${s.delta > 0 ? "edged up" : "edged down"}`);
-  }
-
-  if (clauses.length === 0) return "Little movement since the last snapshot.";
-  const last = clauses.pop()!;
-  const head = clauses.length ? `${clauses.join(", ")} while ${last}` : last;
-  return `${head.charAt(0).toUpperCase()}${head.slice(1)}.`;
-}
+import type { SubjectOverview } from "@/lib/api";
 
 /** Source-mix takeaway + a priority line, from the real source types/domains. */
 export function buildSourceCopy(
