@@ -135,6 +135,7 @@ type Spoke = {
 const SPOKES: Spoke[] = [
   { key: "", label: "Overview", Icon: OverviewIcon, built: true },
   { key: "dashboard", label: "Dashboard", Icon: DashboardIcon, built: true },
+  { key: "dashboard_v2", label: "Dashboard v2", Icon: DashboardIcon, built: true },
   { key: "visibility", label: "Visibility", Icon: VisibilityIcon, built: true },
   { key: "competition", label: "Competitive", Icon: CompetitionIcon, built: true },
   { key: "narrative", label: "Narrative", Icon: NarrativeIcon, built: true },

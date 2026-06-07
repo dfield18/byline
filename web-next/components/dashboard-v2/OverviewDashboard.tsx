@@ -66,6 +66,8 @@ export interface Recommendation {
 export interface ModelDescription {
   id: string;
   name: string;
+  /** Concise framing angle for this model (e.g. "Education and Parental Rights"). */
+  frame?: string | null;
   summary: string;
   sentiment: Sentiment;
 }
@@ -618,10 +620,11 @@ export function OverviewDashboard({
         </section>
       </div>
 
-      {/* 2×2 grid: readout + prompt themes, then source mix + recommended focus */}
+      {/* Grid: full-width cross-model readout, then source mix + prompt themes,
+          then full-width recommended focus. */}
       <div className="bo-grid">
-        {/* Cross-model readout — where competitive landscape was */}
-        <section className="bo-card">
+        {/* Cross-model readout — full-width, its own horizontal area */}
+        <section className="bo-card bo-card--full">
           <CardHead dots={["var(--bo-bronze)"]} spoke="narrative" onOpenSpoke={onOpenSpoke}>
             How each model describes {data.subject}
           </CardHead>
@@ -638,28 +641,13 @@ export function OverviewDashboard({
                         {s.label}
                       </span>
                     </div>
+                    {m.frame && <div className="bo-rframe">{m.frame}</div>}
                     <p className="bo-rtext">{m.summary}</p>
                   </div>
                 </div>
               );
             })}
           </div>
-        </section>
-
-        {/* Prompt themes — where the cross-model readout was */}
-        <section className="bo-card">
-          <CardHead dots={["var(--bo-bronze)"]} spoke="prompts" onOpenSpoke={onOpenSpoke}>
-            Prompt themes driving this result
-          </CardHead>
-          {data.drivers.map((d, i) => {
-            const s = ASSOCIATION_STYLE[d.association];
-            return (
-              <div key={d.id} className={`bo-row${i === 0 ? " bo-row--first" : ""}`}>
-                <span className="bo-mut">{d.label}</span>
-                <Pill label={d.association} bg={s.bg} fg={s.fg} />
-              </div>
-            );
-          })}
         </section>
 
         {/* Source type mix */}
@@ -691,26 +679,20 @@ export function OverviewDashboard({
           </div>
         </section>
 
-        {/* Top sources — beside the source type mix */}
+        {/* Prompt themes — moved into the slot where Top sources was */}
         <section className="bo-card">
-          <CardHead dots={["var(--bo-bronze)"]} spoke="sources" onOpenSpoke={onOpenSpoke}>
-            Top sources
+          <CardHead dots={["var(--bo-bronze)"]} spoke="prompts" onOpenSpoke={onOpenSpoke}>
+            Prompt themes driving this result
           </CardHead>
-          {data.topSources.length > 0 ? (
-            <div className="bo-topsrc">
-              {data.topSources.map((s) => (
-                <div key={s.id} className="bo-topsrc-row">
-                  <span className="bo-topsrc-name">{s.name}</span>
-                  <span className="bo-topsrc-type">{s.type}</span>
-                  <span className="bo-topsrc-cites">
-                    {s.citations} <em>cites</em>
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="bo-empty">No sources cited yet.</div>
-          )}
+          {data.drivers.map((d, i) => {
+            const s = ASSOCIATION_STYLE[d.association];
+            return (
+              <div key={d.id} className={`bo-row${i === 0 ? " bo-row--first" : ""}`}>
+                <span className="bo-mut">{d.label}</span>
+                <Pill label={d.association} bg={s.bg} fg={s.fg} />
+              </div>
+            );
+          })}
         </section>
 
         {/* Recommended focus — the action card, full-width banner on its own line */}
@@ -874,11 +856,16 @@ const BO_CSS = `
 
 /* Cross-model readout — mirrors the landing console's .lc-card rows. */
 .bo-readout { display: flex; flex-direction: column; }
+/* Full-width readout: lay the per-model cards side by side to use the width. */
+.bo-card--full .bo-readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 4px 36px; }
+.bo-card--full .bo-rcard { border-top: none; padding: 12px 0; }
+@media (max-width: 640px) { .bo-card--full .bo-readout { grid-template-columns: 1fr; } }
 .bo-rcard { display: flex; gap: 14px; padding: 16px 0; border-top: 1px solid var(--bo-line); }
 .bo-rcard:first-child { border-top: none; padding-top: 2px; }
 .bo-rbody { flex: 1; min-width: 0; }
 .bo-rtop { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; min-height: 22px; }
 .bo-rname { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.bo-rframe { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bo-bronze-deep); margin-bottom: 4px; }
 .bo-rsent { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 9px; border-radius: 6px; white-space: nowrap; }
 .bo-rtext { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--bo-ink-soft); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
