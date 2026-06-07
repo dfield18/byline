@@ -12,7 +12,7 @@
  * "Prompt themes driving this result" and renders `drivers` (theme + a
  * strong/moderate/weak/missing association badge).
  */
-import type { ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { MODEL_BRANDS } from "@/components/dashboard/ModelLogo";
 
 // ── Contract ─────────────────────────────────────────────────────────────
@@ -74,6 +74,24 @@ export interface DriverTheme {
   label: string;
   association: Association;
 }
+export interface CoverageCell {
+  slug: string;
+  mentioned: boolean;
+  present: boolean;
+  rank: number | null;
+  percentile: number | null;
+}
+export interface CoverageRow {
+  id: string;
+  label: string;
+  full: string;
+  level: Association;
+  cells: CoverageCell[];
+}
+export interface CoverageMatrix {
+  platforms: { slug: string; name: string }[];
+  rows: CoverageRow[];
+}
 export interface Competitor {
   id: string;
   name: string;
@@ -118,6 +136,7 @@ export interface OverviewData {
   trendLabels: string[];
   competitors: Competitor[];
   drivers: DriverTheme[];
+  coverage: CoverageMatrix;
   models: ModelDescription[];
   sources: SourceType[];
   topSources: TopSource[];
@@ -140,6 +159,12 @@ export const ASSOCIATION_STYLE: Record<Association, { bg: string; fg: string }> 
   moderate: { bg: "var(--bo-bronze-bg)", fg: "var(--bo-bronze-deep)" },
   weak: { bg: "var(--bo-neu-bg)", fg: "var(--bo-neu)" },
   missing: { bg: "var(--bo-neg-bg)", fg: "var(--bo-neg)" },
+};
+const ASSOC_LABEL: Record<Association, string> = {
+  strong: "Strong",
+  moderate: "Moderate",
+  weak: "Weak",
+  missing: "Missing",
 };
 
 const THEME_DOT: Record<ThemeId, string> = {
@@ -208,6 +233,8 @@ const lastDefined = (pts: (number | null)[]): number => pts.reduce<number>((a, v
 // endpoint (so no legend is needed). Points are null-aligned to `labels`, so
 // every series shares one time axis; rivals differ by dash pattern + opacity.
 function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string[] }) {
+  // Hovered column index (shared time axis), or null when not hovering.
+  const [hover, setHover] = useState<number | null>(null);
   const drawable = series.filter((s) => s.points.some((p) => p != null));
   if (drawable.length === 0 || labels.length === 0) return <div className="bo-empty">No trend yet.</div>;
 
@@ -290,8 +317,38 @@ function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string
       return [...acc, { ...l, y: prev ? Math.max(l.y, prev.y + GAP) : l.y }];
     }, []);
 
+  // Pointer → nearest column on the shared time axis.
+  const onMove = (e: MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width === 0 || N <= 1) return;
+    const vbx = ((e.clientX - rect.left) / rect.width) * W;
+    const t = (vbx - x0) / (x1 - x0);
+    setHover(Math.max(0, Math.min(N - 1, Math.round(t * (N - 1)))));
+  };
+  const hoverRows =
+    hover === null
+      ? []
+      : drawable
+          .filter((s) => s.points[hover] != null)
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            value: s.points[hover] as number,
+            color: s.isSubject ? "var(--bo-bronze)" : "var(--bo-line-strong)",
+            isSubject: s.isSubject,
+          }));
+  const tipLeft = hover === null ? 0 : Math.max(9, Math.min(91, (xAt(hover) / W) * 100));
+
   return (
-    <svg className="bo-spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Mention rate trend">
+    <div className="bo-spark-wrap">
+    <svg
+      className="bo-spark"
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-label="Mention rate trend"
+      onMouseMove={onMove}
+      onMouseLeave={() => setHover(null)}
+    >
       <defs>
         <linearGradient id="bo-area-fade" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="var(--bo-bronze)" stopOpacity={0.13} />
@@ -367,7 +424,47 @@ function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string
           {l.name}
         </text>
       ))}
+
+      {/* hover guide + per-series markers */}
+      {hover !== null && hoverRows.length > 0 && (
+        <g>
+          <line
+            x1={xAt(hover)}
+            y1={y0}
+            x2={xAt(hover)}
+            y2={y1}
+            stroke="var(--bo-line-strong)"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            vectorEffect="non-scaling-stroke"
+          />
+          {hoverRows.map((r) => (
+            <circle
+              key={`${r.id}-hov`}
+              cx={xAt(hover)}
+              cy={yAt(r.value)}
+              r={r.isSubject ? 4 : 3}
+              fill={r.color}
+              stroke="var(--bo-card)"
+              strokeWidth={1.5}
+            />
+          ))}
+        </g>
+      )}
     </svg>
+      {hover !== null && hoverRows.length > 0 && (
+        <div className="bo-sparktip" style={{ left: `${tipLeft}%` }}>
+          <div className="bo-sparktip-date">{labels[hover]}</div>
+          {hoverRows.map((r) => (
+            <div key={r.id} className="bo-sparktip-row">
+              <i style={{ background: r.color }} />
+              <span className="bo-sparktip-name">{r.name}</span>
+              <b>{r.value}%</b>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -646,23 +743,97 @@ export function OverviewDashboard({
           </div>
         </section>
 
-        {/* Prompt themes — where the cross-model readout was */}
+        {/* Prompt themes — theme × model coverage matrix (same as /dashboard) */}
         <section className="bo-card">
           <CardHead dots={["var(--bo-bronze)"]} spoke="prompts" onOpenSpoke={onOpenSpoke}>
             Prompt themes driving this result
           </CardHead>
-          {data.drivers.map((d, i) => {
-            const s = ASSOCIATION_STYLE[d.association];
-            return (
-              <div key={d.id} className={`bo-row${i === 0 ? " bo-row--first" : ""}`}>
-                <span className="bo-mut">{d.label}</span>
-                <Pill label={d.association} bg={s.bg} fg={s.fg} />
+          {data.coverage.rows.length > 0 && data.coverage.platforms.length > 0 ? (
+            <>
+              <div
+                className="bo-ptm"
+                style={{ ["--bo-ptm-cols" as string]: data.coverage.platforms.length }}
+              >
+                <div className="bo-ptm-row bo-ptm-head">
+                  <span className="bo-ptm-theme">Theme</span>
+                  {data.coverage.platforms.map((p) => {
+                    const brand = MODEL_BRANDS[p.slug];
+                    return (
+                      <span className="bo-ptm-cell" key={p.slug} title={p.name}>
+                        {brand ? (
+                          <span className="bo-ptm-logo" style={{ background: brand.bg }} aria-hidden>
+                            <svg viewBox="0 0 24 24" fill="#fff">
+                              <path d={brand.path} />
+                            </svg>
+                          </span>
+                        ) : (
+                          <span className="bo-ptm-logo bo-ptm-logo--fb" aria-hidden>
+                            {p.name.charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })}
+                  <span className="bo-ptm-cell bo-ptm-assoc">Association</span>
+                </div>
+                {data.coverage.rows.map((row) => (
+                  <div className="bo-ptm-row" key={row.id} title={row.full}>
+                    <span className="bo-ptm-theme">
+                      <span className="bo-ptm-tt">{row.label}</span>
+                    </span>
+                    {row.cells.map((c) => (
+                      <span className="bo-ptm-cell" key={c.slug}>
+                        {c.mentioned ? (
+                          c.percentile !== null ? (
+                            <span className="bo-pip bo-pip--hit">{c.percentile}</span>
+                          ) : (
+                            <span className="bo-pip bo-pip--hit bo-pip--dot" />
+                          )
+                        ) : c.present ? (
+                          <span className="bo-pip bo-pip--miss">0</span>
+                        ) : (
+                          <span className="bo-pip bo-pip--na">·</span>
+                        )}
+                      </span>
+                    ))}
+                    <span className="bo-ptm-cell bo-ptm-assoc">
+                      <span className={`bo-ng bo-ng--${row.level}`}>{ASSOC_LABEL[row.level]}</span>
+                    </span>
+                  </div>
+                ))}
               </div>
-            );
-          })}
+              <p className="bo-ptm-legend">
+                Prominence percentile (100 = top, 0 = not mentioned) · Association = link strength.
+              </p>
+            </>
+          ) : (
+            <div className="bo-empty">No prompt-theme coverage yet.</div>
+          )}
         </section>
 
-        {/* Source type mix */}
+        {/* Top sources — swapped to sit where Source type mix was */}
+        <section className="bo-card">
+          <CardHead dots={["var(--bo-bronze)"]} spoke="sources" onOpenSpoke={onOpenSpoke}>
+            Top sources
+          </CardHead>
+          {data.topSources.length > 0 ? (
+            <div className="bo-topsrc">
+              {data.topSources.map((s) => (
+                <div key={s.id} className="bo-topsrc-row">
+                  <span className="bo-topsrc-name">{s.name}</span>
+                  <span className="bo-topsrc-type">{s.type}</span>
+                  <span className="bo-topsrc-cites">
+                    {s.citations} <em>cites</em>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bo-empty">No sources cited yet.</div>
+          )}
+        </section>
+
+        {/* Source type mix — swapped to sit where Top sources was */}
         <section className="bo-card">
           <CardHead dots={["var(--bo-bronze)"]} spoke="sources" onOpenSpoke={onOpenSpoke}>
             Source type mix
@@ -689,28 +860,6 @@ export function OverviewDashboard({
               })}
             </div>
           </div>
-        </section>
-
-        {/* Top sources — beside the source type mix */}
-        <section className="bo-card">
-          <CardHead dots={["var(--bo-bronze)"]} spoke="sources" onOpenSpoke={onOpenSpoke}>
-            Top sources
-          </CardHead>
-          {data.topSources.length > 0 ? (
-            <div className="bo-topsrc">
-              {data.topSources.map((s) => (
-                <div key={s.id} className="bo-topsrc-row">
-                  <span className="bo-topsrc-name">{s.name}</span>
-                  <span className="bo-topsrc-type">{s.type}</span>
-                  <span className="bo-topsrc-cites">
-                    {s.citations} <em>cites</em>
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="bo-empty">No sources cited yet.</div>
-          )}
         </section>
 
         {/* Recommended focus — the action card, full-width banner on its own line */}
@@ -848,9 +997,18 @@ const BO_CSS = `
 .bo-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .bo-pill { font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: capitalize; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
 
-.bo-spark { width: 100%; height: auto; display: block; }
+.bo-spark-wrap { position: relative; }
+.bo-spark { width: 100%; height: auto; display: block; cursor: crosshair; }
 .bo-axis { fill: var(--bo-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .bo-spark-label { font-size: 11px; letter-spacing: -0.01em; }
+/* Hover tooltip — values at the hovered column. */
+.bo-sparktip { position: absolute; top: 4px; transform: translateX(-50%); pointer-events: none; z-index: 5; background: var(--bo-ink); color: #f3f1ec; border-radius: 9px; padding: 8px 11px; font-size: 11.5px; line-height: 1.4; box-shadow: 0 12px 28px -10px rgba(16,16,26,0.5); white-space: nowrap; }
+.bo-sparktip-date { font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #c9c1b2; margin-bottom: 5px; }
+.bo-sparktip-row { display: flex; align-items: center; gap: 7px; }
+.bo-sparktip-row + .bo-sparktip-row { margin-top: 2px; }
+.bo-sparktip-row i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.bo-sparktip-name { color: #e8e3d8; }
+.bo-sparktip-row b { margin-left: auto; padding-left: 12px; font-variant-numeric: tabular-nums; }
 .bo-empty { font-size: 12.5px; color: var(--bo-muted); padding: 18px 0; }
 
 .bo-table { display: flex; flex-direction: column; }
@@ -901,6 +1059,30 @@ const BO_CSS = `
 .bo-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--bo-line); }
 .bo-row--first { border-top: none; }
 .bo-mut { font-size: 13px; font-weight: 600; color: var(--bo-ink-soft); min-width: 0; }
+
+/* Prompt-themes coverage matrix (theme × model prominence + association). */
+.bo-ptm { display: flex; flex-direction: column; }
+.bo-ptm-row { display: grid; grid-template-columns: minmax(0,1fr) repeat(var(--bo-ptm-cols, 2), 46px) 96px; align-items: center; gap: 10px; padding: 9px 8px; margin: 0 -8px; border-top: 1px solid var(--bo-line); border-radius: 7px; }
+.bo-ptm-head { border-top: none; padding-bottom: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bo-muted); font-weight: 700; }
+.bo-ptm-theme { min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--bo-ink-soft); }
+.bo-ptm-head .bo-ptm-theme { font-weight: 700; }
+.bo-ptm-tt { display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bo-ptm-cell { display: grid; place-items: center; }
+.bo-ptm-assoc { justify-items: start; padding-left: 8px; }
+.bo-ptm-logo { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; }
+.bo-ptm-logo svg { width: 12px; height: 12px; display: block; }
+.bo-ptm-logo--fb { background: var(--bo-sand); color: var(--bo-ink-soft); font-size: 10px; font-weight: 700; }
+.bo-pip { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.bo-pip--hit { background: var(--bo-bronze); color: #fff; width: auto; min-width: 24px; height: 18px; padding: 0 6px; border-radius: 9px; }
+.bo-pip--hit.bo-pip--dot { width: 9px; min-width: 0; height: 9px; padding: 0; border-radius: 50%; }
+.bo-pip--miss { width: auto; min-width: 24px; height: 18px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--bo-line-strong); color: var(--bo-muted); background: transparent; }
+.bo-pip--na { color: var(--bo-line-strong); font-weight: 400; }
+.bo-ng { display: inline-block; flex: none; width: 72px; text-align: center; padding: 3px 0; border-radius: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.bo-ng--strong { background: var(--bo-pos-bg); color: var(--bo-pos); }
+.bo-ng--moderate { background: var(--bo-bronze-bg); color: var(--bo-bronze-deep); }
+.bo-ng--weak { background: var(--bo-neu-bg); color: var(--bo-neu); }
+.bo-ng--missing { background: var(--bo-neg-bg); color: var(--bo-neg); }
+.bo-ptm-legend { margin: 10px 2px 0; font-size: 11px; line-height: 1.5; color: var(--bo-muted); }
 
 .bo-source-body { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
 .bo-donut { width: 116px; height: 116px; flex: none; }

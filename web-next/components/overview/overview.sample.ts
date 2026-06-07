@@ -44,6 +44,44 @@ export const overviewSample: OverviewData = {
     { id: "fraud", label: "Fraud in government programs", association: "missing" },
     { id: "posttrump", label: "Post-Trump GOP", association: "missing" },
   ],
+  coverage: {
+    platforms: [
+      { slug: "chatgpt", name: "ChatGPT" },
+      { slug: "gemini", name: "Gemini" },
+    ],
+    rows: [
+      {
+        id: "conservatism",
+        label: "Future of American conservatism",
+        full: "Future of American conservatism",
+        level: "strong",
+        cells: [
+          { slug: "chatgpt", mentioned: true, present: true, rank: 1, percentile: 100 },
+          { slug: "gemini", mentioned: true, present: true, rank: 2, percentile: 80 },
+        ],
+      },
+      {
+        id: "populist",
+        label: "Populist conservative policy",
+        full: "Populist conservative policy",
+        level: "moderate",
+        cells: [
+          { slug: "chatgpt", mentioned: true, present: true, rank: 3, percentile: 60 },
+          { slug: "gemini", mentioned: false, present: true, rank: null, percentile: null },
+        ],
+      },
+      {
+        id: "posttrump",
+        label: "Post-Trump GOP",
+        full: "Post-Trump GOP",
+        level: "missing",
+        cells: [
+          { slug: "chatgpt", mentioned: false, present: true, rank: null, percentile: null },
+          { slug: "gemini", mentioned: false, present: false, rank: null, percentile: null },
+        ],
+      },
+    ],
+  },
   models: [
     {
       id: "gemini",

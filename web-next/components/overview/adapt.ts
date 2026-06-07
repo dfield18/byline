@@ -159,23 +159,43 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     isSubject: c.is_subject,
   }));
 
-  // Drivers = per-theme association strength, reusing the coverage-matrix logic.
-  const drivers = buildCoverageMatrix(api).rows.map((r) => ({
-    id: r.label + r.full,
+  // Coverage matrix (theme × model prominence + association) — the same shape
+  // the /dashboard spoke renders. Also flattened to `drivers` for any consumer
+  // that only needs theme + association.
+  const cov = buildCoverageMatrix(api);
+  const coverage = {
+    platforms: cov.platforms,
+    rows: cov.rows.map((r) => ({
+      id: r.label + r.full,
+      label: r.label,
+      full: r.full,
+      level: r.level,
+      cells: r.cells,
+    })),
+  };
+  const drivers = coverage.rows.map((r) => ({
+    id: r.id,
     label: r.label,
     association: r.level,
   }));
 
-  const excerptFor = (slug: string) =>
-    api.evidence_cards.find((e) => e.model_slug === slug)?.excerpt ?? null;
+  // Concise one-line framing per model: a real full sentence built from the
+  // model's assigned frame (frame_label), kept to ~5–10 words.
+  const cardFor = (slug: string) =>
+    api.evidence_cards.find((e) => e.model_slug === slug) ?? null;
   const models = api.per_platform_kpis
     .filter((m) => (m.n_responses ?? 0) > 0)
-    .map((m) => ({
-      id: m.slug,
-      name: m.name,
-      summary: excerptFor(m.slug) ?? "No representative quote surfaced yet.",
-      sentiment: bandSentiment(m.avg_sentiment),
-    }));
+    .map((m) => {
+      const frame = cardFor(m.slug)?.frame_label?.trim();
+      return {
+        id: m.slug,
+        name: m.name,
+        summary: frame
+          ? `Frames ${api.subject_name} around ${frame}.`
+          : "No distinct frame surfaced yet.",
+        sentiment: bandSentiment(m.avg_sentiment),
+      };
+    });
 
   // Source-type mix: aggregate citations by type.
   const byType = new Map<string, number>();
@@ -208,18 +228,45 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
         }))
     : [];
 
+  // One-line takeaway (~10–15 words), derived from visibility + sentiment +
+  // competitive standing. Used when the backend bottom_line is absent.
+  const mentionPct = k.ai_recall.value !== null ? Math.round(k.ai_recall.value * 100) : null;
+  const visBand =
+    mentionPct === null ? null : mentionPct < 34 ? "Low" : mentionPct < 67 ? "Moderate" : "Strong";
+  const sentWord = bandSentiment(k.avg_sentiment.value);
+  const subjStanding = api.competitive.find((c) => c.is_subject);
+  const nRivals = api.competitive.filter((c) => !c.is_subject).length;
+  const aheadOf = subjStanding
+    ? api.competitive.filter((c) => !c.is_subject && c.sov > subjStanding.sov).length
+    : 0;
+  const standing =
+    nRivals === 0 || !subjStanding
+      ? null
+      : aheadOf === 0
+        ? `leading all ${nRivals} tracked rivals`
+        : aheadOf >= nRivals
+          ? `trailing all ${nRivals} tracked rivals`
+          : `behind ${aheadOf} of ${nRivals} tracked rivals`;
+  const takeaway =
+    visBand === null
+      ? null
+      : `${visBand} AI visibility (${mentionPct}% mention rate), ${sentWord} sentiment${
+          standing ? `, ${standing}` : ""
+        }.`;
+
   return {
     subject: api.subject_name,
     category: api.category || null,
     updatedLabel: updated ? `updated ${updated}` : "no snapshot yet",
     comparisonLabel,
-    bottomLine: api.bottom_line ?? null,
+    bottomLine: api.bottom_line ?? takeaway,
     kpis,
     themes: [], // populated once the bucket query-template model exists
     mentionTrend,
     trendLabels,
     competitors,
     drivers,
+    coverage,
     models,
     sources,
     topSources,

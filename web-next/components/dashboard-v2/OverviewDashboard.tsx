@@ -12,7 +12,7 @@
  * "Prompt themes driving this result" and renders `drivers` (theme + a
  * strong/moderate/weak/missing association badge).
  */
-import type { ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { MODEL_BRANDS } from "@/components/dashboard/ModelLogo";
 
 // ── Contract ─────────────────────────────────────────────────────────────
@@ -48,6 +48,8 @@ export interface KpiMetric {
   info?: string;
   /** Optional position-on-a-range cue (e.g. sentiment on −1…+1). */
   scale?: { value: number; min: number; max: number };
+  /** One-line plain-English read of what this value means. */
+  interpretation?: string;
 }
 export interface MentionSeries {
   id: string;
@@ -62,6 +64,8 @@ export interface Recommendation {
   navigateTo?: ThemeId;
   /** Detail spoke this action's title links into. */
   spoke?: Spoke;
+  /** The concrete next move for this action (backend `action`). */
+  nextMove?: string | null;
 }
 export interface ModelDescription {
   id: string;
@@ -109,15 +113,23 @@ export interface OverviewData {
   /** Subject category, shown as a chip by the name (e.g. "Politician"). */
   category: string | null;
   updatedLabel: string;
-  /** What the KPI deltas are measured against, e.g. "Change vs previous snapshot — May 29, 2026 (8 days earlier)". */
+  /** Data date of this snapshot, e.g. "Jun 2, 2026". */
+  snapshotLabel: string | null;
+  /** Relative description of the prior run, e.g. "previous run earlier today". */
+  comparedWith: string;
+  /** What the KPI deltas are measured against (legacy; superseded by comparedWith). */
   comparisonLabel: string;
-  /** One-line synthesis from the backend, shown under the title. */
+  /** One-line synthesis from the backend, shown as the executive insight. */
   bottomLine: string | null;
   kpis: KpiMetric[];
   themes: Theme[];
   mentionTrend: MentionSeries[];
   /** X-axis labels for the mention trend, index-aligned to each series' points. */
   trendLabels: string[];
+  /** Editorial one-liner contextualizing the trend (subject vs rivals). */
+  trendInsight: string | null;
+  /** Editorial one-liner summarizing prompt-theme coverage gaps. */
+  themesSummary: string | null;
   competitors: Competitor[];
   drivers: DriverTheme[];
   models: ModelDescription[];
@@ -210,6 +222,8 @@ const lastDefined = (pts: (number | null)[]): number => pts.reduce<number>((a, v
 // endpoint (so no legend is needed). Points are null-aligned to `labels`, so
 // every series shares one time axis; rivals differ by dash pattern + opacity.
 function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string[] }) {
+  // Hovered column index (shared time axis), or null when not hovering.
+  const [hover, setHover] = useState<number | null>(null);
   const drawable = series.filter((s) => s.points.some((p) => p != null));
   if (drawable.length === 0 || labels.length === 0) return <div className="bo-empty">No trend yet.</div>;
 
@@ -292,8 +306,38 @@ function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string
       return [...acc, { ...l, y: prev ? Math.max(l.y, prev.y + GAP) : l.y }];
     }, []);
 
+  // Pointer → nearest column on the shared time axis.
+  const onMove = (e: MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width === 0 || N <= 1) return;
+    const vbx = ((e.clientX - rect.left) / rect.width) * W;
+    const t = (vbx - x0) / (x1 - x0);
+    setHover(Math.max(0, Math.min(N - 1, Math.round(t * (N - 1)))));
+  };
+  const hoverRows =
+    hover === null
+      ? []
+      : drawable
+          .filter((s) => s.points[hover] != null)
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            value: s.points[hover] as number,
+            color: s.isSubject ? "var(--bo-bronze)" : "var(--bo-line-strong)",
+            isSubject: s.isSubject,
+          }));
+  const tipLeft = hover === null ? 0 : Math.max(9, Math.min(91, (xAt(hover) / W) * 100));
+
   return (
-    <svg className="bo-spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Mention rate trend">
+    <div className="bo-spark-wrap">
+    <svg
+      className="bo-spark"
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-label="Mention rate trend"
+      onMouseMove={onMove}
+      onMouseLeave={() => setHover(null)}
+    >
       <defs>
         <linearGradient id="bo-area-fade" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="var(--bo-bronze)" stopOpacity={0.13} />
@@ -369,7 +413,47 @@ function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string
           {l.name}
         </text>
       ))}
+
+      {/* hover guide + per-series markers */}
+      {hover !== null && hoverRows.length > 0 && (
+        <g>
+          <line
+            x1={xAt(hover)}
+            y1={y0}
+            x2={xAt(hover)}
+            y2={y1}
+            stroke="var(--bo-line-strong)"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            vectorEffect="non-scaling-stroke"
+          />
+          {hoverRows.map((r) => (
+            <circle
+              key={`${r.id}-hov`}
+              cx={xAt(hover)}
+              cy={yAt(r.value)}
+              r={r.isSubject ? 4 : 3}
+              fill={r.color}
+              stroke="var(--bo-card)"
+              strokeWidth={1.5}
+            />
+          ))}
+        </g>
+      )}
     </svg>
+      {hover !== null && hoverRows.length > 0 && (
+        <div className="bo-sparktip" style={{ left: `${tipLeft}%` }}>
+          <div className="bo-sparktip-date">{labels[hover]}</div>
+          {hoverRows.map((r) => (
+            <div key={r.id} className="bo-sparktip-row">
+              <i style={{ background: r.color }} />
+              <span className="bo-sparktip-name">{r.name}</span>
+              <b>{r.value}%</b>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -407,8 +491,7 @@ function MiniSpark({ points }: { points: (number | null)[] }) {
 const SOURCE_PALETTE = ["#8a6d2f", "#5b6b4a", "#bc5f3a", "#41658c", "#8a6a9b"];
 
 // Donut for the source-type mix. Degrades gracefully at zero total.
-function Donut({ sources, totalLabel }: { sources: SourceType[]; totalLabel: string }) {
-  const size = 116;
+function Donut({ sources, totalLabel, size = 116 }: { sources: SourceType[]; totalLabel: string; size?: number }) {
   const stroke = 15;
   const r = (size - stroke) / 2;
   const c = size / 2;
@@ -424,7 +507,7 @@ function Donut({ sources, totalLabel }: { sources: SourceType[]; totalLabel: str
     offset: total > 0 ? sources.slice(0, i).reduce((sum, p) => sum + (p.count / total) * circ, 0) : 0,
   }));
   return (
-    <svg className="bo-donut" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Source type mix">
+    <svg className="bo-donut" style={{ width: size, height: size }} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Source type mix">
       <circle cx={c} cy={c} r={r} fill="none" stroke="var(--bo-sand)" strokeWidth={stroke} />
       {total > 0 &&
         arcs.map(({ seg, color, dash, offset }) => (
@@ -452,22 +535,6 @@ function Donut({ sources, totalLabel }: { sources: SourceType[]; totalLabel: str
         </>
       )}
     </svg>
-  );
-}
-
-// A thin −/0/+ position cue for a value on a fixed range (e.g. sentiment on
-// −1…+1), so an abstract figure like "−0.04" visibly reads as "near neutral".
-function KpiScale({ value, min, max }: { value: number; min: number; max: number }) {
-  const span = max - min || 1;
-  const pos = Math.max(0, Math.min(100, ((value - min) / span) * 100));
-  const mid = Math.max(0, Math.min(100, ((0 - min) / span) * 100));
-  const color = value >= 0.15 ? "var(--bo-pos)" : value <= -0.15 ? "var(--bo-neg)" : "var(--bo-neu)";
-  return (
-    <div className="bo-kscale" aria-hidden>
-      <span className="bo-kscale-track" />
-      <span className="bo-kscale-mid" style={{ left: `${mid}%` }} />
-      <span className="bo-kscale-dot" style={{ left: `${pos}%`, background: color }} />
-    </div>
   );
 }
 
@@ -511,12 +578,9 @@ export function OverviewDashboard({
       <header className="bo-head">
         <h1 className="bo-subject">{data.subject}</h1>
         {data.category && <span className="bo-cat">{data.category}</span>}
-        <span className="bo-updated">{data.updatedLabel}</span>
       </header>
 
-      {data.bottomLine && <p className="bo-bottomline">{data.bottomLine}</p>}
-
-      {/* KPI strip */}
+      {/* KPI strip — consistent: label / value+change / sparkline / interpretation */}
       <div className="bo-kpis">
         {data.kpis.map((k) => (
           <div key={k.id} className="bo-kpi">
@@ -538,20 +602,28 @@ export function OverviewDashboard({
                   {k.delta}
                 </div>
               </div>
-              {(k.scale || k.spark) && (
+              {k.spark && (
                 <div className="bo-kpi-viz">
-                  {k.scale ? (
-                    <KpiScale value={k.scale.value} min={k.scale.min} max={k.scale.max} />
-                  ) : (
-                    k.spark && <MiniSpark points={k.spark} />
-                  )}
+                  <MiniSpark points={k.spark} />
                 </div>
               )}
             </div>
+            {k.interpretation && <div className="bo-kpi-interp">{k.interpretation}</div>}
           </div>
         ))}
       </div>
-      <div className="bo-kpi-note">{data.comparisonLabel}</div>
+
+      {/* Snapshot metadata + executive insight */}
+      <div className="bo-snapshot">
+        <span className="bo-snap">
+          <span className="bo-snap-k">Snapshot</span> {data.snapshotLabel ?? "—"}
+        </span>
+        <span className="bo-snap-sep" aria-hidden />
+        <span className="bo-snap">
+          <span className="bo-snap-k">Compared with</span> {data.comparedWith}
+        </span>
+      </div>
+      {data.bottomLine && <p className="bo-insight">{data.bottomLine}</p>}
 
       {/* Theme spine — navigable. Hidden until theme/bucket data exists. */}
       {data.themes.length > 0 && (
@@ -586,6 +658,7 @@ export function OverviewDashboard({
           <CardHead dots={["var(--bo-bronze)"]} spoke="visibility" onOpenSpoke={onOpenSpoke}>
             Mention rate trend
           </CardHead>
+          {data.trendInsight && <p className="bo-cardnote">{data.trendInsight}</p>}
           <Sparkline series={data.mentionTrend} labels={data.trendLabels} />
         </section>
 
@@ -597,9 +670,9 @@ export function OverviewDashboard({
           <div className="bo-table">
             <div className="bo-trow bo-trow--head">
               <span className="bo-ent">Entity</span>
-              <span className="bo-num">Mention %</span>
-              <span className="bo-num">Avg rank</span>
-              <span className="bo-num">Top answer</span>
+              <span className="bo-num">Mention Rate</span>
+              <span className="bo-num">Avg Position</span>
+              <span className="bo-num">Top Answer Rate</span>
             </div>
             {data.competitors.map((c) => (
               <div key={c.id} className={`bo-trow${c.isSubject ? " bo-trow--you" : ""}`}>
@@ -616,18 +689,20 @@ export function OverviewDashboard({
               </div>
             ))}
           </div>
-          <p className="bo-tnote">Avg rank — lower is better.</p>
+          <p className="bo-tnote">Avg position — lower is better.</p>
         </section>
       </div>
 
-      {/* Grid: full-width cross-model readout, then source mix + prompt themes,
-          then full-width recommended focus. */}
-      <div className="bo-grid">
-        {/* Cross-model readout — full-width, its own horizontal area */}
-        <section className="bo-card bo-card--full">
+      {/* Stack: model evidence → diagnosis row → recommended conclusion */}
+      <div className="bo-stack">
+        {/* Model evidence — representative excerpts + the frame they reinforce */}
+        <section className="bo-card">
           <CardHead dots={["var(--bo-bronze)"]} spoke="narrative" onOpenSpoke={onOpenSpoke}>
-            How each model describes {data.subject}
+            Model evidence
           </CardHead>
+          <p className="bo-cardnote">
+            How each model frames {data.subject}, in one line, and the topic it reinforces.
+          </p>
           <div className="bo-readout">
             {data.models.map((m) => {
               const s = SENTIMENT_STYLE[m.sentiment];
@@ -641,7 +716,7 @@ export function OverviewDashboard({
                         {s.label}
                       </span>
                     </div>
-                    {m.frame && <div className="bo-rframe">{m.frame}</div>}
+                    {m.frame && <div className="bo-rframe">Primary frame: {m.frame}</div>}
                     <p className="bo-rtext">{m.summary}</p>
                   </div>
                 </div>
@@ -650,57 +725,62 @@ export function OverviewDashboard({
           </div>
         </section>
 
-        {/* Source type mix */}
-        <section className="bo-card">
-          <CardHead dots={["var(--bo-bronze)"]} spoke="sources" onOpenSpoke={onOpenSpoke}>
-            Source type mix
-          </CardHead>
-          <div className="bo-source-body">
-            <Donut sources={data.sources} totalLabel={data.sourceTotalLabel} />
-            <div className="bo-source-bars">
-              {data.sources.map((s, i) => {
-                const color = SOURCE_PALETTE[i % SOURCE_PALETTE.length];
-                return (
-                  <div key={s.id} className="bo-sbar">
-                    <span className="bo-sbar-label">
-                      <i style={{ background: color }} />
-                      {s.label}
-                    </span>
-                    <span className="bo-sbar-track" aria-hidden>
-                      <i style={{ width: `${s.share}%`, background: color }} />
-                    </span>
-                    <span className="bo-sbar-val">
-                      {s.share}% <em>{s.count}</em>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
+        {/* Diagnosis row: prompt themes (prominent) + compact citation foundation */}
+        <div className="bo-midrow">
+          {/* Prompt themes — the core narrative diagnosis */}
+          <section className="bo-card">
+            <CardHead dots={["var(--bo-bronze)"]} spoke="prompts" onOpenSpoke={onOpenSpoke}>
+              Prompt themes driving this result
+            </CardHead>
+            {data.themesSummary && <p className="bo-cardnote">{data.themesSummary}</p>}
+            {data.drivers.map((d, i) => {
+              const s = ASSOCIATION_STYLE[d.association];
+              return (
+                <div key={d.id} className={`bo-row${i === 0 ? " bo-row--first" : ""}`}>
+                  <span className="bo-mut">{d.label}</span>
+                  <Pill label={d.association} bg={s.bg} fg={s.fg} />
+                </div>
+              );
+            })}
+          </section>
 
-        {/* Prompt themes — moved into the slot where Top sources was */}
-        <section className="bo-card">
-          <CardHead dots={["var(--bo-bronze)"]} spoke="prompts" onOpenSpoke={onOpenSpoke}>
-            Prompt themes driving this result
-          </CardHead>
-          {data.drivers.map((d, i) => {
-            const s = ASSOCIATION_STYLE[d.association];
-            return (
-              <div key={d.id} className={`bo-row${i === 0 ? " bo-row--first" : ""}`}>
-                <span className="bo-mut">{d.label}</span>
-                <Pill label={d.association} bg={s.bg} fg={s.fg} />
+          {/* Citation foundation — compact source-type breakdown */}
+          <section className="bo-card">
+            <CardHead dots={["var(--bo-bronze)"]} spoke="sources" onOpenSpoke={onOpenSpoke}>
+              Citation foundation
+            </CardHead>
+            <div className="bo-source-body bo-source-body--compact">
+              <Donut sources={data.sources} totalLabel={data.sourceTotalLabel} size={92} />
+              <div className="bo-source-bars">
+                {data.sources.map((s, i) => {
+                  const color = SOURCE_PALETTE[i % SOURCE_PALETTE.length];
+                  return (
+                    <div key={s.id} className="bo-sbar">
+                      <span className="bo-sbar-label">
+                        <i style={{ background: color }} />
+                        {s.label}
+                      </span>
+                      <span className="bo-sbar-track" aria-hidden>
+                        <i style={{ width: `${s.share}%`, background: color }} />
+                      </span>
+                      <span className="bo-sbar-val">
+                        {s.share}% <em>{s.count}</em>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </section>
+            </div>
+          </section>
+        </div>
 
-        {/* Recommended focus — the action card, full-width banner on its own line */}
-        <section className="bo-card bo-card--action bo-card--full">
+        {/* Recommended focus — the conclusion / action section */}
+        <section className="bo-card bo-card--action">
           <CardHead dots={["var(--bo-bronze)"]} spoke="recommendations" onOpenSpoke={onOpenSpoke}>
             Recommended focus
           </CardHead>
-          <ol className="bo-recs">
+          <p className="bo-cardnote">What to do next based on this snapshot.</p>
+          <ol className="bo-recs bo-recs--cols">
             {data.recommendations.map((r, i) => {
               const linkSpoke = r.spoke && onOpenSpoke ? r.spoke : null;
               return (
@@ -726,7 +806,14 @@ export function OverviewDashboard({
                     ) : (
                       <span className="bo-rec-title">{r.title}</span>
                     )}
-                    <p className="bo-rec-why">{r.rationale}</p>
+                    <p className="bo-rec-why">
+                      <span className="bo-rec-lbl">Why</span> {r.rationale}
+                    </p>
+                    {r.nextMove && (
+                      <p className="bo-rec-why">
+                        <span className="bo-rec-lbl">Next move</span> {r.nextMove}
+                      </p>
+                    )}
                   </div>
                 </li>
               );
@@ -791,11 +878,17 @@ const BO_CSS = `
 .bo-kpi-value { font-size: 26px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1.05; }
 .bo-kpi-delta { margin-top: 6px; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .bo-kspark { width: 100%; height: 34px; display: block; }
-/* −/0/+ position cue (sentiment): a track, a 0 tick, and a dot at the value. */
-.bo-kscale { position: relative; height: 12px; }
-.bo-kscale-track { position: absolute; left: 0; right: 0; top: 5px; height: 3px; border-radius: 2px; background: var(--bo-sand); }
-.bo-kscale-mid { position: absolute; top: 2px; width: 1px; height: 9px; background: var(--bo-line-strong); transform: translateX(-0.5px); }
-.bo-kscale-dot { position: absolute; top: 1px; width: 9px; height: 9px; border-radius: 50%; transform: translateX(-4.5px); border: 2px solid var(--bo-card); box-shadow: 0 0 0 1px rgba(28,24,14,0.06); }
+/* Plain-English interpretation under each metric. */
+.bo-kpi-interp { margin-top: 9px; font-size: 12px; line-height: 1.4; color: var(--bo-muted); }
+
+/* Snapshot metadata strip + executive insight callout (below the KPI strip). */
+.bo-snapshot { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 18px 0 14px; font-size: 12px; color: var(--bo-ink-soft); }
+.bo-snap-k { font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10.5px; color: var(--bo-muted); margin-right: 4px; }
+.bo-snap-sep { width: 1px; height: 13px; background: var(--bo-line-strong); }
+.bo-insight { margin: 0 0 26px; padding: 13px 16px; background: var(--bo-sand); border: 1px solid var(--bo-line); border-radius: 12px; font-size: 14.5px; line-height: 1.5; color: var(--bo-ink-soft); max-width: 88ch; }
+
+/* Editorial intro line under a card header (insights, subtitles). */
+.bo-cardnote { margin: -4px 0 14px; font-size: 13px; line-height: 1.45; color: var(--bo-muted); }
 
 .bo-spine { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
 .bo-theme {
@@ -815,6 +908,10 @@ const BO_CSS = `
 /* Top row: a wider trend beside the narrower competitive table. */
 .bo-toprow { display: grid; grid-template-columns: 1.6fr 1fr; gap: 18px; margin-bottom: 18px; }
 .bo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+/* Bottom stack: model evidence → diagnosis row → recommended conclusion. */
+.bo-stack { display: flex; flex-direction: column; gap: 18px; }
+/* Diagnosis row: prompt themes (prominent) wider than citation foundation. */
+.bo-midrow { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; }
 .bo-card { background: var(--bo-card); border: 1px solid var(--bo-line); border-radius: var(--bo-radius); box-shadow: var(--bo-shadow); padding: 18px 20px; min-width: 0; }
 /* Action card — the "do this next" emphasis: warm tint + bronze accent rail. */
 .bo-card--full { grid-column: 1 / -1; }
@@ -830,14 +927,24 @@ const BO_CSS = `
 .bo-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .bo-pill { font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: capitalize; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
 
-.bo-spark { width: 100%; height: auto; display: block; }
+.bo-spark-wrap { position: relative; }
+.bo-spark { width: 100%; height: auto; display: block; cursor: crosshair; }
 .bo-axis { fill: var(--bo-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .bo-spark-label { font-size: 11px; letter-spacing: -0.01em; }
+/* Hover tooltip — values at the hovered column. */
+.bo-sparktip { position: absolute; top: 4px; transform: translateX(-50%); pointer-events: none; z-index: 5; background: var(--bo-ink); color: #f3f1ec; border-radius: 9px; padding: 8px 11px; font-size: 11.5px; line-height: 1.4; box-shadow: 0 12px 28px -10px rgba(16,16,26,0.5); white-space: nowrap; }
+.bo-sparktip-date { font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #c9c1b2; margin-bottom: 5px; }
+.bo-sparktip-row { display: flex; align-items: center; gap: 7px; }
+.bo-sparktip-row + .bo-sparktip-row { margin-top: 2px; }
+.bo-sparktip-row i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.bo-sparktip-name { color: #e8e3d8; }
+.bo-sparktip-row b { margin-left: auto; padding-left: 12px; font-variant-numeric: tabular-nums; }
 .bo-empty { font-size: 12.5px; color: var(--bo-muted); padding: 18px 0; }
 
 .bo-table { display: flex; flex-direction: column; }
-.bo-trow { display: grid; grid-template-columns: minmax(0,1fr) 88px 60px 68px; align-items: center; gap: 10px; padding: 9px 8px; margin: 0 -8px; border-top: 1px solid var(--bo-line); border-radius: 7px; font-size: 13px; }
-.bo-trow--head { border-top: none; padding-bottom: 5px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bo-muted); font-weight: 700; }
+.bo-trow { display: grid; grid-template-columns: minmax(0,1fr) 80px 64px 74px; align-items: center; gap: 12px; padding: 9px 8px; margin: 0 -8px; border-top: 1px solid var(--bo-line); border-radius: 7px; font-size: 13px; }
+.bo-trow--head { border-top: none; padding-bottom: 6px; align-items: end; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--bo-muted); font-weight: 700; }
+.bo-trow--head .bo-num { white-space: normal; line-height: 1.15; }
 .bo-trow--you { background: var(--bo-bronze-bg); }
 .bo-ent { min-width: 0; font-weight: 600; color: var(--bo-ink-soft); display: flex; align-items: center; gap: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bo-trow--you .bo-ent { color: var(--bo-bronze-deep); }
@@ -854,18 +961,14 @@ const BO_CSS = `
 .bo-num-v { position: relative; font-variant-numeric: tabular-nums; }
 .bo-tnote { margin: 11px 2px 0; font-size: 11px; color: var(--bo-muted); }
 
-/* Cross-model readout — mirrors the landing console's .lc-card rows. */
-.bo-readout { display: flex; flex-direction: column; }
-/* Full-width readout: lay the per-model cards side by side to use the width. */
-.bo-card--full .bo-readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 4px 36px; }
-.bo-card--full .bo-rcard { border-top: none; padding: 12px 0; }
-@media (max-width: 640px) { .bo-card--full .bo-readout { grid-template-columns: 1fr; } }
-.bo-rcard { display: flex; gap: 14px; padding: 16px 0; border-top: 1px solid var(--bo-line); }
-.bo-rcard:first-child { border-top: none; padding-top: 2px; }
+/* Model evidence — per-model cards laid side by side to use the full width. */
+.bo-readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 6px 36px; }
+@media (max-width: 640px) { .bo-readout { grid-template-columns: 1fr; } }
+.bo-rcard { display: flex; gap: 14px; padding: 14px 0; }
 .bo-rbody { flex: 1; min-width: 0; }
 .bo-rtop { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; min-height: 22px; }
 .bo-rname { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
-.bo-rframe { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bo-bronze-deep); margin-bottom: 4px; }
+.bo-rframe { font-size: 11.5px; font-weight: 600; color: var(--bo-bronze-deep); margin-bottom: 5px; }
 .bo-rsent { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 9px; border-radius: 6px; white-space: nowrap; }
 .bo-rtext { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--bo-ink-soft); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
@@ -880,17 +983,22 @@ const BO_CSS = `
 .bo-rec-title { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--bo-ink); }
 .bo-rec-title--link { background: none; border: none; padding: 0; font: inherit; color: var(--bo-bronze-deep); cursor: pointer; }
 .bo-rec-title--link:hover { text-decoration: underline; }
-.bo-rec-why { margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--bo-muted); }
-/* Full-width action banner: lay the recommendations out side by side. */
-.bo-card--full .bo-recs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px 28px; }
-.bo-card--full .bo-rec { align-items: flex-start; }
+.bo-rec-why { margin: 5px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--bo-muted); }
+.bo-rec-lbl { font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; color: var(--bo-bronze-deep); margin-right: 5px; }
+/* Recommended-focus conclusion: lay the actions out side by side. */
+.bo-recs--cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px 30px; }
+.bo-recs--cols .bo-rec { align-items: flex-start; }
 
 .bo-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--bo-line); }
 .bo-row--first { border-top: none; }
 .bo-mut { font-size: 13px; font-weight: 600; color: var(--bo-ink-soft); min-width: 0; }
 
 .bo-source-body { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
-.bo-donut { width: 116px; height: 116px; flex: none; }
+/* Compact citation-foundation: smaller gap so the donut feels secondary. */
+.bo-source-body--compact { gap: 18px; }
+.bo-source-body--compact .bo-source-bars { min-width: 150px; }
+.bo-source-body--compact .bo-sbar { grid-template-columns: 92px 1fr auto; gap: 10px; }
+.bo-donut { flex: none; }
 .bo-donut-num { fill: var(--bo-ink); font-size: 20px; font-weight: 700; }
 .bo-donut-sub { fill: var(--bo-muted); font-size: 8px; text-transform: uppercase; letter-spacing: 0.08em; }
 .bo-source-bars { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 12px; }
@@ -913,15 +1021,12 @@ const BO_CSS = `
 
 @media (max-width: 860px) {
   .bo-kpis, .bo-spine { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 860px) {
-  .bo-card--full .bo-recs { grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 860px) {
-  .bo-toprow { grid-template-columns: 1fr; }
+  .bo-toprow, .bo-midrow { grid-template-columns: 1fr; }
+  .bo-recs--cols { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 640px) {
   .bo-grid { grid-template-columns: 1fr; }
-  .bo-card--full .bo-recs { grid-template-columns: 1fr; }
+  .bo-kpis { grid-template-columns: 1fr; }
+  .bo-recs--cols { grid-template-columns: 1fr; }
 }
 `;

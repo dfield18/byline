@@ -43,6 +43,41 @@ const fmtWeek = (w: string): string => {
     : d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 };
 
+// "A, B, and C" from a list of names.
+const listNames = (xs: string[]): string =>
+  xs.length <= 1
+    ? xs.join("")
+    : xs.length === 2
+      ? `${xs[0]} and ${xs[1]}`
+      : `${xs.slice(0, -1).join(", ")}, and ${xs[xs.length - 1]}`;
+
+// Plain-English interpretations, derived generically from the value (no
+// fabrication — same thresholds the KPI band uses elsewhere).
+const interpMention = (v: number | null): string =>
+  v === null
+    ? "No visibility data yet"
+    : v < 0.34
+      ? "Low visibility across monitored prompts"
+      : v < 0.67
+        ? "Moderate visibility across prompts"
+        : "Strong visibility across prompts";
+const interpSentiment = (v: number | null): string =>
+  v === null
+    ? "No sentiment measured yet"
+    : v >= 0.15
+      ? "Positive overall framing"
+      : v <= -0.15
+        ? "Negative overall framing"
+        : "Neutral overall framing";
+const interpRisk = (v: number | null): string =>
+  v === null ? "No data yet" : v === 0 ? "No major negative frames" : "Negative framing detected";
+const interpCitation = (v: number | null): string =>
+  v === null
+    ? "Insufficient comparison data"
+    : v < 0.2
+      ? "Few answers cite sources"
+      : "Answers frequently cite sources";
+
 /**
  * Adapt the live `SubjectOverview` payload into the prop-driven `OverviewData`
  * contract. Wired to the CURRENT backend (decision: ship on today's data).
@@ -73,6 +108,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       timeZone: "UTC",
     });
   let comparisonLabel = "First snapshot — no prior period to compare yet";
+  let comparedWith = "No prior run to compare yet";
   if (priorAt) {
     const ms =
       api.meta.last_refresh_at != null
@@ -82,11 +118,12 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     const hours = Math.round(ms / 3_600_000);
     const rel =
       days >= 1
-        ? ` (${days} day${days === 1 ? "" : "s"} earlier)`
+        ? `${days} day${days === 1 ? "" : "s"} earlier`
         : hours >= 1
-          ? ` (${hours} hour${hours === 1 ? "" : "s"} earlier)`
-          : " (earlier the same day)";
-    comparisonLabel = `Change vs previous snapshot — ${fmtDate(priorAt)}${rel}`;
+          ? `${hours} hour${hours === 1 ? "" : "s"} earlier`
+          : "earlier today";
+    comparisonLabel = `Change vs previous snapshot — ${fmtDate(priorAt)} (${rel})`;
+    comparedWith = `previous run ${rel}`;
   }
 
   const k = api.kpis;
@@ -99,6 +136,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       ...fmtDelta(k.ai_recall.delta, "pp"),
       spark: t.ai_recall,
       info: "Share of AI answers that mention this subject at all. Higher means the subject surfaces more often when these prompts are asked.",
+      interpretation: interpMention(k.ai_recall.value),
     },
     {
       id: "sentiment",
@@ -107,9 +145,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       ...fmtDelta(k.avg_sentiment.delta, "pts"),
       spark: t.avg_sentiment,
       info: "Average tone of AI answers about this subject, scored from −1 (negative) to +1 (positive). Around 0 is neutral.",
-      ...(k.avg_sentiment.value === null
-        ? {}
-        : { scale: { value: k.avg_sentiment.value, min: -1, max: 1 } }),
+      interpretation: interpSentiment(k.avg_sentiment.value),
     },
     {
       id: "risk",
@@ -119,6 +155,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       deltaDirection: k.risk_frame_rate.value === 0 ? "neutral" : "down",
       spark: t.risk_frame_rate,
       info: "Share of answers that frame the subject around controversy, scandal, extremism, or reputational risk. Lower is better.",
+      interpretation: interpRisk(k.risk_frame_rate.value),
     },
     {
       id: "citation",
@@ -127,6 +164,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       ...fmtDelta(k.citation_rate.delta, "pp"),
       spark: t.citation_rate,
       info: "Share of AI answers that cite or link an external source when discussing this subject.",
+      interpretation: interpCitation(k.citation_rate.value),
     },
   ];
 
@@ -142,6 +180,20 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       return { id: name, name, isSubject: false, points: ct ? alignPoints(ct.mention_rate) : [] };
     }),
   ].filter((s) => s.points.some((p) => p !== null));
+
+  // Editorial trend insight: subject's mention rate vs the top rivals'.
+  const subjComp = api.competitive.find((c) => c.is_subject);
+  const trendRivals = ranked.filter((c) => !c.is_subject).slice(0, 3);
+  const subjPct = subjComp ? Math.round(subjComp.sov * 100) : null;
+  const rivalMaxPct = trendRivals.length
+    ? Math.max(...trendRivals.map((c) => Math.round(c.sov * 100)))
+    : null;
+  const trendInsight =
+    subjPct !== null && rivalMaxPct !== null
+      ? `${api.subject_name} appears in only ${subjPct}% of answers, while ${listNames(
+          trendRivals.map((c) => c.name),
+        )} appear in up to ${rivalMaxPct}%.`
+      : null;
 
   // Top 4 rivals by share of voice + the subject = 5 rows (re-sorted by sov so
   // the subject sits in its natural position).
@@ -166,8 +218,18 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     association: r.level,
   }));
 
-  // Landing-style "cross-model readout": a concise framing angle (frame_label)
-  // plus a one-sentence analysis (rationale) per model — not the raw quote.
+  // Editorial themes summary: lead with the missing themes (the biggest gaps),
+  // then weak, else acknowledge solid coverage.
+  const missingThemes = drivers.filter((d) => d.association === "missing").map((d) => d.label);
+  const weakThemes = drivers.filter((d) => d.association === "weak").map((d) => d.label);
+  const themesSummary = missingThemes.length
+    ? `${api.subject_name} is mostly absent from prompts about ${listNames(missingThemes.slice(0, 3))}.`
+    : weakThemes.length
+      ? `${api.subject_name} has only weak presence on ${listNames(weakThemes.slice(0, 3))}.`
+      : `${api.subject_name} has solid coverage across the tracked prompt themes.`;
+
+  // Model evidence: a concise one-sentence read of each model's framing
+  // (rationale — a full sentence, ~15–20 words) plus the frame it reinforces.
   const cardFor = (slug: string) =>
     api.evidence_cards.find((e) => e.model_slug === slug) ?? null;
   const models = api.per_platform_kpis
@@ -178,8 +240,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
         id: m.slug,
         name: m.name,
         frame: card?.frame_label ?? null,
-        summary:
-          card?.rationale || card?.excerpt || "No analysis surfaced yet.",
+        summary: card?.rationale || card?.excerpt || "No analysis surfaced yet.",
         sentiment: bandSentiment(m.avg_sentiment),
       };
     });
@@ -211,6 +272,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
           id: `${a.label}-${i}`,
           title: a.label,
           rationale: a.why,
+          nextMove: a.action ?? null,
           spoke: recSpoke(a.label, a.why),
         }))
     : [];
@@ -219,14 +281,18 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     subject: api.subject_name,
     category: api.category || null,
     updatedLabel: updated ? `updated ${updated}` : "no snapshot yet",
+    snapshotLabel: updated,
+    comparedWith,
     comparisonLabel,
     bottomLine: api.bottom_line ?? null,
     kpis,
     themes: [], // populated once the bucket query-template model exists
     mentionTrend,
     trendLabels,
+    trendInsight,
     competitors,
     drivers,
+    themesSummary,
     models,
     sources,
     topSources,
