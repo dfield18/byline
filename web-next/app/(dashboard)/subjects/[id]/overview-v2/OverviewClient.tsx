@@ -5,6 +5,7 @@ import {
   OverviewDashboard,
   type OverviewData,
   type ThemeId,
+  type Spoke,
 } from "@/components/overview/OverviewDashboard";
 
 /**
@@ -36,6 +37,7 @@ export function OverviewClient({
       onNavigate={(themeId) =>
         router.push(`/subjects/${subjectId}/${THEME_ROUTE[themeId]}`)
       }
+      onOpenSpoke={(spoke: Spoke) => router.push(`/subjects/${subjectId}/${spoke}`)}
     />
   );
 }

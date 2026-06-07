@@ -7,13 +7,18 @@ import type { OverviewData } from "./OverviewDashboard";
  */
 export const overviewSample: OverviewData = {
   subject: "J.D. Vance",
+  category: "Politician",
   updatedLabel: "updated Jun 5, 2026",
+  comparisonLabel: "Change vs previous snapshot — May 29, 2026 (7 days earlier)",
+  bottomLine:
+    "Mentioned in 50% of AI answers — down 30 pp and now 4th of 5 tracked rivals — with neutral sentiment and a strong association to conservatism but no link yet to the post-Trump GOP storyline.",
   kpis: [
-    { id: "mention", label: "mention rate", value: "50%", delta: "↓ 30 pp", deltaDirection: "down" },
-    { id: "sentiment", label: "avg sentiment", value: "-0.04", delta: "↑ 2 pp", deltaDirection: "up" },
-    { id: "risk", label: "risk framing", value: "0%", delta: "none detected", deltaDirection: "neutral" },
-    { id: "citation", label: "citation rate", value: "15%", delta: "↑ 10 pp", deltaDirection: "up" },
+    { id: "mention", label: "mention rate", value: "50%", delta: "↓ 30 pp", deltaDirection: "down", spark: [66, 100, 66, 100, 100, 83, 83, 100, 50, 70, 80, 50], info: "Share of AI answers that mention this subject at all. Higher means the subject surfaces more often when these prompts are asked." },
+    { id: "sentiment", label: "avg sentiment", value: "-0.04", delta: "↑ 2 pp", deltaDirection: "up", spark: [-0.1, -0.08, -0.12, -0.05, -0.06, -0.02, -0.09, -0.04, -0.07, -0.05, -0.06, -0.04], info: "Average tone of AI answers about this subject, scored from −1 (negative) to +1 (positive). Around 0 is neutral.", scale: { value: -0.04, min: -1, max: 1 } },
+    { id: "risk", label: "risk framing", value: "0%", delta: "none detected", deltaDirection: "neutral", spark: [10, 8, 0, 5, 0, 0, 4, 0, 0, 0, 0, 0], info: "Share of answers that frame the subject around controversy, scandal, extremism, or reputational risk. Lower is better." },
+    { id: "citation", label: "citation rate", value: "15%", delta: "↑ 10 pp", deltaDirection: "up", spark: [4, 5, 6, 5, 8, 7, 10, 9, 12, 11, 13, 15], info: "Share of AI answers that cite or link an external source when discussing this subject." },
   ],
+  trendLabels: ["Mar 21", "Mar 28", "Apr 4", "Apr 11", "Apr 18", "Apr 25", "May 2", "May 9", "May 16", "May 23", "May 30", "Jun 5"],
   themes: [
     { id: "issues", label: "Issues", status: "surfaces on 3 of 5", sentiment: "neutral", trend: "flat" },
     { id: "recent-news", label: "Recent news", status: "high salience", sentiment: "mixed", trend: "up" },
@@ -59,6 +64,13 @@ export const overviewSample: OverviewData = {
     { id: "news", label: "News", share: 64, count: 32 },
     { id: "reference", label: "Reference", share: 26, count: 13 },
     { id: "social", label: "Social Media", share: 10, count: 5 },
+  ],
+  topSources: [
+    { id: "wikipedia.org", name: "Wikipedia", type: "Reference", citations: 11 },
+    { id: "nytimes.com", name: "nytimes.com", type: "News", citations: 7 },
+    { id: "politico.com", name: "politico.com", type: "News", citations: 6 },
+    { id: "x.com", name: "x.com", type: "Social Media", citations: 5 },
+    { id: "wsj.com", name: "wsj.com", type: "News", citations: 4 },
   ],
   sourceTotalLabel: "50 citations",
   recommendations: [
