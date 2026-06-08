@@ -31,6 +31,37 @@ function fmtDelta(delta: number | null, unit: "pp" | "pts"): Pick<KpiMetric, "de
 }
 
 const pct = (v: number | null): string => (v === null ? "—" : `${Math.round(v * 100)}%`);
+// Plain-English KPI interpretations, derived from the value (same thresholds the
+// bands use elsewhere — no fabrication).
+const interpMention = (v: number | null): string =>
+  v === null
+    ? "No visibility data yet"
+    : v < 0.34
+      ? "Low visibility across monitored prompts"
+      : v < 0.67
+        ? "Moderate visibility across prompts"
+        : "Strong visibility across prompts";
+const interpSentiment = (v: number | null): string =>
+  v === null
+    ? "No sentiment measured yet"
+    : v >= 0.15
+      ? "Positive overall framing"
+      : v <= -0.15
+        ? "Negative overall framing"
+        : "Neutral overall framing";
+const interpCitation = (v: number | null): string =>
+  v === null
+    ? "Insufficient comparison data"
+    : v < 0.2
+      ? "Few answers cite sources"
+      : "Answers frequently cite sources";
+// "A, B, and C" from a list of names.
+const listNames = (xs: string[]): string =>
+  xs.length <= 1
+    ? xs.join("")
+    : xs.length === 2
+      ? `${xs[0]} and ${xs[1]}`
+      : `${xs.slice(0, -1).join(", ")}, and ${xs[xs.length - 1]}`;
 // Map a 0..1 fraction series to 0..100, preserving nulls so every series stays
 // index-aligned to trajectory.weeks (the chart's shared x-axis).
 const alignPoints = (xs: (number | null)[]): (number | null)[] =>
@@ -93,6 +124,8 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
 
   const k = api.kpis;
   const t = api.trajectory;
+  // Most-cited individual source — surfaced as a KPI in place of Risk Framing.
+  const topSrc = [...api.sources].sort((a, b) => b.n_citations - a.n_citations)[0] ?? null;
   const kpis: KpiMetric[] = [
     {
       id: "mention",
@@ -101,6 +134,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       ...fmtDelta(k.ai_recall.delta, "pp"),
       spark: t.ai_recall,
       info: "Share of AI answers that mention this subject at all. Higher means the subject surfaces more often when these prompts are asked.",
+      interpretation: interpMention(k.ai_recall.value),
     },
     {
       id: "sentiment",
@@ -109,15 +143,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       ...fmtDelta(k.avg_sentiment.delta, "pts"),
       spark: t.avg_sentiment,
       info: "Average tone of AI answers about this subject, scored from −1 (negative) to +1 (positive). Around 0 is neutral.",
-    },
-    {
-      id: "risk",
-      label: "risk framing",
-      value: pct(k.risk_frame_rate.value),
-      delta: k.risk_frame_rate.value === 0 ? "none detected" : "detected",
-      deltaDirection: k.risk_frame_rate.value === 0 ? "neutral" : "down",
-      spark: t.risk_frame_rate,
-      info: "Share of answers that frame the subject around controversy, scandal, extremism, or reputational risk. Lower is better.",
+      interpretation: interpSentiment(k.avg_sentiment.value),
     },
     {
       id: "citation",
@@ -126,6 +152,19 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       ...fmtDelta(k.citation_rate.delta, "pp"),
       spark: t.citation_rate,
       info: "Share of AI answers that cite or link an external source when discussing this subject.",
+      interpretation: interpCitation(k.citation_rate.value),
+    },
+    {
+      id: "topsource",
+      label: "top source",
+      value: topSrc ? topSrc.name : "—",
+      delta: topSrc ? `${topSrc.n_citations} cite${topSrc.n_citations === 1 ? "" : "s"}` : "no citations",
+      deltaDirection: "neutral",
+      interpretation: topSrc ? `${topSrc.type} source` : "No sources cited yet",
+      compact: true,
+      valueTitle: topSrc ? topSrc.name : undefined,
+      spoke: "sources",
+      info: "The single most-cited source for this subject across the tracked models.",
     },
   ];
 
@@ -178,8 +217,8 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     association: r.level,
   }));
 
-  // Concise one-line framing per model: a real full sentence built from the
-  // model's assigned frame (frame_label), kept to ~5–10 words.
+  // Model evidence: a short complete sentence (~8–10 words) describing the frame
+  // each model reinforces — built from frame_label so it never gets truncated.
   const cardFor = (slug: string) =>
     api.evidence_cards.find((e) => e.model_slug === slug) ?? null;
   const models = api.per_platform_kpis
@@ -189,8 +228,9 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       return {
         id: m.slug,
         name: m.name,
+        frame: frame ?? null,
         summary: frame
-          ? `Frames ${api.subject_name} around ${frame}.`
+          ? `${api.subject_name} is framed primarily around ${frame}.`
           : "No distinct frame surfaced yet.",
         sentiment: bandSentiment(m.avg_sentiment),
       };
@@ -246,12 +286,24 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
         : aheadOf >= nRivals
           ? `trailing all ${nRivals} tracked rivals`
           : `behind ${aheadOf} of ${nRivals} tracked rivals`;
+  // Source concentration: if one type dominates, call it out (e.g. news-heavy).
+  const topType = sources[0];
+  const sourcing = topType && topType.share >= 50 ? `${topType.label.toLowerCase()}-heavy sourcing` : null;
   const takeaway =
     visBand === null
       ? null
       : `${visBand} AI visibility (${mentionPct}% mention rate), ${sentWord} sentiment${
-          standing ? `, ${standing}` : ""
-        }.`;
+          sourcing ? `, ${sourcing}` : ""
+        }${standing ? `, ${standing}` : ""}.`;
+
+  // Editorial themes summary: lead with the missing themes (the biggest gaps).
+  const missingThemes = drivers.filter((d) => d.association === "missing").map((d) => d.label);
+  const weakThemes = drivers.filter((d) => d.association === "weak").map((d) => d.label);
+  const themesSummary = missingThemes.length
+    ? `${api.subject_name} is mostly absent from prompts about ${listNames(missingThemes.slice(0, 3))}.`
+    : weakThemes.length
+      ? `${api.subject_name} has only weak presence on ${listNames(weakThemes.slice(0, 3))}.`
+      : `${api.subject_name} has solid coverage across the tracked prompt themes.`;
 
   return {
     subject: api.subject_name,
@@ -268,6 +320,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     competitors,
     drivers,
     coverage,
+    themesSummary,
     models,
     sources,
     topSources,

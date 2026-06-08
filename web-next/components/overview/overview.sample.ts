@@ -9,6 +9,8 @@ export const overviewSample: OverviewData = {
   subject: "J.D. Vance",
   category: "Politician",
   updatedLabel: "updated Jun 5, 2026",
+  snapshotLabel: "Jun 5, 2026",
+  comparedWith: "previous run 7 days earlier",
   comparisonLabel: "Change vs previous snapshot — May 29, 2026 (7 days earlier)",
   bottomLine:
     "Mentioned in 50% of AI answers — down 30 pp and now 4th of 5 tracked rivals — with neutral sentiment and a strong association to conservatism but no link yet to the post-Trump GOP storyline.",
