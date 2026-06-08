@@ -75,7 +75,7 @@ export const KPI_DEFS: KpiDef[] = [
     label: "Citation Rate",
     format: "pct",
     higherBetter: true,
-    help: "Share of AI answers that cite or link an external source when discussing this subject.",
+    help: "Share of AI answers that cite one of the subject's own websites.",
   },
 ];
 

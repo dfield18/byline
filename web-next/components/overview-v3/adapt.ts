@@ -153,20 +153,20 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
         ? { delta: "no prior data", deltaDirection: "neutral" as const }
         : fmtDelta(k.citation_rate.delta, "pp")),
       spark: t.citation_rate,
-      info: "Share of AI answers that cite or link an external source when discussing this subject.",
+      info: "Share of AI answers that cite one of the subject's own websites.",
       interpretation: interpCitation(k.citation_rate.value),
     },
     {
       id: "topsource",
       label: "top cited source",
       value: topSrc ? topSrc.name : "—",
-      delta: topSrc ? `${topSrc.n_citations} cite${topSrc.n_citations === 1 ? "" : "s"}` : "no citations",
+      delta: topSrc ? `in ${Math.round(topSrc.response_coverage * 100)}% of answers` : "no citations",
       deltaDirection: "neutral",
       interpretation: topSrc ? `${topSrc.type} source` : "No sources cited yet",
       compact: true,
       valueTitle: topSrc ? topSrc.name : undefined,
       spoke: "sources",
-      info: "The single most-cited source for this subject across the tracked models.",
+      info: "The most-cited source for this subject, and the share of answers that cite it.",
     },
   ];
 
@@ -219,24 +219,37 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     association: r.level,
   }));
 
-  // Model evidence: a short complete sentence (~8–10 words) describing the frame
-  // each model reinforces — built from frame_label so it never gets truncated.
+  // Model framing: each model maps to the frame it reinforces (frame_label),
+  // shown as a chip (the headline insight already names them, so no sentence).
   const cardFor = (slug: string) =>
     api.evidence_cards.find((e) => e.model_slug === slug) ?? null;
-  const models = api.per_platform_kpis
+  const realModels = api.per_platform_kpis
     .filter((m) => (m.n_responses ?? 0) > 0)
-    .map((m) => {
-      const frame = cardFor(m.slug)?.frame_label?.trim();
-      return {
-        id: m.slug,
-        name: m.name,
-        frame: frame ?? null,
-        summary: frame
-          ? `${api.subject_name} is framed primarily around ${frame}.`
-          : "No distinct frame surfaced yet.",
-        sentiment: bandSentiment(m.avg_sentiment),
-      };
-    });
+    .map((m) => ({
+      id: m.slug,
+      name: m.name,
+      frame: cardFor(m.slug)?.frame_label?.trim() ?? null,
+      summary: "",
+      sentiment: bandSentiment(m.avg_sentiment),
+      placeholder: false,
+    }));
+  // PLACEHOLDERS (prototype): show Claude + Perplexity rows when they have no
+  // live data, so the card reflects the full model set. Clearly marked as such.
+  const PLACEHOLDER_MODELS = [
+    { id: "claude", name: "Claude" },
+    { id: "perplexity", name: "Perplexity" },
+  ];
+  const placeholders = PLACEHOLDER_MODELS.filter(
+    (p) => !realModels.some((m) => m.id === p.id),
+  ).map((p) => ({
+    id: p.id,
+    name: p.name,
+    frame: "Not yet tracked",
+    summary: "",
+    sentiment: "neutral" as const,
+    placeholder: true,
+  }));
+  const models = [...realModels, ...placeholders];
 
   // Source-type mix: aggregate citations by type.
   const byType = new Map<string, number>();
@@ -338,7 +351,11 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
         : aheadOf === 0
           ? `${api.subject_name} leads every tracked rival on mention rate.`
           : `${api.subject_name} ranks ${aheadOf + 1} of ${nRivals + 1} on mention rate.`;
-  const distinctFrames = [...new Set(models.map((m) => m.frame).filter((f): f is string => !!f))];
+  const distinctFrames = [
+    ...new Set(
+      models.filter((m) => !m.placeholder).map((m) => m.frame).filter((f): f is string => !!f),
+    ),
+  ];
   const framingInsight = distinctFrames.length
     ? `Models frame ${api.subject_name} around ${listNames(distinctFrames)}.`
     : null;
@@ -355,11 +372,11 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
           weakThemes.length === 1 ? "area" : "areas"
         } below.`
       : `Maintain coverage and watch for emerging gaps.`;
-  // Chart annotation near the subject's endpoint.
+  // Chart annotation near the subject's endpoint (short, to fit the gutter).
   const trendAnnotation =
     mentionPct === null
       ? null
-      : `${mentionPct}% — ${k.ai_recall.delta != null && k.ai_recall.delta < 0 ? "low & declining" : "current rate"}`;
+      : `${mentionPct}% · ${k.ai_recall.delta != null && k.ai_recall.delta < 0 ? "declining" : "current"}`;
 
   return {
     subject: api.subject_name,

@@ -78,6 +78,8 @@ export interface ModelDescription {
   frame?: string | null;
   summary: string;
   sentiment: Sentiment;
+  /** True for prototype placeholder rows (no live data). */
+  placeholder?: boolean;
 }
 export interface DriverTheme {
   id: string;
@@ -286,7 +288,7 @@ function Sparkline({
   const W = 720;
   const H = 372;
   const LX = 46; // left gutter for y-axis labels (wider for larger text)
-  const RX = 124; // right gutter for endpoint labels (wider for larger text)
+  const RX = 148; // right gutter for endpoint labels + annotation (no clipping)
   const TY = 16;
   const BY = 30; // bottom gutter for x-axis labels
   const x0 = LX;
@@ -757,16 +759,23 @@ export function OverviewDashboard({
             {data.models.map((m) => {
               const s = SENTIMENT_STYLE[m.sentiment];
               return (
-                <div key={m.id} className="bo-rcard">
+                <div key={m.id} className={`bo-rcard${m.placeholder ? " bo-rcard--ph" : ""}`}>
                   <ModelMark slug={m.id} name={m.name} logo={logos?.[m.id]} />
                   <div className="bo-rbody">
                     <div className="bo-rtop">
                       <span className="bo-rname">{m.name}</span>
-                      <span className="bo-rsent" style={{ background: s.bg, color: s.fg }}>
-                        {s.label}
-                      </span>
+                      {!m.placeholder && (
+                        <span className="bo-rsent" style={{ background: s.bg, color: s.fg }}>
+                          {s.label}
+                        </span>
+                      )}
+                      {m.placeholder && <span className="bo-rsample">sample</span>}
                     </div>
-                    <p className="bo-rtext">{m.summary}</p>
+                    {m.frame && (
+                      <span className={`bo-rframe-chip${m.placeholder ? " bo-rframe-chip--ph" : ""}`}>
+                        {m.frame}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -922,7 +931,7 @@ const BO_CSS = `
 
 .bo-cardhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .bo-cardhead .bo-eyebrow { margin-bottom: 0; }
-.bo-viewall { flex: none; background: none; border: none; padding: 0; font: inherit; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; color: var(--bo-line-strong); cursor: pointer; white-space: nowrap; }
+.bo-viewall { flex: none; background: none; border: none; padding: 0; font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; color: var(--bo-muted); cursor: pointer; white-space: nowrap; }
 .bo-viewall:hover { color: var(--bo-bronze-deep); }
 .bo-viewall:focus-visible { outline: 2px solid var(--bo-bronze); outline-offset: 2px; border-radius: 4px; }
 .bo-eyebrow { display: flex; align-items: center; gap: 7px; margin-bottom: 14px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--bo-ink-soft); }
@@ -975,6 +984,11 @@ const BO_CSS = `
 .bo-rname { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 .bo-rframe { font-size: 11.5px; font-weight: 600; color: var(--bo-bronze-deep); margin-bottom: 5px; }
 .bo-rsent { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px; white-space: nowrap; opacity: 0.85; }
+.bo-rsample { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px; white-space: nowrap; color: var(--bo-muted); background: var(--bo-sand); }
+/* Model framing: the frame each model reinforces, shown as a chip. */
+.bo-rframe-chip { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--bo-bronze-deep); background: var(--bo-bronze-bg); padding: 3px 9px; border-radius: 7px; }
+.bo-rframe-chip--ph { color: var(--bo-muted); background: var(--bo-sand); font-weight: 500; }
+.bo-rcard--ph { opacity: 0.7; }
 /* Editorial intro line under a card header (insights, subtitles). */
 .bo-cardnote { margin: -4px 0 14px; font-size: 13px; line-height: 1.45; color: var(--bo-muted); }
 .bo-rtext { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--bo-ink-soft); }

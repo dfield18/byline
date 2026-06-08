@@ -163,7 +163,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       value: pct(k.citation_rate.value),
       ...fmtDelta(k.citation_rate.delta, "pp"),
       spark: t.citation_rate,
-      info: "Share of AI answers that cite or link an external source when discussing this subject.",
+      info: "Share of AI answers that cite one of the subject's own websites.",
       interpretation: interpCitation(k.citation_rate.value),
     },
   ];

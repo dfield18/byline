@@ -18,7 +18,7 @@ export const overviewSample: OverviewData = {
     { id: "mention", label: "mention rate", value: "50%", delta: "↓ 30 pp", deltaDirection: "down", spark: [66, 100, 66, 100, 100, 83, 83, 100, 50, 70, 80, 50], info: "Share of AI answers that mention this subject at all. Higher means the subject surfaces more often when these prompts are asked." },
     { id: "sentiment", label: "avg sentiment", value: "-0.04", delta: "↑ 2 pp", deltaDirection: "up", spark: [-0.1, -0.08, -0.12, -0.05, -0.06, -0.02, -0.09, -0.04, -0.07, -0.05, -0.06, -0.04], info: "Average tone of AI answers about this subject, scored from −1 (negative) to +1 (positive). Around 0 is neutral.", scale: { value: -0.04, min: -1, max: 1 } },
     { id: "risk", label: "risk framing", value: "0%", delta: "none detected", deltaDirection: "neutral", spark: [10, 8, 0, 5, 0, 0, 4, 0, 0, 0, 0, 0], info: "Share of answers that frame the subject around controversy, scandal, extremism, or reputational risk. Lower is better." },
-    { id: "citation", label: "citation rate", value: "15%", delta: "↑ 10 pp", deltaDirection: "up", spark: [4, 5, 6, 5, 8, 7, 10, 9, 12, 11, 13, 15], info: "Share of AI answers that cite or link an external source when discussing this subject." },
+    { id: "citation", label: "citation rate", value: "15%", delta: "↑ 10 pp", deltaDirection: "up", spark: [4, 5, 6, 5, 8, 7, 10, 9, 12, 11, 13, 15], info: "Share of AI answers that cite one of the subject's own websites." },
   ],
   trendLabels: ["Mar 21", "Mar 28", "Apr 4", "Apr 11", "Apr 18", "Apr 25", "May 2", "May 9", "May 16", "May 23", "May 30", "Jun 5"],
   themes: [

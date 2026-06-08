@@ -578,6 +578,11 @@ class SourcesExtractor(Extractor):
       as a setup_input rather than a new column on `subjects` to keep
       with the existing per-subject-config pattern (no migration needed;
       backfill is a setup_inputs UPDATE).
+    - v1.2: support MULTIPLE owned domains. `canonical_url` may now be a
+      string or a list, and an optional `canonical_urls` list is unioned
+      in. A citation counts as own-site if it matches ANY configured host
+      (or a subdomain). Use for subjects who run more than one site they
+      control (e.g. a personal/political site + a PAC site).
 
     `cited_own_site` matching: the citation's hostname is `endswith`-
     matched against the canonical hostname so subdomain links count
@@ -586,7 +591,7 @@ class SourcesExtractor(Extractor):
     """
 
     name = "sources"
-    version = "1.1"
+    version = "1.2"
     output_column = "sources"
 
     def __init__(self, source_type_ids: dict[str, int]) -> None:
@@ -599,11 +604,27 @@ class SourcesExtractor(Extractor):
         meta = response.response_metadata or {}
         citations = meta.get("citations") or []
 
-        # Pull canonical_url for the subject, normalize to a hostname for
-        # the matching test below.
+        # Pull the subject's own-site domain(s), normalized to hostnames for
+        # the matching test below. A subject can own MORE THAN ONE site (e.g.
+        # a personal/political site plus a PAC site), so we accept both a
+        # `canonical_url` (string OR list) and an optional `canonical_urls`
+        # list, union them, and match a citation against ANY of them.
         subj_inputs = response.subject_setup_inputs or {}
-        canonical_url = subj_inputs.get("canonical_url")
-        canonical_host = _canonical_domain(canonical_url) if canonical_url else None
+        raw_urls: list[str] = []
+        cu = subj_inputs.get("canonical_url")
+        if isinstance(cu, str):
+            raw_urls.append(cu)
+        elif isinstance(cu, list):
+            raw_urls.extend(u for u in cu if isinstance(u, str))
+        extra = subj_inputs.get("canonical_urls")
+        if isinstance(extra, list):
+            raw_urls.extend(u for u in extra if isinstance(u, str))
+        canonical_hosts: list[str] = []
+        for u in raw_urls:
+            h = _canonical_domain(u)
+            if h and h not in canonical_hosts:
+                canonical_hosts.append(h)
+        has_canonical = bool(canonical_hosts)
 
         sources_out: list[dict[str, Any]] = []
         any_own_site = False
@@ -614,12 +635,12 @@ class SourcesExtractor(Extractor):
             slug = _classify_domain(domain or "")
 
             is_own = False
-            if canonical_host and domain:
+            if has_canonical and domain:
                 d = domain.lower()
                 if d.startswith("www."):
                     d = d[4:]
                 # Match exact or subdomain (e.g., press.heritage.org → heritage.org)
-                if d == canonical_host or d.endswith("." + canonical_host):
+                if any(d == ch or d.endswith("." + ch) for ch in canonical_hosts):
                     is_own = True
                     any_own_site = True
 
@@ -630,14 +651,14 @@ class SourcesExtractor(Extractor):
                 "source_type_slug": slug,
                 "source_type_id": self._source_type_ids.get(slug),
                 "classified_via": "domain_lookup",
-                "is_own_site": is_own if canonical_host else None,
+                "is_own_site": is_own if has_canonical else None,
             })
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
 
-        # cited_own_site: True/False if canonical_url is set; None if the
-        # subject hasn't configured one (we can't tell either way).
-        cited_own_site = any_own_site if canonical_host else None
+        # cited_own_site: True/False if the subject has ≥1 own-site domain
+        # configured; None if none configured (we can't tell either way).
+        cited_own_site = any_own_site if has_canonical else None
 
         return ExtractionResult(
             output=sources_out,
