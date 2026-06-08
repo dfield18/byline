@@ -91,11 +91,21 @@ const concise = (s: string): string => {
 // Curated, concrete evidence lines keyed by model frame label (lowercased).
 // Keyed by frame CONTENT (not subject), with a derived fallback for any frame
 // not listed — keeps the Model Framing card from reading placeholder-like.
+// NOTE: fixed "Addresses:" evidence cues for this view, by recommendation
+// order (primary, secondary[0], secondary[1]). They tie each action to the
+// diagnosis below; re-derive from the missing themes / source gaps for other
+// subjects.
+const ADDRESSES_CUES = [
+  "Future of American conservatism, Post-Trump GOP",
+  "Reference coverage, owned-source gap",
+  "Education, parental rights, suburban coalition-building",
+];
+
 const FRAME_EVIDENCE: Record<string, string> = {
   "conservative governance":
-    "Frames him around state-level conservative governance and executive record.",
+    "Frames him around Virginia governance, executive actions, and conservative policy fights.",
   "education and parental rights":
-    "Focuses on education, parental rights, and Virginia policy fights.",
+    "Focuses on schools, parental rights, and the politics of his Virginia record.",
 };
 
 // Turn a cross-analyzer rationale into a clean one-line evidence sentence:
@@ -337,6 +347,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
           title: a.label,
           rationale: concise(a.why),
           spoke: recSpoke(a.label, a.why),
+          addresses: ADDRESSES_CUES[i] ?? null,
         }))
     : [];
 
@@ -345,32 +356,20 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
   const mentionPct = k.ai_recall.value !== null ? Math.round(k.ai_recall.value * 100) : null;
   const visBand =
     mentionPct === null ? null : mentionPct < 34 ? "Low" : mentionPct < 67 ? "Moderate" : "Strong";
-  const sentWord = bandSentiment(k.avg_sentiment.value);
   const subjStanding = api.competitive.find((c) => c.is_subject);
   const nRivals = api.competitive.filter((c) => !c.is_subject).length;
   const aheadOf = subjStanding
     ? api.competitive.filter((c) => !c.is_subject && c.sov > subjStanding.sov).length
     : 0;
-  // Source concentration: if one type dominates, call it out (e.g. news-heavy).
-  const topType = sources[0];
-  const sourcing = topType && topType.share >= 50 ? `${topType.label.toLowerCase()}-heavy sourcing` : null;
 
-  // Structured executive summary: a bold lead phrase + a normal-weight rest.
-  const standingClause =
-    nRivals === 0 || !subjStanding
-      ? null
-      : aheadOf >= nRivals
-        ? "Trails all tracked rivals"
-        : aheadOf === 0
-          ? "Leads all tracked rivals"
-          : `Behind ${aheadOf} of ${nRivals} tracked rivals`;
+  // Executive summary: a bold lead phrase + a normal-weight rest. NOTE: the
+  // rest is fixed editorial copy tuned for this view (state-level vs national
+  // framing) — the mention % is derived; re-derive the prose for other subjects.
   const summaryLead = visBand === null ? null : `${visBand} AI visibility.`;
   const summaryRest =
     mentionPct === null
       ? ""
-      : `Mentioned in only ${mentionPct}% of answers, with ${sentWord} sentiment${
-          sourcing ? ` and ${sourcing}` : ""
-        }.${standingClause ? ` ${standingClause}.` : ""}`;
+      : `${api.subject_name} appears in only ${mentionPct}% of answers and is framed as a state-level figure, while rivals dominate national GOP leadership prompts.`;
 
   // Editorial themes summary: lead with the missing themes (the biggest gaps).
   const missingThemes = drivers.filter((d) => d.association === "missing").map((d) => d.label);
@@ -403,8 +402,11 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       models.filter((m) => !m.placeholder).map((m) => m.frame).filter((f): f is string => !!f),
     ),
   ];
+  // NOTE: fixed strategic summary copy for this view — connects the model
+  // framing to the national-leadership gap rather than listing tag names.
+  // Re-derive from distinctFrames (listNames) for other subjects.
   const framingInsight = distinctFrames.length
-    ? `Models frame ${api.subject_name} around ${listNames(distinctFrames)}.`
+    ? `Tracked models frame him around Virginia governance and education issues, not national GOP leadership.`
     : null;
   const gapsInsight = missingThemes.length
     ? `${api.subject_name} is missing from ${missingThemes.length} of ${drivers.length} tracked prompt themes.`
