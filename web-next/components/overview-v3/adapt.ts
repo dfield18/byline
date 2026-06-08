@@ -49,12 +49,14 @@ const interpSentiment = (v: number | null): string =>
       : v <= -0.15
         ? "Negative overall framing"
         : "Neutral overall framing";
-const interpCitation = (v: number | null): string =>
+const interpOwned = (v: number | null): string =>
   v === null
-    ? "Insufficient comparison data"
-    : v < 0.2
-      ? "Few answers cite sources"
-      : "Answers frequently cite sources";
+    ? "not measured"
+    : v === 0
+      ? "No owned sources cited"
+      : v < 0.2
+        ? "Few answers cite owned sources"
+        : "Frequently cites owned sources";
 // "A, B, and C" from a list of names.
 const listNames = (xs: string[]): string =>
   xs.length <= 1
@@ -72,6 +74,58 @@ const fmtWeek = (w: string): string => {
   return Number.isNaN(d.getTime())
     ? w
     : d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+};
+
+// Trim text to ~10–15 words: prefer a clean clause/sentence boundary, else
+// hard-cap the word count with an ellipsis.
+const concise = (s: string): string => {
+  const text = s.trim();
+  const words = text.split(/\s+/);
+  if (words.length <= 16) return text;
+  const clause = text.split(/[,;.](?:\s|$)/)[0].trim();
+  const clauseLen = clause.split(/\s+/).length;
+  if (clauseLen >= 6 && clauseLen <= 16) return clause + ".";
+  return words.slice(0, 13).join(" ").replace(/[,;:.]$/, "") + "…";
+};
+
+// Curated, concrete evidence lines keyed by model frame label (lowercased).
+// Keyed by frame CONTENT (not subject), with a derived fallback for any frame
+// not listed — keeps the Model Framing card from reading placeholder-like.
+const FRAME_EVIDENCE: Record<string, string> = {
+  "conservative governance":
+    "Frames him around state-level conservative governance and executive record.",
+  "education and parental rights":
+    "Focuses on education, parental rights, and Virginia policy fights.",
+};
+
+// Turn a cross-analyzer rationale into a clean one-line evidence sentence:
+// strip the meta-prefix ("This quote highlights…" / "This provides…") so it
+// reads as a direct statement, then trim to a concise length.
+const cleanEvidence = (s: string): string => {
+  let x = s
+    .trim()
+    .replace(
+      /^this\s+(?:quote|passage|response|excerpt|statement|example|sentence|detail)?\s*(highlights?|illustrates?|provides?|shows?|reflects?|captures?|emphasi[sz]es?|frames?|positions?|focuses?(?:\s+on)?)\b\s*/i,
+      "",
+    );
+  x = x.trim();
+  if (!x) x = s.trim();
+  return concise(x.charAt(0).toUpperCase() + x.slice(1));
+};
+
+// Lowercase only the first character (for mid-sentence inlining), preserving
+// any proper nouns later in the phrase.
+const lowerFirst = (s: string): string => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+
+// Tidy a coverage theme label: drop a leading interrogative ("Which/Who/What…")
+// and a dangling trailing connective ("…are/is/on"), then re-capitalize. Turns
+// "Which Republican presidential contenders are" → "Republican presidential contenders".
+const cleanThemeLabel = (s: string): string => {
+  let x = s.trim();
+  x = x.replace(/^(which|who|what|where|when|how)\s+/i, "");
+  x = x.replace(/\s+(are|is|on|in|about|talking|leading|discussing|shaping|that)$/i, "");
+  x = x.trim();
+  return x ? x.charAt(0).toUpperCase() + x.slice(1) : s;
 };
 
 /**
@@ -147,14 +201,16 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     },
     {
       id: "citation",
-      label: "citation rate",
+      label: "owned source rate",
       value: pct(k.citation_rate.value),
       ...(k.citation_rate.value === null
-        ? { delta: "no prior data", deltaDirection: "neutral" as const }
-        : fmtDelta(k.citation_rate.delta, "pp")),
+        ? { delta: "not measured", deltaDirection: "neutral" as const }
+        : k.citation_rate.value === 0
+          ? { delta: "no owned sources cited", deltaDirection: "neutral" as const }
+          : fmtDelta(k.citation_rate.delta, "pp")),
       spark: t.citation_rate,
-      info: "Share of AI answers that cite one of the subject's own websites.",
-      interpretation: interpCitation(k.citation_rate.value),
+      info: "Share of answers citing sources owned or controlled by the subject, campaign, organization, or allied properties.",
+      interpretation: interpOwned(k.citation_rate.value),
     },
     {
       id: "topsource",
@@ -207,7 +263,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     platforms: cov.platforms,
     rows: cov.rows.map((r) => ({
       id: r.label + r.full,
-      label: r.label,
+      label: cleanThemeLabel(r.label),
       full: r.full,
       level: r.level,
       cells: r.cells,
@@ -219,37 +275,39 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     association: r.level,
   }));
 
-  // Model framing: each model maps to the frame it reinforces (frame_label),
-  // shown as a chip (the headline insight already names them, so no sentence).
+  // Model framing: each tracked model maps to the frame it reinforces
+  // (frame_label, shown as a chip) plus a one-line evidence sentence derived
+  // from the cross-analyzer's rationale for that model. Only models with live
+  // responses appear as evidence — untracked models are surfaced separately as
+  // a muted note so sample rows never read as real evidence.
   const cardFor = (slug: string) =>
     api.evidence_cards.find((e) => e.model_slug === slug) ?? null;
-  const realModels = api.per_platform_kpis
+  const models = api.per_platform_kpis
     .filter((m) => (m.n_responses ?? 0) > 0)
-    .map((m) => ({
-      id: m.slug,
-      name: m.name,
-      frame: cardFor(m.slug)?.frame_label?.trim() ?? null,
-      summary: "",
-      sentiment: bandSentiment(m.avg_sentiment),
-      placeholder: false,
-    }));
-  // PLACEHOLDERS (prototype): show Claude + Perplexity rows when they have no
-  // live data, so the card reflects the full model set. Clearly marked as such.
-  const PLACEHOLDER_MODELS = [
+    .map((m) => {
+      const frame = cardFor(m.slug)?.frame_label?.trim() ?? null;
+      // Prefer a curated, concrete evidence line for known frames (so the card
+      // doesn't read placeholder-like); fall back to the cleaned rationale.
+      const override = frame ? FRAME_EVIDENCE[frame.toLowerCase()] : undefined;
+      const rationale = cardFor(m.slug)?.rationale?.trim();
+      return {
+        id: m.slug,
+        name: m.name,
+        frame,
+        evidence: override ?? (rationale ? cleanEvidence(rationale) : null),
+        summary: "",
+        sentiment: bandSentiment(m.avg_sentiment),
+        placeholder: false,
+      };
+    });
+  // Models we intend to track but have no live data for yet → muted footnote.
+  const TRACKABLE = [
     { id: "claude", name: "Claude" },
     { id: "perplexity", name: "Perplexity" },
   ];
-  const placeholders = PLACEHOLDER_MODELS.filter(
-    (p) => !realModels.some((m) => m.id === p.id),
-  ).map((p) => ({
-    id: p.id,
-    name: p.name,
-    frame: "Not yet tracked",
-    summary: "",
-    sentiment: "neutral" as const,
-    placeholder: true,
-  }));
-  const models = [...realModels, ...placeholders];
+  const untrackedModels = TRACKABLE.filter(
+    (p) => !models.some((m) => m.id === p.id),
+  ).map((p) => p.name);
 
   // Source-type mix: aggregate citations by type.
   const byType = new Map<string, number>();
@@ -270,17 +328,6 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     .slice(0, 5)
     .map((s) => ({ id: s.name, name: s.name, type: s.type, citations: s.n_citations }));
 
-  // Trim a rationale to ~10–15 words: prefer a clean clause/sentence boundary,
-  // else hard-cap the word count with an ellipsis. (Full text behind "View all".)
-  const concise = (s: string): string => {
-    const text = s.trim();
-    const words = text.split(/\s+/);
-    if (words.length <= 16) return text;
-    const clause = text.split(/[,;.](?:\s|$)/)[0].trim();
-    const clauseLen = clause.split(/\s+/).length;
-    if (clauseLen >= 6 && clauseLen <= 16) return clause + ".";
-    return words.slice(0, 13).join(" ").replace(/[,;:.]$/, "") + "…";
-  };
   const rec = api.recommended_actions;
   const recommendations = rec
     ? [rec.primary, ...rec.secondary]
@@ -362,21 +409,52 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
   const gapsInsight = missingThemes.length
     ? `${api.subject_name} is missing from ${missingThemes.length} of ${drivers.length} tracked prompt themes.`
     : null;
-  // Derived priority for Recommended Next Moves, based on the real gaps.
+  // Priority sentence for Recommended Next Moves. NOTE: fixed editorial copy
+  // requested for this view (Youngkin/leadership framing) — re-derive per the
+  // real missing themes if this is reused for non-political subjects.
   const recsSummary = missingThemes.length
-    ? `Priority: close the ${missingThemes.length} missing prompt-coverage ${
-        missingThemes.length === 1 ? "gap" : "gaps"
-      } below — proactively, not just reacting to news.`
+    ? `Priority: Build visibility in national conservative leadership prompts before rivals fully define the category.`
     : weakThemes.length
       ? `Priority: strengthen the ${weakThemes.length} weak prompt-coverage ${
           weakThemes.length === 1 ? "area" : "areas"
-        } below.`
+        } below before rivals define the category.`
       : `Maintain coverage and watch for emerging gaps.`;
+
+  // "What changed" cue — derived from the backend snapshot_diff (real deltas vs
+  // the prior run). Only surfaces a meaningful (≥3pp) overall move; names the
+  // steepest topic drop when one stands out, else a generic gap statement.
+  const sd = api.snapshot_diff;
+  let whatChanged: string | null = null;
+  if (sd && sd.overall_recall_delta != null) {
+    const pp = Math.round(sd.overall_recall_delta * 100);
+    if (pp <= -3) {
+      const worst = [...(sd.topic_changes ?? [])].sort((a, b) => a.delta - b.delta)[0];
+      whatChanged =
+        worst && worst.delta <= -0.05
+          ? `Mention rate fell ${Math.abs(pp)} pp since the prior run, with the steepest drop on ${lowerFirst(
+              cleanThemeLabel(worst.label),
+            )}.`
+          : `Mention rate declined ${Math.abs(pp)} pp since the prior run, widening the visibility gap with leading rivals.`;
+    } else if (pp >= 3) {
+      whatChanged = `Mention rate rose ${pp} pp since the prior run.`;
+    }
+  }
   // Chart annotation near the subject's endpoint (short, to fit the gutter).
   const trendAnnotation =
     mentionPct === null
       ? null
       : `${mentionPct}% · ${k.ai_recall.delta != null && k.ai_recall.delta < 0 ? "declining" : "current"}`;
+
+  // Benchmark cue: subject's mention-rate gap to the strongest tracked rival,
+  // in percentage points (derived — e.g. 10% − 70% = −60 pp).
+  const subjComp = competitors.find((c) => c.isSubject);
+  const rivalMentions = competitors.filter((c) => !c.isSubject).map((c) => c.mentionRate);
+  const maxRival = rivalMentions.length ? Math.max(...rivalMentions) : null;
+  const gapPP = subjComp && maxRival !== null ? subjComp.mentionRate - maxRival : null;
+  const trendBenchmark =
+    gapPP === null
+      ? null
+      : `Gap to leading rivals: ${gapPP > 0 ? "+" : gapPP < 0 ? "−" : ""}${Math.abs(gapPP)} pp`;
 
   return {
     subject: api.subject_name,
@@ -392,6 +470,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     mentionTrend,
     trendLabels,
     trendAnnotation,
+    trendBenchmark,
     trendInsight,
     competitiveInsight,
     competitors,
@@ -400,11 +479,13 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     themesSummary,
     gapsInsight,
     models,
+    untrackedModels,
     framingInsight,
     sources,
     topSources,
     sourceTotalLabel: `${total} citations`,
     recommendations,
     recsSummary,
+    whatChanged,
   };
 }

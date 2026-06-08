@@ -76,6 +76,8 @@ export interface ModelDescription {
   name: string;
   /** Concise framing angle for this model (e.g. "Conservative governance"). */
   frame?: string | null;
+  /** One-line evidence sentence under the frame tag (from the model's rationale). */
+  evidence?: string | null;
   summary: string;
   sentiment: Sentiment;
   /** True for prototype placeholder rows (no live data). */
@@ -153,6 +155,8 @@ export interface OverviewData {
   trendLabels: string[];
   /** Short annotation rendered near the subject's endpoint on the trend. */
   trendAnnotation: string | null;
+  /** Benchmark cue: mention-rate gap to the leading rival (e.g. "Gap to leading rivals: −60 pp"). */
+  trendBenchmark?: string | null;
   /** Insight line for the Mention Rate Trend card. */
   trendInsight: string | null;
   /** Insight line for the Competitive Landscape card. */
@@ -165,6 +169,8 @@ export interface OverviewData {
   /** Insight line for the Prompt Coverage Gaps card. */
   gapsInsight: string | null;
   models: ModelDescription[];
+  /** Model names we intend to track but have no live data for yet (muted note). */
+  untrackedModels?: string[];
   /** Insight line for the Model Framing card. */
   framingInsight: string | null;
   sources: SourceType[];
@@ -173,6 +179,8 @@ export interface OverviewData {
   recommendations: Recommendation[];
   /** Summary sentence at the top of Recommended Next Moves. */
   recsSummary: string;
+  /** Compact "what changed vs prior run" cue, derived from snapshot_diff. */
+  whatChanged?: string | null;
 }
 
 // ── Style tokens (semantic) ──────────────────────────────────────────────
@@ -199,10 +207,12 @@ const ASSOC_LABEL: Record<Association, string> = {
 };
 // Association strength → bar fill fraction (0–1) + color, for the strength-bar
 // chart. Missing keeps a tiny stub so the row reads as "at the Missing end".
-const LEVEL_FRAC: Record<Association, number> = { missing: 0.05, weak: 0.34, moderate: 0.67, strong: 1 };
+// Fill fraction along the Missing→Strong axis. Weak sits clearly in the weak
+// band (well short of the ⅔ Moderate mark); Missing is just a short stub.
+const LEVEL_FRAC: Record<Association, number> = { missing: 0.05, weak: 0.24, moderate: 0.6, strong: 1 };
 const LEVEL_COLOR: Record<Association, string> = {
-  missing: "var(--bo-line-strong)",
-  weak: "var(--bo-neu)",
+  missing: "var(--bo-line-strong)", // short, LIGHTER marker — subtler than Weak
+  weak: "var(--bo-neu)", // amber — not red, and visibly stronger than Missing
   moderate: "var(--bo-bronze)",
   strong: "var(--bo-pos)",
 };
@@ -264,8 +274,33 @@ function Pill({ label, bg, fg }: { label: string; bg: string; fg: string }) {
   );
 }
 
+// Small "i" affordance with a hover/focus tooltip — same pattern as the KPI
+// strip, reused for column-header definitions. align="end" opens the bubble
+// leftward so it doesn't overflow right-aligned cells near the card edge.
+function InfoTip({ text, align = "start" }: { text: string; align?: "start" | "end" }) {
+  return (
+    <span className="bo-kpi-info" tabIndex={0} aria-label={text}>
+      i
+      <span
+        className={`bo-kpi-tip${align === "end" ? " bo-kpi-tip--end" : ""}`}
+        role="tooltip"
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
 // Index of the last non-null entry, or -1.
 const lastDefined = (pts: (number | null)[]): number => pts.reduce<number>((a, v, i) => (v != null ? i : a), -1);
+
+// "A", "A and B", or "A, B, and C".
+const formatList = (xs: string[]): string =>
+  xs.length <= 1
+    ? xs.join("")
+    : xs.length === 2
+      ? `${xs[0]} and ${xs[1]}`
+      : `${xs.slice(0, -1).join(", ")}, and ${xs[xs.length - 1]}`;
 
 // Hand-rolled multi-series line chart on a fixed 0–100% domain, with gridlines,
 // y-axis ticks, dated x-axis ticks, and a name label at each line's right
@@ -288,7 +323,7 @@ function Sparkline({
   const W = 720;
   const H = 372;
   const LX = 46; // left gutter for y-axis labels (wider for larger text)
-  const RX = 148; // right gutter for endpoint labels + annotation (no clipping)
+  const RX = 156; // right gutter for endpoint labels + annotation (no clipping)
   const TY = 16;
   const BY = 30; // bottom gutter for x-axis labels
   const x0 = LX;
@@ -345,19 +380,46 @@ function Sparkline({
   const tickIdx =
     tickCount <= 1 ? [N - 1] : Array.from({ length: tickCount }, (_, k) => Math.round((k * (N - 1)) / (tickCount - 1)));
 
-  // Endpoint labels, de-collided by pushing overlapping labels downward.
-  const GAP = 19;
-  const labelPos = drawable
-    .map((s) => {
-      const li = lastDefined(s.points);
-      return {
+  // Endpoint labels. The subject keeps its own prominent label; when there are
+  // ≥2 rivals (which cluster near the top and would collide), collapse them into
+  // a single muted "Leading rivals" label at their average height — this also
+  // reads the executive point faster: the subject sits far below the field.
+  const subjForLabel = drawable.find((s) => s.isSubject);
+  const rivalForLabel = drawable.filter((s) => !s.isSubject);
+  const rawLabels: { id: string; name: string; y: number; color: string; weight: number }[] = [];
+  if (subjForLabel) {
+    const li = lastDefined(subjForLabel.points);
+    rawLabels.push({
+      id: "subject",
+      name: subjForLabel.name,
+      y: yAt(subjForLabel.points[li] as number),
+      color: "var(--bo-bronze-deep)",
+      weight: 700,
+    });
+  }
+  if (rivalForLabel.length >= 2) {
+    const ys = rivalForLabel.map((s) => yAt(s.points[lastDefined(s.points)] as number));
+    rawLabels.push({
+      id: "rivals",
+      name: "Leading rivals",
+      y: ys.reduce((a, b) => a + b, 0) / ys.length,
+      color: "var(--bo-muted)",
+      weight: 600,
+    });
+  } else {
+    for (const s of rivalForLabel) {
+      rawLabels.push({
         id: s.id,
         name: s.name,
-        y: yAt(s.points[li] as number),
-        color: s.isSubject ? "var(--bo-bronze-deep)" : "var(--bo-muted)",
-        weight: s.isSubject ? 700 : 600,
-      };
-    })
+        y: yAt(s.points[lastDefined(s.points)] as number),
+        color: "var(--bo-muted)",
+        weight: 600,
+      });
+    }
+  }
+  // De-collide by pushing overlapping labels downward.
+  const GAP = 19;
+  const labelPos = rawLabels
     .sort((a, b) => a.y - b.y)
     .reduce<{ id: string; name: string; y: number; color: string; weight: number }[]>((acc, l) => {
       const prev = acc[acc.length - 1];
@@ -567,15 +629,6 @@ export function OverviewDashboard({
       <header className="bo-head">
         <h1 className="bo-subject">{data.subject}</h1>
         {data.category && <span className="bo-cat">{data.category}</span>}
-        <div className="bo-snapshot bo-snapshot--inhead">
-          <span className="bo-snap">
-            <span className="bo-snap-k">Snapshot</span> {data.snapshotLabel ?? "—"}
-          </span>
-          <span className="bo-snap-sep" aria-hidden />
-          <span className="bo-snap">
-            <span className="bo-snap-k">Compared with</span> {data.comparedWith}
-          </span>
-        </div>
       </header>
 
       {(data.summaryLead || data.summaryRest) && (
@@ -629,6 +682,17 @@ export function OverviewDashboard({
         ))}
       </div>
 
+      {/* Snapshot metadata — sits just below the KPI strip, small + muted. */}
+      <div className="bo-snapshot bo-snapshot--belowkpis">
+        <span className="bo-snap">
+          <span className="bo-snap-k">Snapshot</span> {data.snapshotLabel ?? "—"}
+        </span>
+        <span className="bo-snap-sep" aria-hidden />
+        <span className="bo-snap">
+          <span className="bo-snap-k">Compared with</span> {data.comparedWith}
+        </span>
+      </div>
+
       {/* Theme spine — navigable. Hidden until theme/bucket data exists. */}
       {data.themes.length > 0 && (
         <div className="bo-spine">
@@ -669,7 +733,21 @@ export function OverviewDashboard({
             </button>
           )}
         </div>
-        <p className="bo-cardnote">{data.recsSummary}</p>
+        <p className="bo-cardnote bo-cardnote--priority">
+          {data.recsSummary.startsWith("Priority:") ? (
+            <>
+              <strong className="bo-priority-k">Priority:</strong>
+              {data.recsSummary.slice("Priority:".length)}
+            </>
+          ) : (
+            data.recsSummary
+          )}
+        </p>
+        {data.whatChanged && (
+          <p className="bo-changed">
+            <span className="bo-changed-k">What changed:</span> {data.whatChanged}
+          </p>
+        )}
         <ol className="bo-recs bo-recs--cols">
           {data.recommendations.map((r, i) => {
             const linkSpoke = r.spoke && onOpenSpoke ? r.spoke : null;
@@ -705,12 +783,13 @@ export function OverviewDashboard({
       </section>
 
       {/* ── Visibility performance ─────────────────────────────────────────── */}
-      <h2 className="bo-section-h">Visibility performance</h2>
+      <h2 className="bo-section-h bo-section-h--spaced">Visibility performance</h2>
       <div className="bo-toprow">
         {/* Mention trend — no "View all" (keep the strip uncluttered) */}
         <section className="bo-card">
           <CardHead dots={["var(--bo-bronze)"]}>Mention rate trend</CardHead>
           {data.trendInsight && <p className="bo-insight">{data.trendInsight}</p>}
+          {data.trendBenchmark && <p className="bo-benchmark">{data.trendBenchmark}</p>}
           <Sparkline
             series={data.mentionTrend}
             labels={data.trendLabels}
@@ -727,9 +806,18 @@ export function OverviewDashboard({
           <div className="bo-table">
             <div className="bo-trow bo-trow--head">
               <span className="bo-ent">Entity</span>
-              <span className="bo-num">Mention Rate</span>
-              <span className="bo-num">Avg Position</span>
-              <span className="bo-num">Top Answer Rate</span>
+              <span className="bo-num">
+                Mention Rate
+                <InfoTip align="end" text="Share of AI answers across the tracked prompts that mention this entity at all." />
+              </span>
+              <span className="bo-num">
+                Avg Position
+                <InfoTip align="end" text="Average rank of this entity among all entities named in an answer, when it appears. Lower is better." />
+              </span>
+              <span className="bo-num">
+                Top Answer Rate
+                <InfoTip align="end" text="Share of answers where this entity is named first — the top-ranked result." />
+              </span>
             </div>
             {data.competitors.map((c) => (
               <div key={c.id} className={`bo-trow${c.isSubject ? " bo-trow--you" : ""}`}>
@@ -759,28 +847,27 @@ export function OverviewDashboard({
             {data.models.map((m) => {
               const s = SENTIMENT_STYLE[m.sentiment];
               return (
-                <div key={m.id} className={`bo-rcard${m.placeholder ? " bo-rcard--ph" : ""}`}>
+                <div key={m.id} className="bo-rcard">
                   <ModelMark slug={m.id} name={m.name} logo={logos?.[m.id]} />
                   <div className="bo-rbody">
                     <div className="bo-rtop">
                       <span className="bo-rname">{m.name}</span>
-                      {!m.placeholder && (
-                        <span className="bo-rsent" style={{ background: s.bg, color: s.fg }}>
-                          {s.label}
-                        </span>
-                      )}
-                      {m.placeholder && <span className="bo-rsample">sample</span>}
-                    </div>
-                    {m.frame && (
-                      <span className={`bo-rframe-chip${m.placeholder ? " bo-rframe-chip--ph" : ""}`}>
-                        {m.frame}
+                      <span className="bo-rsent" style={{ background: s.bg, color: s.fg }}>
+                        {s.label}
                       </span>
-                    )}
+                    </div>
+                    {m.frame && <span className="bo-rframe-chip">{m.frame}</span>}
+                    {m.evidence && <p className="bo-rev">{m.evidence}</p>}
                   </div>
                 </div>
               );
             })}
           </div>
+          {data.untrackedModels && data.untrackedModels.length > 0 && (
+            <p className="bo-untracked">
+              {formatList(data.untrackedModels)} will appear after the next model run.
+            </p>
+          )}
         </section>
 
         {/* Prompt coverage gaps */}
@@ -869,20 +956,27 @@ const BO_CSS = `
 .bo-cat { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bo-muted); background: var(--bo-sand); padding: 2px 6px; border-radius: 5px; }
 .bo-summary-lead { font-weight: 600; color: var(--bo-ink); }
 /* Section dividers (Visibility performance / Diagnosis). */
-.bo-section-h { margin: 0 0 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--bo-muted); }
+.bo-section-h { margin: 0 0 14px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #2d2d33; }
+/* Extra breathing room above the first section header (below the action card). */
+.bo-section-h--spaced { margin-top: 32px; }
 /* Per-card insight line — semibold, below the header, above the content. */
 .bo-insight { margin: -4px 0 14px; font-size: 13.5px; font-weight: 600; line-height: 1.4; color: var(--bo-ink-soft); }
+/* Benchmark cue under the trend insight — small, muted gold (never red). */
+.bo-benchmark { margin: -8px 0 12px; font-size: 12px; font-weight: 700; letter-spacing: 0.01em; color: var(--bo-bronze-deep); }
 .bo-updated { font-size: 12.5px; color: var(--bo-muted); }
 .bo-bottomline { margin: 0 0 12px; font-size: 15px; line-height: 1.5; color: var(--bo-ink-soft); max-width: 70ch; }
 
 /* KPI strip — a grouped executive metric strip with column dividers. */
-.bo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 24px; border-top: 1px solid var(--bo-line); border-bottom: 1px solid var(--bo-line); }
-.bo-kpi { padding: 14px 22px; }
+.bo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 9px; border-top: 1px solid var(--bo-line); border-bottom: 1px solid var(--bo-line); }
+.bo-kpi { padding: 18px 22px; }
 .bo-kpi:first-child { padding-left: 0; }
-.bo-kpi:not(:first-child) { border-left: 1px solid var(--bo-line); }
+/* Soft, low-contrast vertical dividers — premium, not spreadsheet-like. */
+.bo-kpi:not(:first-child) { border-left: 1px solid rgba(40,36,22,0.06); }
 /* Snapshot metadata strip — rides at the right of the header row. */
 .bo-snapshot { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--bo-ink-soft); }
 .bo-snapshot--inhead { margin-left: auto; }
+/* Snapshot strip directly below the KPI cards — smaller + right-aligned. */
+.bo-snapshot--belowkpis { justify-content: flex-end; margin: 0 0 30px; font-size: 11px; color: var(--bo-muted); }
 .bo-snap-k { font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10.5px; color: var(--bo-muted); margin-right: 4px; }
 .bo-snap-sep { align-self: center; width: 1px; height: 12px; background: var(--bo-line-strong); }
 .bo-kpi-label { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--bo-muted); }
@@ -890,6 +984,9 @@ const BO_CSS = `
 .bo-kpi-info:hover, .bo-kpi-info:focus-visible { color: var(--bo-ink-soft); border-color: var(--bo-ink-soft); }
 .bo-kpi-tip { position: absolute; top: calc(100% + 8px); left: -3px; width: 210px; padding: 9px 11px; border-radius: 9px; background: var(--bo-ink); color: #f3f1ec; font-size: 11.5px; font-weight: 500; line-height: 1.45; letter-spacing: 0; text-transform: none; text-align: left; box-shadow: 0 12px 28px -10px rgba(16,16,26,0.5); opacity: 0; visibility: hidden; transform: translateY(-3px); transition: opacity .13s ease, transform .13s ease, visibility .13s ease; z-index: 60; pointer-events: none; }
 .bo-kpi-tip::before { content: ""; position: absolute; bottom: 100%; left: 6px; border: 5px solid transparent; border-bottom-color: var(--bo-ink); }
+/* Right-anchored variant: opens leftward for right-aligned cells. */
+.bo-kpi-tip--end { left: auto; right: -3px; }
+.bo-kpi-tip--end::before { left: auto; right: 6px; }
 .bo-kpi-info:hover .bo-kpi-tip, .bo-kpi-info:focus-visible .bo-kpi-tip { opacity: 1; visibility: visible; transform: translateY(0); }
 /* Compact KPI: figures on the left, sparkline/scale on the right of the cell. */
 .bo-kpi-body { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
@@ -920,14 +1017,22 @@ const BO_CSS = `
 .bo-theme-trend { color: var(--bo-muted); font-size: 14px; }
 
 /* Top row: a wider trend beside the narrower competitive table. */
-.bo-toprow { display: grid; grid-template-columns: 1.7fr 1fr; gap: 22px; margin-bottom: 28px; }
-.bo-card--roomy { padding: 22px 28px; }
-.bo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.bo-toprow { display: grid; grid-template-columns: 1.3fr 1fr; gap: 30px; margin-bottom: 32px; }
+.bo-card--roomy { padding: 24px 30px; }
+/* Diagnosis: Prompt Coverage Gaps carries more strategic weight → wider column. */
+.bo-grid { display: grid; grid-template-columns: 45fr 55fr; gap: 22px; }
 .bo-card { background: var(--bo-card); border: 1px solid var(--bo-line); border-radius: var(--bo-radius); box-shadow: var(--bo-shadow); padding: 22px 24px; min-width: 0; }
 /* Action card — the "do this next" emphasis: warm tint + bronze accent rail. */
 .bo-card--full { grid-column: 1 / -1; }
-.bo-card--action { background: linear-gradient(180deg, #faf5ea 0%, #fffdf8 70%); border-color: #e7dcc2; box-shadow: inset 3px 0 0 var(--bo-bronze), var(--bo-shadow); }
+/* Left accent rail + a SUBTLE full border (lighter than before now that the
+   card sits high on the page) keeps it warm/strategic without heavy gold. */
+.bo-card--action { background: linear-gradient(180deg, #faf6ec 0%, #fffdf8 72%); border-color: #f2ece1; box-shadow: inset 4px 0 0 var(--bo-bronze), var(--bo-shadow); padding: 25px 28px; }
 .bo-card--action .bo-rec-num { background: var(--bo-bronze); color: #fff; }
+.bo-card--action .bo-cardhead { margin-bottom: 11px; }
+.bo-card--action .bo-cardnote { margin: -2px 0 13px; }
+/* Priority sentence — slightly more weight/size than a plain note. */
+.bo-cardnote--priority { font-size: 14px; line-height: 1.5; color: var(--bo-ink-soft); }
+.bo-priority-k { font-weight: 700; color: var(--bo-ink); }
 
 .bo-cardhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .bo-cardhead .bo-eyebrow { margin-bottom: 0; }
@@ -954,12 +1059,15 @@ const BO_CSS = `
 .bo-empty { font-size: 12.5px; color: var(--bo-muted); padding: 18px 0; }
 
 .bo-table { display: flex; flex-direction: column; }
-.bo-trow { display: grid; grid-template-columns: minmax(0,1fr) 70px 58px 70px; align-items: center; gap: 12px; padding: 12px 8px; margin: 0 -8px; border-top: 1px solid var(--bo-line); border-radius: 7px; font-size: 13px; line-height: 1.4; }
-.bo-trow--head { border-top: none; padding-bottom: 6px; align-items: end; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--bo-muted); font-weight: 700; }
-.bo-trow--head .bo-num { white-space: normal; line-height: 1.15; }
+.bo-trow { display: grid; grid-template-columns: minmax(0,1fr) 74px 70px 96px; align-items: center; gap: 13px; padding: 14px 8px; margin: 0 -8px; border-top: 1px solid var(--bo-line); border-radius: 7px; font-size: 13px; line-height: 1.4; }
+.bo-trow--head { border-top: none; padding-bottom: 9px; align-items: end; font-size: 9px; text-transform: uppercase; letter-spacing: 0.02em; color: var(--bo-muted); font-weight: 700; }
+.bo-trow--head .bo-num { white-space: nowrap; line-height: 1.15; }
+/* Shrink the info "i" in column headers so each name stays on one line. */
+.bo-trow--head .bo-kpi-info { width: 12px; height: 12px; margin-left: 3px; font-size: 8px; }
 .bo-trow--you { background: rgba(138,109,47,0.07); }
 .bo-ent { min-width: 0; font-weight: 600; color: var(--bo-ink-soft); display: flex; align-items: center; gap: 7px; }
-.bo-ent-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Allow full entity names to wrap to a second line rather than truncate. */
+.bo-ent-name { min-width: 0; white-space: normal; overflow-wrap: break-word; line-height: 1.25; }
 .bo-trow--you .bo-ent { color: var(--bo-bronze-deep); }
 .bo-you { flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #fff; background: var(--bo-bronze); border-radius: 4px; padding: 1px 5px; }
 .bo-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--bo-ink-soft); white-space: nowrap; }
@@ -984,11 +1092,12 @@ const BO_CSS = `
 .bo-rname { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 .bo-rframe { font-size: 11.5px; font-weight: 600; color: var(--bo-bronze-deep); margin-bottom: 5px; }
 .bo-rsent { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px; white-space: nowrap; opacity: 0.85; }
-.bo-rsample { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px; white-space: nowrap; color: var(--bo-muted); background: var(--bo-sand); }
-/* Model framing: the frame each model reinforces, shown as a chip. */
+/* Model framing: the frame each model reinforces, shown as a subtle pill. */
 .bo-rframe-chip { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--bo-bronze-deep); background: var(--bo-bronze-bg); padding: 3px 9px; border-radius: 7px; }
-.bo-rframe-chip--ph { color: var(--bo-muted); background: var(--bo-sand); font-weight: 500; }
-.bo-rcard--ph { opacity: 0.7; }
+/* One-line evidence under the frame tag — smaller + muted, but readable. */
+.bo-rev { margin: 7px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--bo-muted); }
+/* Untracked-models footnote — clearly NOT evidence. */
+.bo-untracked { margin: 13px 0 0; padding-top: 12px; border-top: 1px solid var(--bo-line); font-size: 12px; line-height: 1.4; color: var(--bo-muted); }
 /* Editorial intro line under a card header (insights, subtitles). */
 .bo-cardnote { margin: -4px 0 14px; font-size: 13px; line-height: 1.45; color: var(--bo-muted); }
 .bo-rtext { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--bo-ink-soft); }
@@ -999,15 +1108,19 @@ const BO_CSS = `
 
 .bo-recs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 13px; }
 .bo-rec { display: flex; gap: 11px; }
-.bo-rec-num { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--bo-bronze-bg); color: var(--bo-bronze-deep); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.bo-rec-num { flex: none; width: 23px; height: 23px; border-radius: 50%; background: var(--bo-bronze-bg); color: var(--bo-bronze-deep); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
 .bo-rec-body { min-width: 0; }
-.bo-rec-title { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--bo-ink); }
-.bo-rec-title--link { background: none; border: none; padding: 0; font: inherit; color: var(--bo-bronze-deep); cursor: pointer; }
+.bo-rec-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; color: var(--bo-ink); }
+.bo-rec-title--link { background: none; border: none; padding: 0; font: inherit; font-weight: 700; color: var(--bo-bronze-deep); cursor: pointer; text-align: left; }
 .bo-rec-title--link:hover { text-decoration: underline; }
-.bo-rec-why { margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--bo-muted); }
-/* Recommended next moves: three actions as separated mini-cards. */
-.bo-recs--cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.bo-recs--cols .bo-rec { align-items: flex-start; padding: 14px 16px; border: 1px solid var(--bo-line); border-radius: 12px; background: rgba(255,255,255,0.55); }
+.bo-rec-why { margin: 7px 0 0; font-size: 12px; line-height: 1.5; color: var(--bo-muted); }
+/* Recommended next moves: three actions as separated mini-cards, taller so the
+   titles read as the primary content and descriptions as supporting detail. */
+.bo-recs--cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.bo-recs--cols .bo-rec { align-items: flex-start; gap: 10px; padding: 17px 17px; border: 1px solid var(--bo-line); border-radius: 12px; background: rgba(255,255,255,0.6); }
+/* "What changed" cue — warm/amber accent, never a red warning. */
+.bo-changed { margin: 0 0 14px; padding: 9px 13px; border-radius: 9px; background: rgba(255,255,255,0.62); border: 1px solid var(--bo-line); border-left: 3px solid var(--bo-bronze); font-size: 12.5px; line-height: 1.45; color: var(--bo-ink-soft); }
+.bo-changed-k { font-weight: 700; color: var(--bo-bronze-deep); }
 
 .bo-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--bo-line); }
 .bo-row--first { border-top: none; }
@@ -1033,19 +1146,19 @@ const BO_CSS = `
 /* Prompt-themes strength-bar chart: theme label + a bar whose length encodes
    the association level, against a Missing→Strong axis. */
 .bo-sb { display: flex; flex-direction: column; }
-.bo-sb-row { display: grid; grid-template-columns: minmax(0, 1fr) 1.25fr 64px; gap: 14px; align-items: center; padding: 9px 0; border-top: 1px solid var(--bo-line); }
+.bo-sb-row { display: grid; grid-template-columns: minmax(0, 1fr) 1.25fr 64px; gap: 14px; align-items: center; padding: 13px 0; border-top: 1px solid var(--bo-line); }
 .bo-sb-axis { border-top: none; padding: 0 0 6px; }
 .bo-sb-ticks { display: flex; justify-content: space-between; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; color: var(--bo-muted); }
 .bo-sb-level { justify-self: end; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--bo-muted); }
 .bo-sb-level--moderate { color: var(--bo-bronze-deep); }
 .bo-sb-level--strong { color: var(--bo-pos); }
 .bo-sb-theme { min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--bo-ink-soft); line-height: 1.25; }
-.bo-sb-track { position: relative; height: 8px; border-radius: 4px; background: var(--bo-sand); overflow: hidden; }
+.bo-sb-track { position: relative; height: 9px; border-radius: 5px; background: var(--bo-sand); box-shadow: inset 0 0 0 1px rgba(28,24,14,0.06); overflow: hidden; }
 /* faint reference lines at the Weak (⅓) and Moderate (⅔) marks */
 .bo-sb-grid { position: absolute; inset: 0; background:
   linear-gradient(90deg, transparent calc(33.33% - 0.5px), var(--bo-line-strong) 33.33%, transparent calc(33.33% + 0.5px)),
   linear-gradient(90deg, transparent calc(66.66% - 0.5px), var(--bo-line-strong) 66.66%, transparent calc(66.66% + 0.5px)); opacity: 0.5; }
-.bo-sb-fill { position: absolute; left: 0; top: 0; bottom: 0; min-width: 5px; border-radius: 4px; }
+.bo-sb-fill { position: absolute; left: 0; top: 0; bottom: 0; min-width: 10px; border-radius: 5px; }
 .bo-ng { display: inline-block; flex: none; width: 72px; text-align: center; padding: 3px 0; border-radius: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
 .bo-ng--strong { background: var(--bo-pos-bg); color: var(--bo-pos); }
 .bo-ng--moderate { background: var(--bo-bronze-bg); color: var(--bo-bronze-deep); }
