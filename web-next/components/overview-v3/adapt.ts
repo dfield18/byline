@@ -149,14 +149,16 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       id: "citation",
       label: "citation rate",
       value: pct(k.citation_rate.value),
-      ...fmtDelta(k.citation_rate.delta, "pp"),
+      ...(k.citation_rate.value === null
+        ? { delta: "no prior data", deltaDirection: "neutral" as const }
+        : fmtDelta(k.citation_rate.delta, "pp")),
       spark: t.citation_rate,
       info: "Share of AI answers that cite or link an external source when discussing this subject.",
       interpretation: interpCitation(k.citation_rate.value),
     },
     {
       id: "topsource",
-      label: "top source",
+      label: "top cited source",
       value: topSrc ? topSrc.name : "—",
       delta: topSrc ? `${topSrc.n_citations} cite${topSrc.n_citations === 1 ? "" : "s"}` : "no citations",
       deltaDirection: "neutral",
@@ -255,6 +257,17 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     .slice(0, 5)
     .map((s) => ({ id: s.name, name: s.name, type: s.type, citations: s.n_citations }));
 
+  // Trim a rationale to ~10–15 words: prefer a clean clause/sentence boundary,
+  // else hard-cap the word count with an ellipsis. (Full text behind "View all".)
+  const concise = (s: string): string => {
+    const text = s.trim();
+    const words = text.split(/\s+/);
+    if (words.length <= 16) return text;
+    const clause = text.split(/[,;.](?:\s|$)/)[0].trim();
+    const clauseLen = clause.split(/\s+/).length;
+    if (clauseLen >= 6 && clauseLen <= 16) return clause + ".";
+    return words.slice(0, 13).join(" ").replace(/[,;:.]$/, "") + "…";
+  };
   const rec = api.recommended_actions;
   const recommendations = rec
     ? [rec.primary, ...rec.secondary]
@@ -262,7 +275,7 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
         .map((a, i) => ({
           id: `${a.label}-${i}`,
           title: a.label,
-          rationale: a.why,
+          rationale: concise(a.why),
           spoke: recSpoke(a.label, a.why),
         }))
     : [];
@@ -278,23 +291,26 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
   const aheadOf = subjStanding
     ? api.competitive.filter((c) => !c.is_subject && c.sov > subjStanding.sov).length
     : 0;
-  const standing =
-    nRivals === 0 || !subjStanding
-      ? null
-      : aheadOf === 0
-        ? `leading all ${nRivals} tracked rivals`
-        : aheadOf >= nRivals
-          ? `trailing all ${nRivals} tracked rivals`
-          : `behind ${aheadOf} of ${nRivals} tracked rivals`;
   // Source concentration: if one type dominates, call it out (e.g. news-heavy).
   const topType = sources[0];
   const sourcing = topType && topType.share >= 50 ? `${topType.label.toLowerCase()}-heavy sourcing` : null;
-  const takeaway =
-    visBand === null
+
+  // Structured executive summary: a bold lead phrase + a normal-weight rest.
+  const standingClause =
+    nRivals === 0 || !subjStanding
       ? null
-      : `${visBand} AI visibility (${mentionPct}% mention rate), ${sentWord} sentiment${
-          sourcing ? `, ${sourcing}` : ""
-        }${standing ? `, ${standing}` : ""}.`;
+      : aheadOf >= nRivals
+        ? "Trails all tracked rivals"
+        : aheadOf === 0
+          ? "Leads all tracked rivals"
+          : `Behind ${aheadOf} of ${nRivals} tracked rivals`;
+  const summaryLead = visBand === null ? null : `${visBand} AI visibility.`;
+  const summaryRest =
+    mentionPct === null
+      ? ""
+      : `Mentioned in only ${mentionPct}% of answers, with ${sentWord} sentiment${
+          sourcing ? ` and ${sourcing}` : ""
+        }.${standingClause ? ` ${standingClause}.` : ""}`;
 
   // Editorial themes summary: lead with the missing themes (the biggest gaps).
   const missingThemes = drivers.filter((d) => d.association === "missing").map((d) => d.label);
@@ -305,6 +321,46 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
       ? `${api.subject_name} has only weak presence on ${listNames(weakThemes.slice(0, 3))}.`
       : `${api.subject_name} has solid coverage across the tracked prompt themes.`;
 
+  // Per-card insight one-liners — all derived from real standing/coverage.
+  const trendInsight =
+    nRivals === 0
+      ? null
+      : aheadOf >= nRivals
+        ? `${api.subject_name} trails all tracked rivals on mention rate.`
+        : aheadOf === 0
+          ? `${api.subject_name} leads the tracked rivals on mention rate.`
+          : `${api.subject_name} trails ${aheadOf} of ${nRivals} tracked rivals on mention rate.`;
+  const competitiveInsight =
+    nRivals === 0
+      ? null
+      : aheadOf >= nRivals
+        ? `All tracked rivals outperform ${api.subject_name} on mention rate.`
+        : aheadOf === 0
+          ? `${api.subject_name} leads every tracked rival on mention rate.`
+          : `${api.subject_name} ranks ${aheadOf + 1} of ${nRivals + 1} on mention rate.`;
+  const distinctFrames = [...new Set(models.map((m) => m.frame).filter((f): f is string => !!f))];
+  const framingInsight = distinctFrames.length
+    ? `Models frame ${api.subject_name} around ${listNames(distinctFrames)}.`
+    : null;
+  const gapsInsight = missingThemes.length
+    ? `${api.subject_name} is missing from ${missingThemes.length} of ${drivers.length} tracked prompt themes.`
+    : null;
+  // Derived priority for Recommended Next Moves, based on the real gaps.
+  const recsSummary = missingThemes.length
+    ? `Priority: close the ${missingThemes.length} missing prompt-coverage ${
+        missingThemes.length === 1 ? "gap" : "gaps"
+      } below — proactively, not just reacting to news.`
+    : weakThemes.length
+      ? `Priority: strengthen the ${weakThemes.length} weak prompt-coverage ${
+          weakThemes.length === 1 ? "area" : "areas"
+        } below.`
+      : `Maintain coverage and watch for emerging gaps.`;
+  // Chart annotation near the subject's endpoint.
+  const trendAnnotation =
+    mentionPct === null
+      ? null
+      : `${mentionPct}% — ${k.ai_recall.delta != null && k.ai_recall.delta < 0 ? "low & declining" : "current rate"}`;
+
   return {
     subject: api.subject_name,
     category: api.category || null,
@@ -312,19 +368,26 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
     snapshotLabel: updated,
     comparedWith,
     comparisonLabel,
-    bottomLine: api.bottom_line ?? takeaway,
+    summaryLead: api.bottom_line ? null : summaryLead,
+    summaryRest: api.bottom_line ?? summaryRest,
     kpis,
     themes: [], // populated once the bucket query-template model exists
     mentionTrend,
     trendLabels,
+    trendAnnotation,
+    trendInsight,
+    competitiveInsight,
     competitors,
     drivers,
     coverage,
     themesSummary,
+    gapsInsight,
     models,
+    framingInsight,
     sources,
     topSources,
     sourceTotalLabel: `${total} citations`,
     recommendations,
+    recsSummary,
   };
 }

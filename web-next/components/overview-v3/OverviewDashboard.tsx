@@ -141,23 +141,36 @@ export interface OverviewData {
   comparedWith: string;
   /** What the KPI deltas are measured against (legacy; superseded by comparedWith). */
   comparisonLabel: string;
-  /** One-line synthesis from the backend, shown under the title. */
-  bottomLine: string | null;
+  /** Executive summary: a bold lead phrase + a normal-weight rest. */
+  summaryLead: string | null;
+  summaryRest: string;
   kpis: KpiMetric[];
   themes: Theme[];
   mentionTrend: MentionSeries[];
   /** X-axis labels for the mention trend, index-aligned to each series' points. */
   trendLabels: string[];
+  /** Short annotation rendered near the subject's endpoint on the trend. */
+  trendAnnotation: string | null;
+  /** Insight line for the Mention Rate Trend card. */
+  trendInsight: string | null;
+  /** Insight line for the Competitive Landscape card. */
+  competitiveInsight: string | null;
   competitors: Competitor[];
   drivers: DriverTheme[];
   coverage: CoverageMatrix;
   /** Editorial one-liner summarizing prompt-theme coverage gaps. */
   themesSummary: string | null;
+  /** Insight line for the Prompt Coverage Gaps card. */
+  gapsInsight: string | null;
   models: ModelDescription[];
+  /** Insight line for the Model Framing card. */
+  framingInsight: string | null;
   sources: SourceType[];
   topSources: TopSource[];
   sourceTotalLabel: string;
   recommendations: Recommendation[];
+  /** Summary sentence at the top of Recommended Next Moves. */
+  recsSummary: string;
 }
 
 // ── Style tokens (semantic) ──────────────────────────────────────────────
@@ -186,7 +199,7 @@ const ASSOC_LABEL: Record<Association, string> = {
 // chart. Missing keeps a tiny stub so the row reads as "at the Missing end".
 const LEVEL_FRAC: Record<Association, number> = { missing: 0.05, weak: 0.34, moderate: 0.67, strong: 1 };
 const LEVEL_COLOR: Record<Association, string> = {
-  missing: "var(--bo-neg)",
+  missing: "var(--bo-line-strong)",
   weak: "var(--bo-neu)",
   moderate: "var(--bo-bronze)",
   strong: "var(--bo-pos)",
@@ -256,7 +269,15 @@ const lastDefined = (pts: (number | null)[]): number => pts.reduce<number>((a, v
 // y-axis ticks, dated x-axis ticks, and a name label at each line's right
 // endpoint (so no legend is needed). Points are null-aligned to `labels`, so
 // every series shares one time axis; rivals differ by dash pattern + opacity.
-function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string[] }) {
+function Sparkline({
+  series,
+  labels,
+  annotation,
+}: {
+  series: MentionSeries[];
+  labels: string[];
+  annotation?: string | null;
+}) {
   // Hovered column index (shared time axis), or null when not hovering.
   const [hover, setHover] = useState<number | null>(null);
   const drawable = series.filter((s) => s.points.some((p) => p != null));
@@ -307,7 +328,7 @@ function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string
   const rivals = drawable.filter((s) => !s.isSubject);
   const rivalIndex = (s: MentionSeries) => rivals.indexOf(s);
   const rivalDash = (i: number) => (i === 0 ? undefined : i === 1 ? "6 5" : "2 5");
-  const rivalOpacity = (i: number) => (i === 0 ? 0.8 : 0.58);
+  const rivalOpacity = (i: number) => (i === 0 ? 0.9 : 0.72);
 
   const subj = drawable.find((s) => s.isSubject);
   const subjFirst = subj ? subj.points.findIndex((p) => p != null) : -1;
@@ -412,7 +433,7 @@ function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string
             d={path(s.points)}
             fill="none"
             stroke={s.isSubject ? "var(--bo-bronze)" : "var(--bo-line-strong)"}
-            strokeWidth={s.isSubject ? 2.5 : 1.6}
+            strokeWidth={s.isSubject ? 3.2 : 1.7}
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeDasharray={s.isSubject ? undefined : rivalDash(ri)}
@@ -443,11 +464,23 @@ function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string
           className="bo-spark-label"
           x={x1 + 8}
           y={Math.min(l.y + 3.5, H - 4)}
-          style={{ fill: l.color, fontWeight: l.weight }}
+          style={{ fill: l.color, fontWeight: l.weight, fontSize: l.weight >= 700 ? 16 : undefined }}
         >
           {l.name}
         </text>
       ))}
+
+      {/* subtle annotation under the subject's endpoint label */}
+      {annotation &&
+        (() => {
+          const subjLabel = labelPos.find((l) => l.weight >= 700);
+          if (!subjLabel) return null;
+          return (
+            <text className="bo-spark-annot" x={x1 + 8} y={Math.min(subjLabel.y + 20, H - 3)}>
+              {annotation}
+            </text>
+          );
+        })()}
 
       {/* hover guide + per-series markers */}
       {hover !== null && hoverRows.length > 0 && (
@@ -489,33 +522,6 @@ function Sparkline({ series, labels }: { series: MentionSeries[]; labels: string
         </div>
       )}
     </div>
-  );
-}
-
-// Tiny single-series sparkline for a KPI card. Self-normalizes; nulls = gaps.
-function MiniSpark({ points }: { points: (number | null)[] }) {
-  const vals = points.filter((v): v is number => v != null);
-  if (vals.length < 2) return null;
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const range = max - min || 1;
-  const W = 120;
-  const H = 26;
-  const pad = 2;
-  const N = points.length;
-  const xAt = (i: number) => (N <= 1 ? 0 : pad + (i / (N - 1)) * (W - pad * 2));
-  const yAt = (v: number) => H - pad - ((v - min) / range) * (H - pad * 2);
-  const d = points
-    .map((v, i) => ({ v, i }))
-    .filter((p): p is { v: number; i: number } => p.v != null)
-    .map((p, k) => `${k === 0 ? "M" : "L"}${xAt(p.i).toFixed(1)},${yAt(p.v).toFixed(1)}`)
-    .join(" ");
-  const li = lastDefined(points);
-  return (
-    <svg className="bo-kspark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden>
-      <path d={d} fill="none" stroke="var(--bo-line-strong)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-      {li >= 0 && <circle cx={xAt(li)} cy={yAt(points[li] as number)} r={1.8} fill="var(--bo-bronze)" />}
-    </svg>
   );
 }
 
@@ -570,7 +576,13 @@ export function OverviewDashboard({
         </div>
       </header>
 
-      {data.bottomLine && <p className="bo-bottomline">{data.bottomLine}</p>}
+      {(data.summaryLead || data.summaryRest) && (
+        <p className="bo-bottomline">
+          {data.summaryLead && <strong className="bo-summary-lead">{data.summaryLead}</strong>}
+          {data.summaryLead ? " " : ""}
+          {data.summaryRest}
+        </p>
+      )}
 
       {/* KPI strip — consistent sparkline viz across all four */}
       <div className="bo-kpis">
@@ -610,13 +622,7 @@ export function OverviewDashboard({
                   {k.delta}
                 </div>
               </div>
-              {k.spark && (
-                <div className="bo-kpi-viz">
-                  <MiniSpark points={k.spark} />
-                </div>
-              )}
             </div>
-            {k.interpretation && <div className="bo-kpi-interp">{k.interpretation}</div>}
           </div>
         ))}
       </div>
@@ -647,21 +653,75 @@ export function OverviewDashboard({
         </div>
       )}
 
-      {/* Top row: mention trend beside the competitive landscape */}
+      {/* Recommended next moves — the executive conclusion, answered first */}
+      <section className="bo-card bo-card--action">
+        <div className="bo-cardhead">
+          <Eyebrow dots={["var(--bo-bronze)"]}>Recommended next moves</Eyebrow>
+          {onOpenSpoke && (
+            <button
+              type="button"
+              className="bo-viewall"
+              onClick={() => onOpenSpoke("recommendations")}
+            >
+              View all →
+            </button>
+          )}
+        </div>
+        <p className="bo-cardnote">{data.recsSummary}</p>
+        <ol className="bo-recs bo-recs--cols">
+          {data.recommendations.map((r, i) => {
+            const linkSpoke = r.spoke && onOpenSpoke ? r.spoke : null;
+            return (
+              <li key={r.id} className="bo-rec">
+                <span className="bo-rec-num">{i + 1}</span>
+                <div className="bo-rec-body">
+                  {linkSpoke ? (
+                    <button
+                      type="button"
+                      className="bo-rec-title bo-rec-title--link"
+                      onClick={() => onOpenSpoke?.(linkSpoke)}
+                    >
+                      {r.title} →
+                    </button>
+                  ) : r.navigateTo ? (
+                    <button
+                      type="button"
+                      className="bo-rec-title bo-rec-title--link"
+                      onClick={() => r.navigateTo && onNavigate?.(r.navigateTo)}
+                    >
+                      {r.title} →
+                    </button>
+                  ) : (
+                    <span className="bo-rec-title">{r.title}</span>
+                  )}
+                  <p className="bo-rec-why">{r.rationale}</p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+
+      {/* ── Visibility performance ─────────────────────────────────────────── */}
+      <h2 className="bo-section-h">Visibility performance</h2>
       <div className="bo-toprow">
-        {/* Mention trend — headline */}
+        {/* Mention trend — no "View all" (keep the strip uncluttered) */}
         <section className="bo-card">
-          <CardHead dots={["var(--bo-bronze)"]} spoke="visibility" onOpenSpoke={onOpenSpoke}>
-            Mention rate trend
-          </CardHead>
-          <Sparkline series={data.mentionTrend} labels={data.trendLabels} />
+          <CardHead dots={["var(--bo-bronze)"]}>Mention rate trend</CardHead>
+          {data.trendInsight && <p className="bo-insight">{data.trendInsight}</p>}
+          <Sparkline
+            series={data.mentionTrend}
+            labels={data.trendLabels}
+            annotation={data.trendAnnotation}
+          />
         </section>
 
-        {/* Competitive landscape — beside the chart */}
-        <section className="bo-card">
+        {/* Competitive landscape */}
+        <section className="bo-card bo-card--roomy">
           <CardHead dots={["var(--bo-bronze)"]} spoke="competition" onOpenSpoke={onOpenSpoke}>
             Competitive landscape
           </CardHead>
+          {data.competitiveInsight && <p className="bo-insight">{data.competitiveInsight}</p>}
           <div className="bo-table">
             <div className="bo-trow bo-trow--head">
               <span className="bo-ent">Entity</span>
@@ -684,16 +744,15 @@ export function OverviewDashboard({
         </section>
       </div>
 
-      {/* 2×2 grid: readout + prompt themes, then source mix + recommended focus */}
+      {/* ── Diagnosis ──────────────────────────────────────────────────────── */}
+      <h2 className="bo-section-h">Diagnosis</h2>
       <div className="bo-grid">
-        {/* Model evidence — frame + representative excerpt per model */}
+        {/* Model framing */}
         <section className="bo-card">
           <CardHead dots={["var(--bo-bronze)"]} spoke="narrative" onOpenSpoke={onOpenSpoke}>
-            Model evidence
+            Model framing
           </CardHead>
-          <p className="bo-cardnote">
-            How each model frames {data.subject}, in one line.
-          </p>
+          {data.framingInsight && <p className="bo-insight">{data.framingInsight}</p>}
           <div className="bo-readout">
             {data.models.map((m) => {
               const s = SENTIMENT_STYLE[m.sentiment];
@@ -715,12 +774,12 @@ export function OverviewDashboard({
           </div>
         </section>
 
-        {/* Prompt themes — replaces Top sources; Theme · Model presence · Association */}
+        {/* Prompt coverage gaps */}
         <section className="bo-card">
           <CardHead dots={["var(--bo-bronze)"]} spoke="prompts" onOpenSpoke={onOpenSpoke}>
-            Prompt themes driving this result
+            Prompt coverage gaps
           </CardHead>
-          {data.themesSummary && <p className="bo-cardnote">{data.themesSummary}</p>}
+          {data.themesSummary && <p className="bo-insight">{data.themesSummary}</p>}
           {data.coverage.rows.length > 0 ? (
             <div className="bo-sb">
               <div className="bo-sb-row bo-sb-axis">
@@ -731,18 +790,19 @@ export function OverviewDashboard({
                   <span>Moderate</span>
                   <span>Strong</span>
                 </span>
+                <span className="bo-sb-level" />
               </div>
               {data.coverage.rows.map((row) => (
                 <div
                   className="bo-sb-row"
                   key={row.id}
-                  title={`${row.full} — ${ASSOC_LABEL[row.level]} association`}
+                  title={`${row.full} — ${ASSOC_LABEL[row.level]} coverage`}
                 >
                   <span className="bo-sb-theme">{row.label}</span>
                   <span
                     className="bo-sb-track"
                     role="img"
-                    aria-label={`${row.label}: ${ASSOC_LABEL[row.level]} association`}
+                    aria-label={`${row.label}: ${ASSOC_LABEL[row.level]} coverage`}
                   >
                     <span className="bo-sb-grid" aria-hidden />
                     <span
@@ -750,52 +810,13 @@ export function OverviewDashboard({
                       style={{ width: `${LEVEL_FRAC[row.level] * 100}%`, background: LEVEL_COLOR[row.level] }}
                     />
                   </span>
+                  <span className={`bo-sb-level bo-sb-level--${row.level}`}>{ASSOC_LABEL[row.level]}</span>
                 </div>
               ))}
             </div>
           ) : (
             <div className="bo-empty">No prompt-theme coverage yet.</div>
           )}
-        </section>
-
-        {/* Recommended focus — the action card, full-width banner on its own line */}
-        <section className="bo-card bo-card--action bo-card--full">
-          <CardHead dots={["var(--bo-bronze)"]} spoke="recommendations" onOpenSpoke={onOpenSpoke}>
-            Recommended focus
-          </CardHead>
-          <p className="bo-cardnote">What to do next based on this snapshot.</p>
-          <ol className="bo-recs">
-            {data.recommendations.map((r, i) => {
-              const linkSpoke = r.spoke && onOpenSpoke ? r.spoke : null;
-              return (
-                <li key={r.id} className="bo-rec">
-                  <span className="bo-rec-num">{i + 1}</span>
-                  <div className="bo-rec-body">
-                    {linkSpoke ? (
-                      <button
-                        type="button"
-                        className="bo-rec-title bo-rec-title--link"
-                        onClick={() => onOpenSpoke?.(linkSpoke)}
-                      >
-                        {r.title} →
-                      </button>
-                    ) : r.navigateTo ? (
-                      <button
-                        type="button"
-                        className="bo-rec-title bo-rec-title--link"
-                        onClick={() => r.navigateTo && onNavigate?.(r.navigateTo)}
-                      >
-                        {r.title} →
-                      </button>
-                    ) : (
-                      <span className="bo-rec-title">{r.title}</span>
-                    )}
-                    <p className="bo-rec-why">{r.rationale}</p>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
         </section>
       </div>
     </div>
@@ -836,17 +857,26 @@ const BO_CSS = `
 
 .bo-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px 12px; margin-bottom: 8px; }
 .bo-subject { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
-.bo-cat { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--bo-bronze-deep); background: var(--bo-bronze-bg); padding: 3px 8px; border-radius: 6px; }
+.bo-cat { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bo-muted); background: var(--bo-sand); padding: 2px 6px; border-radius: 5px; }
+.bo-summary-lead { font-weight: 600; color: var(--bo-ink); }
+/* Section dividers (Visibility performance / Diagnosis). */
+.bo-section-h { margin: 0 0 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--bo-muted); }
+/* Per-card insight line — semibold, below the header, above the content. */
+.bo-insight { margin: -4px 0 14px; font-size: 13.5px; font-weight: 600; line-height: 1.4; color: var(--bo-ink-soft); }
 .bo-updated { font-size: 12.5px; color: var(--bo-muted); }
 .bo-bottomline { margin: 0 0 12px; font-size: 15px; line-height: 1.5; color: var(--bo-ink-soft); max-width: 70ch; }
 
-.bo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-bottom: 22px; }
+/* KPI strip — a grouped executive metric strip with column dividers. */
+.bo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 24px; border-top: 1px solid var(--bo-line); border-bottom: 1px solid var(--bo-line); }
+.bo-kpi { padding: 14px 22px; }
+.bo-kpi:first-child { padding-left: 0; }
+.bo-kpi:not(:first-child) { border-left: 1px solid var(--bo-line); }
 /* Snapshot metadata strip — rides at the right of the header row. */
 .bo-snapshot { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--bo-ink-soft); }
 .bo-snapshot--inhead { margin-left: auto; }
 .bo-snap-k { font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10.5px; color: var(--bo-muted); margin-right: 4px; }
 .bo-snap-sep { align-self: center; width: 1px; height: 12px; background: var(--bo-line-strong); }
-.bo-kpi-label { display: inline-flex; align-items: center; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--bo-ink-soft); }
+.bo-kpi-label { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--bo-muted); }
 .bo-kpi-info { position: relative; display: inline-grid; place-items: center; width: 14px; height: 14px; margin-left: 5px; border-radius: 50%; border: 1px solid var(--bo-line-strong); color: var(--bo-muted); font-size: 9px; font-weight: 700; font-style: normal; line-height: 1; text-transform: none; cursor: default; outline: none; }
 .bo-kpi-info:hover, .bo-kpi-info:focus-visible { color: var(--bo-ink-soft); border-color: var(--bo-ink-soft); }
 .bo-kpi-tip { position: absolute; top: calc(100% + 8px); left: -3px; width: 210px; padding: 9px 11px; border-radius: 9px; background: var(--bo-ink); color: #f3f1ec; font-size: 11.5px; font-weight: 500; line-height: 1.45; letter-spacing: 0; text-transform: none; text-align: left; box-shadow: 0 12px 28px -10px rgba(16,16,26,0.5); opacity: 0; visibility: hidden; transform: translateY(-3px); transition: opacity .13s ease, transform .13s ease, visibility .13s ease; z-index: 60; pointer-events: none; }
@@ -856,7 +886,7 @@ const BO_CSS = `
 .bo-kpi-body { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
 .bo-kpi-figs { flex: none; }
 .bo-kpi-viz { flex: 1; min-width: 0; }
-.bo-kpi-value { max-width: 100%; font-size: 22px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1.05; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bo-kpi-value { max-width: 100%; font-size: 25px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1.05; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Smaller value for long strings (e.g. a domain) so it doesn't overflow. */
 .bo-kpi-value--sm { font-size: 15px; letter-spacing: -0.01em; font-variant-numeric: normal; }
 .bo-kpi-value--link { background: none; border: none; padding: 0; font: inherit; color: var(--bo-bronze-deep); cursor: pointer; text-align: left; display: block; }
@@ -881,7 +911,8 @@ const BO_CSS = `
 .bo-theme-trend { color: var(--bo-muted); font-size: 14px; }
 
 /* Top row: a wider trend beside the narrower competitive table. */
-.bo-toprow { display: grid; grid-template-columns: 1.4fr 1fr; gap: 22px; margin-bottom: 22px; }
+.bo-toprow { display: grid; grid-template-columns: 1.7fr 1fr; gap: 22px; margin-bottom: 28px; }
+.bo-card--roomy { padding: 22px 28px; }
 .bo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
 .bo-card { background: var(--bo-card); border: 1px solid var(--bo-line); border-radius: var(--bo-radius); box-shadow: var(--bo-shadow); padding: 22px 24px; min-width: 0; }
 /* Action card — the "do this next" emphasis: warm tint + bronze accent rail. */
@@ -891,7 +922,7 @@ const BO_CSS = `
 
 .bo-cardhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .bo-cardhead .bo-eyebrow { margin-bottom: 0; }
-.bo-viewall { flex: none; background: none; border: none; padding: 0; font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; color: var(--bo-muted); cursor: pointer; white-space: nowrap; }
+.bo-viewall { flex: none; background: none; border: none; padding: 0; font: inherit; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; color: var(--bo-line-strong); cursor: pointer; white-space: nowrap; }
 .bo-viewall:hover { color: var(--bo-bronze-deep); }
 .bo-viewall:focus-visible { outline: 2px solid var(--bo-bronze); outline-offset: 2px; border-radius: 4px; }
 .bo-eyebrow { display: flex; align-items: center; gap: 7px; margin-bottom: 14px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--bo-ink-soft); }
@@ -902,6 +933,7 @@ const BO_CSS = `
 .bo-spark { width: 100%; height: auto; display: block; cursor: crosshair; }
 .bo-axis { fill: var(--bo-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .bo-spark-label { font-size: 14.5px; letter-spacing: -0.01em; }
+.bo-spark-annot { fill: var(--bo-muted); font-size: 11px; }
 /* Hover tooltip — values at the hovered column. */
 .bo-sparktip { position: absolute; top: 4px; transform: translateX(-50%); pointer-events: none; z-index: 5; background: var(--bo-ink); color: #f3f1ec; border-radius: 9px; padding: 8px 11px; font-size: 11.5px; line-height: 1.4; box-shadow: 0 12px 28px -10px rgba(16,16,26,0.5); white-space: nowrap; }
 .bo-sparktip-date { font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #c9c1b2; margin-bottom: 5px; }
@@ -913,10 +945,10 @@ const BO_CSS = `
 .bo-empty { font-size: 12.5px; color: var(--bo-muted); padding: 18px 0; }
 
 .bo-table { display: flex; flex-direction: column; }
-.bo-trow { display: grid; grid-template-columns: minmax(0,1fr) 70px 58px 70px; align-items: center; gap: 12px; padding: 11px 8px; margin: 0 -8px; border-top: 1px solid var(--bo-line); border-radius: 7px; font-size: 13px; }
+.bo-trow { display: grid; grid-template-columns: minmax(0,1fr) 70px 58px 70px; align-items: center; gap: 12px; padding: 12px 8px; margin: 0 -8px; border-top: 1px solid var(--bo-line); border-radius: 7px; font-size: 13px; line-height: 1.4; }
 .bo-trow--head { border-top: none; padding-bottom: 6px; align-items: end; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--bo-muted); font-weight: 700; }
 .bo-trow--head .bo-num { white-space: normal; line-height: 1.15; }
-.bo-trow--you { background: var(--bo-bronze-bg); }
+.bo-trow--you { background: rgba(138,109,47,0.07); }
 .bo-ent { min-width: 0; font-weight: 600; color: var(--bo-ink-soft); display: flex; align-items: center; gap: 7px; }
 .bo-ent-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bo-trow--you .bo-ent { color: var(--bo-bronze-deep); }
@@ -935,13 +967,14 @@ const BO_CSS = `
 
 /* Cross-model readout — mirrors the landing console's .lc-card rows. */
 .bo-readout { display: flex; flex-direction: column; }
-.bo-rcard { display: flex; gap: 14px; padding: 16px 0; border-top: 1px solid var(--bo-line); }
+.bo-rcard { display: flex; gap: 14px; padding: 14px 0; border-top: 1px solid var(--bo-line); }
+.bo-rcard:first-child { border-top: none; padding-top: 2px; }
 .bo-rcard:first-child { border-top: none; padding-top: 2px; }
 .bo-rbody { flex: 1; min-width: 0; }
 .bo-rtop { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; min-height: 22px; }
 .bo-rname { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 .bo-rframe { font-size: 11.5px; font-weight: 600; color: var(--bo-bronze-deep); margin-bottom: 5px; }
-.bo-rsent { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 9px; border-radius: 6px; white-space: nowrap; }
+.bo-rsent { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px; white-space: nowrap; opacity: 0.85; }
 /* Editorial intro line under a card header (insights, subtitles). */
 .bo-cardnote { margin: -4px 0 14px; font-size: 13px; line-height: 1.45; color: var(--bo-muted); }
 .bo-rtext { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--bo-ink-soft); }
@@ -958,9 +991,9 @@ const BO_CSS = `
 .bo-rec-title--link { background: none; border: none; padding: 0; font: inherit; color: var(--bo-bronze-deep); cursor: pointer; }
 .bo-rec-title--link:hover { text-decoration: underline; }
 .bo-rec-why { margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--bo-muted); }
-/* Full-width action banner: lay the recommendations out side by side. */
-.bo-card--full .bo-recs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px 28px; }
-.bo-card--full .bo-rec { align-items: flex-start; }
+/* Recommended next moves: three actions as separated mini-cards. */
+.bo-recs--cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.bo-recs--cols .bo-rec { align-items: flex-start; padding: 14px 16px; border: 1px solid var(--bo-line); border-radius: 12px; background: rgba(255,255,255,0.55); }
 
 .bo-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--bo-line); }
 .bo-row--first { border-top: none; }
@@ -986,16 +1019,19 @@ const BO_CSS = `
 /* Prompt-themes strength-bar chart: theme label + a bar whose length encodes
    the association level, against a Missing→Strong axis. */
 .bo-sb { display: flex; flex-direction: column; }
-.bo-sb-row { display: grid; grid-template-columns: minmax(0, 1fr) 1.45fr; gap: 18px; align-items: center; padding: 13px 0; border-top: 1px solid var(--bo-line); }
-.bo-sb-axis { border-top: none; padding: 0 0 8px; }
+.bo-sb-row { display: grid; grid-template-columns: minmax(0, 1fr) 1.25fr 64px; gap: 14px; align-items: center; padding: 9px 0; border-top: 1px solid var(--bo-line); }
+.bo-sb-axis { border-top: none; padding: 0 0 6px; }
 .bo-sb-ticks { display: flex; justify-content: space-between; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; color: var(--bo-muted); }
-.bo-sb-theme { min-width: 0; font-size: 13px; font-weight: 600; color: var(--bo-ink-soft); line-height: 1.35; }
-.bo-sb-track { position: relative; height: 10px; border-radius: 5px; background: var(--bo-sand); overflow: hidden; }
+.bo-sb-level { justify-self: end; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--bo-muted); }
+.bo-sb-level--moderate { color: var(--bo-bronze-deep); }
+.bo-sb-level--strong { color: var(--bo-pos); }
+.bo-sb-theme { min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--bo-ink-soft); line-height: 1.25; }
+.bo-sb-track { position: relative; height: 8px; border-radius: 4px; background: var(--bo-sand); overflow: hidden; }
 /* faint reference lines at the Weak (⅓) and Moderate (⅔) marks */
 .bo-sb-grid { position: absolute; inset: 0; background:
   linear-gradient(90deg, transparent calc(33.33% - 0.5px), var(--bo-line-strong) 33.33%, transparent calc(33.33% + 0.5px)),
   linear-gradient(90deg, transparent calc(66.66% - 0.5px), var(--bo-line-strong) 66.66%, transparent calc(66.66% + 0.5px)); opacity: 0.5; }
-.bo-sb-fill { position: absolute; left: 0; top: 0; bottom: 0; min-width: 5px; border-radius: 5px; }
+.bo-sb-fill { position: absolute; left: 0; top: 0; bottom: 0; min-width: 5px; border-radius: 4px; }
 .bo-ng { display: inline-block; flex: none; width: 72px; text-align: center; padding: 3px 0; border-radius: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
 .bo-ng--strong { background: var(--bo-pos-bg); color: var(--bo-pos); }
 .bo-ng--moderate { background: var(--bo-bronze-bg); color: var(--bo-bronze-deep); }
@@ -1026,16 +1062,16 @@ const BO_CSS = `
 .bo-topsrc-cites em { font-style: normal; font-weight: 500; color: var(--bo-muted); }
 
 @media (max-width: 860px) {
-  .bo-kpis, .bo-spine { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 860px) {
-  .bo-card--full .bo-recs { grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 860px) {
-  .bo-toprow { grid-template-columns: 1fr; }
+  .bo-kpis { grid-template-columns: repeat(2, 1fr); }
+  .bo-kpi:nth-child(2) { border-left: none; }
+  .bo-kpi:nth-child(odd) { padding-left: 0; }
+  .bo-spine { grid-template-columns: repeat(2, 1fr); }
+  .bo-toprow, .bo-grid { grid-template-columns: 1fr; }
+  .bo-recs--cols { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 640px) {
-  .bo-grid { grid-template-columns: 1fr; }
-  .bo-card--full .bo-recs { grid-template-columns: 1fr; }
+  .bo-kpis { grid-template-columns: 1fr; }
+  .bo-kpi { border-left: none; padding-left: 0; }
+  .bo-recs--cols { grid-template-columns: 1fr; }
 }
 `;
