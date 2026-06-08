@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -86,9 +87,9 @@ export function TryBuilding({
         <div className="eyebrow">Live demo</div>
         <h1>{subjectName}</h1>
         <p className="try-failed">{failed}</p>
-        <a href="/" className="dash-btn dash-btn-accent">
+        <Link href="/" className="dash-btn dash-btn-accent">
           ← Try another topic
-        </a>
+        </Link>
       </div>
     );
   }

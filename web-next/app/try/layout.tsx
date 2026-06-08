@@ -16,9 +16,9 @@ export default function TryLayout({ children }: { children: React.ReactNode }) {
             <span className="mark">B</span>Byline
           </Link>
           <span className="try-tag">Live demo</span>
-          <a href="/#cta" className="try-cta">
+          <Link href="/#cta" className="try-cta">
             Get started →
-          </a>
+          </Link>
         </header>
         <main className="dash-main">{children}</main>
       </div>

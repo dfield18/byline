@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { OverviewBrief } from "@/components/dashboard/OverviewBrief";
 import { getTryOverview, getTryStatus } from "@/lib/tryApi";
@@ -33,7 +34,7 @@ export default async function TryOverviewPage({
   // later re-run is queued/failed, the last good snapshot is what we want.
   if (overview.meta.latest_refresh_id !== null) {
     const back = (
-      <a href="/" className="back-link">
+      <Link href="/" className="back-link">
         <svg
           className="ico"
           viewBox="0 0 24 24"
@@ -47,12 +48,12 @@ export default async function TryOverviewPage({
           <path d="m15 18-6-6 6-6" />
         </svg>
         Byline home
-      </a>
+      </Link>
     );
     const cta = (
-      <a href="/#cta" className="dash-btn dash-btn-accent">
+      <Link href="/#cta" className="dash-btn dash-btn-accent">
         Track this narrative →
-      </a>
+      </Link>
     );
     return (
       <>
@@ -79,9 +80,9 @@ export default async function TryOverviewPage({
           coverage across the assistants to score it reliably. Try a more
           prominent person, organization, or issue.
         </p>
-        <a href="/" className="dash-btn dash-btn-accent">
+        <Link href="/" className="dash-btn dash-btn-accent">
           ← Try another topic
-        </a>
+        </Link>
       </div>
     );
   }

@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import Link from "next/link";
 import Script from "next/script";
 import "./landing.css";
 
@@ -290,7 +291,7 @@ export default function LandingPage() {
       <nav>
         <div className="wrap nav-inner">
           {/* TODO: point logo at the real home/app route once it exists */}
-          <a className="logo" href="/"><span className="mark">B</span>Byline</a>
+          <Link className="logo" href="/"><span className="mark">B</span>Byline</Link>
           <div className="nav-links">
             <a href="#how">How it works</a>
             <a href="#product">Product</a>
@@ -781,7 +782,7 @@ export default function LandingPage() {
           <div className="foot">
             <div>
               {/* TODO: point logo at the real home/app route once it exists */}
-              <a className="logo" href="/"><span className="mark">B</span>Byline</a>
+              <Link className="logo" href="/"><span className="mark">B</span>Byline</Link>
               <p>AI narrative intelligence for public affairs, advocacy, and campaigns.</p>
             </div>
             <div className="foot-links">
