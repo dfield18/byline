@@ -377,6 +377,26 @@ function Sparkline({
       ? `${path(subj.points)} L${xAt(subjLast).toFixed(1)},${y1.toFixed(1)} L${xAt(subjFirst).toFixed(1)},${y1.toFixed(1)} Z`
       : "";
 
+  // Gap shade: a faint fill between the subject line (bottom) and the
+  // leading-rivals envelope — the max rival at each point (top). Makes the
+  // "−N pp gap to leading rivals" visible directly on the plot.
+  const gapRivals = drawable.filter((s) => !s.isSubject);
+  const gapPts = subj
+    ? labels
+        .map((_, i) => {
+          const sv = subj.points[i];
+          const rv = gapRivals.map((r) => r.points[i]).filter((v): v is number => v != null);
+          return sv != null && rv.length ? { i, sv, maxR: Math.max(...rv) } : null;
+        })
+        .filter((p): p is { i: number; sv: number; maxR: number } => p != null)
+    : [];
+  const gapPath =
+    gapPts.length >= 2
+      ? `${smooth(gapPts.map((p) => ({ x: xAt(p.i), y: yAt(p.maxR) })))} ` +
+        `L${xAt(gapPts[gapPts.length - 1].i).toFixed(1)},${yAt(gapPts[gapPts.length - 1].sv).toFixed(1)} ` +
+        `${smooth([...gapPts].reverse().map((p) => ({ x: xAt(p.i), y: yAt(p.sv) }))).replace(/^M/, "L")} Z`
+      : "";
+
   // X-axis ticks: up to 5, evenly spaced across the shared time index.
   const tickCount = Math.min(5, N);
   const tickIdx =
@@ -490,6 +510,7 @@ function Sparkline({
       ))}
 
       {subj && <path d={areaPath} fill="url(#bo-area-fade)" stroke="none" />}
+      {gapPath && <path d={gapPath} fill="rgba(96,99,112,0.08)" stroke="none" />}
 
       {drawable.map((s) => {
         const ri = rivalIndex(s);
@@ -620,6 +641,38 @@ function ModelMark({ slug, name, logo }: { slug: string; name: string; logo?: Re
   );
 }
 
+// Tiny KPI sparkline — trajectory at a glance, on its own min/max scale.
+function KpiSpark({ points }: { points: (number | null)[] }) {
+  const defined = points.filter((v): v is number => v != null);
+  if (defined.length < 2) return null;
+  const W = 100;
+  const H = 32;
+  const pad = 3;
+  const min = Math.min(...defined);
+  const max = Math.max(...defined);
+  const span = max - min || 1;
+  const n = points.length;
+  const xs = (i: number) => pad + (n <= 1 ? 0 : (i / (n - 1)) * (W - 2 * pad));
+  const ys = (v: number) => H - pad - ((v - min) / span) * (H - 2 * pad);
+  const pts = points
+    .map((v, i) => (v == null ? null : `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`))
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <svg className="bo-kspark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden>
+      <polyline
+        points={pts}
+        fill="none"
+        stroke="var(--bo-muted)"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 export function OverviewDashboard({
   data,
@@ -692,6 +745,11 @@ export function OverviewDashboard({
                   {k.delta}
                 </div>
               </div>
+              {k.spark && !k.compact && (
+                <div className="bo-kpi-viz">
+                  <KpiSpark points={k.spark} />
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -922,10 +980,10 @@ export function OverviewDashboard({
             })}
           </div>
         </section>
-        {/* Prompt coverage gaps — right column, narrow. */}
+        {/* Topic coverage — right column, narrow. */}
         <section className="bo-card">
           <CardHead dots={["var(--bo-bronze)"]} spoke="prompts" onOpenSpoke={onOpenSpoke}>
-            Prompt coverage gaps
+            Topic coverage
           </CardHead>
           {data.themesSummary && <p className="bo-insight">{emphasizeCount(data.themesSummary)}</p>}
           {data.coverage.rows.length > 0 ? (
@@ -948,7 +1006,7 @@ export function OverviewDashboard({
                 ))}
               </div>
               <p className="bo-ptm-legend">
-                Association = link strength across the tracked prompt themes.
+                Association = link strength across the tracked topics.
               </p>
             </>
           ) : (
@@ -1142,8 +1200,9 @@ const BO_CSS = `
 /* Diagnosis stack: full-width cards in a vertical column (Model framing row
    above Prompt coverage gaps). */
 .bo-diag { display: flex; flex-direction: column; gap: 22px; }
-/* Diagnosis row: Model framing (wide) + Prompt coverage gaps (narrow). */
-.bo-diag-row { display: grid; grid-template-columns: 1.26fr 0.74fr; gap: 22px; align-items: start; }
+/* Diagnosis row: Model framing + Prompt coverage gaps, balanced widths and
+   equal height (stretch so both cards share the same depth). */
+.bo-diag-row { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 22px; align-items: stretch; }
 /* Cross-model readout — mirrors the landing console's .lc-card rows:
    logo badge · (name + sentiment + frame) · evidence line, stacked vertically. */
 .bo-readout { display: flex; flex-direction: column; }
@@ -1205,7 +1264,8 @@ const BO_CSS = `
 .bo-ptm-head { border-top: none; padding-bottom: 11px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bo-muted); font-weight: 700; }
 .bo-ptm-theme { min-width: 0; font-size: 13px; font-weight: 600; color: var(--bo-ink-soft); line-height: 1.35; padding-right: 6px; }
 .bo-ptm-head .bo-ptm-theme { font-weight: 700; }
-.bo-ptm-tt { display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Theme labels wrap to multiple lines rather than truncating. */
+.bo-ptm-tt { display: block; min-width: 0; white-space: normal; overflow-wrap: break-word; line-height: 1.3; }
 .bo-ptm-cell { display: grid; place-items: center; }
 /* Placeholder model columns (not yet tracked) — dimmed so they read as pending. */
 .bo-ptm-cell--ph { opacity: 0.38; }
@@ -1238,7 +1298,8 @@ const BO_CSS = `
 .bo-ng--strong { background: var(--bo-pos-bg); color: var(--bo-pos); }
 .bo-ng--moderate { background: var(--bo-bronze-bg); color: var(--bo-bronze-deep); }
 .bo-ng--weak { background: var(--bo-neu-bg); color: var(--bo-neu); }
-.bo-ng--missing { background: var(--bo-neg-bg); color: var(--bo-neg); }
+/* Missing = neutral gray (NOT red — red is reserved for negative metric deltas). */
+.bo-ng--missing { background: var(--bo-sand); color: var(--bo-muted); }
 .bo-ptm-legend { margin: 14px 2px 0; font-size: 11px; line-height: 1.5; color: var(--bo-muted); }
 
 .bo-source-body { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }

@@ -373,10 +373,10 @@ export function toOverviewData(api: SubjectOverview): OverviewData {
   // so the insight stays a short count rather than re-listing them (avoids a
   // crowded two-line sentence above the scale).
   const themesSummary = missingThemes.length
-    ? `${api.subject_name} is missing from ${missingThemes.length} of ${drivers.length} tracked prompt themes.`
+    ? `${api.subject_name} is missing from ${missingThemes.length} of ${drivers.length} tracked topics.`
     : weakThemes.length
-      ? `${api.subject_name} has only weak presence on ${weakThemes.length} of ${drivers.length} tracked prompt themes.`
-      : `${api.subject_name} has solid coverage across the tracked prompt themes.`;
+      ? `${api.subject_name} has only weak presence on ${weakThemes.length} of ${drivers.length} tracked topics.`
+      : `${api.subject_name} has solid coverage across the tracked topics.`;
 
   // Per-card insight one-liners — all derived from real standing/coverage.
   const trendInsight =
