@@ -299,14 +299,6 @@ function emphasizeCount(text: string): ReactNode {
   );
 }
 
-// "A", "A and B", or "A, B, and C".
-const formatList = (xs: string[]): string =>
-  xs.length <= 1
-    ? xs.join("")
-    : xs.length === 2
-      ? `${xs[0]} and ${xs[1]}`
-      : `${xs.slice(0, -1).join(", ")}, and ${xs[xs.length - 1]}`;
-
 // Hand-rolled multi-series line chart on a fixed 0–100% domain, with gridlines,
 // y-axis ticks, dated x-axis ticks, and a name label at each line's right
 // endpoint (so no legend is needed). Points are null-aligned to `labels`, so
@@ -651,10 +643,6 @@ export function OverviewDashboard({
           <span className="bo-snap">
             <span className="bo-snap-k">Snapshot</span> {data.snapshotLabel ?? "—"}
           </span>
-          <span className="bo-snap-sep" aria-hidden />
-          <span className="bo-snap">
-            <span className="bo-snap-k">Compared with</span> {data.comparedWith}
-          </span>
         </div>
       </header>
 
@@ -708,6 +696,10 @@ export function OverviewDashboard({
           </div>
         ))}
       </div>
+      {/* Comparison cue — bottom-left, just under the KPI strip. */}
+      <p className="bo-comparison">
+        <span className="bo-snap-k">Compared with</span> {data.comparedWith}
+      </p>
 
       {/* Theme spine — navigable. Hidden until theme/bucket data exists. */}
       {data.themes.length > 0 && (
@@ -882,110 +874,18 @@ export function OverviewDashboard({
 
       {/* ── Diagnosis ──────────────────────────────────────────────────────── */}
       <h2 className="bo-section-h">Diagnosis</h2>
-      <div className="bo-grid">
-        {/* Prompt coverage gaps — placed first: shows WHERE the subject is
-            missing, which the recommendations act on, before HOW models frame him. */}
-        <section className="bo-card">
-          <CardHead dots={["var(--bo-bronze)"]} spoke="prompts" onOpenSpoke={onOpenSpoke}>
-            Prompt coverage gaps
-          </CardHead>
-          {data.themesSummary && <p className="bo-insight">{emphasizeCount(data.themesSummary)}</p>}
-          {data.coverage.rows.length > 0 && data.coverage.platforms.length > 0 ? (
-            (() => {
-              // Tracked model columns + dimmed placeholders for models not yet
-              // tracked (Claude/Perplexity), so the matrix shows the full set.
-              const ptmCols = [
-                ...data.coverage.platforms.map((p) => ({ slug: p.slug, name: p.name, placeholder: false })),
-                ...(data.untrackedModels ?? []).map((name) => ({
-                  slug: name.toLowerCase(),
-                  name,
-                  placeholder: true,
-                })),
-              ];
-              return (
-                <>
-                  <div className="bo-ptm" style={{ ["--bo-ptm-cols" as string]: ptmCols.length }}>
-                    <div className="bo-ptm-row bo-ptm-head">
-                      <span className="bo-ptm-theme">Theme</span>
-                      {ptmCols.map((p) => {
-                        const brand = MODEL_BRANDS[p.slug];
-                        return (
-                          <span
-                            className={`bo-ptm-cell${p.placeholder ? " bo-ptm-cell--ph" : ""}`}
-                            key={p.slug}
-                            title={p.placeholder ? `${p.name} — not yet tracked` : p.name}
-                          >
-                            {brand ? (
-                              <span className="bo-ptm-logo" style={{ background: brand.bg }} aria-hidden>
-                                <svg viewBox="0 0 24 24" fill="#fff">
-                                  <path d={brand.path} />
-                                </svg>
-                              </span>
-                            ) : (
-                              <span className="bo-ptm-logo bo-ptm-logo--fb" aria-hidden>
-                                {p.name.charAt(0).toUpperCase()}
-                              </span>
-                            )}
-                          </span>
-                        );
-                      })}
-                      <span className="bo-ptm-cell bo-ptm-assoc">Association</span>
-                    </div>
-                    {data.coverage.rows.map((row) => (
-                      <div className="bo-ptm-row" key={row.id} title={row.full}>
-                        <span className="bo-ptm-theme">
-                          <span className="bo-ptm-tt">{row.label}</span>
-                        </span>
-                        {ptmCols.map((p) => {
-                          if (p.placeholder) {
-                            return (
-                              <span className="bo-ptm-cell bo-ptm-cell--ph" key={p.slug}>
-                                <span className="bo-pip bo-pip--na">·</span>
-                              </span>
-                            );
-                          }
-                          const c = row.cells.find((cell) => cell.slug === p.slug);
-                          return (
-                            <span className="bo-ptm-cell" key={p.slug}>
-                              {c && c.mentioned ? (
-                                c.percentile !== null ? (
-                                  <span className="bo-pip bo-pip--hit">{c.percentile}</span>
-                                ) : (
-                                  <span className="bo-pip bo-pip--hit bo-pip--dot" />
-                                )
-                              ) : c && c.present ? (
-                                <span className="bo-pip bo-pip--miss">0</span>
-                              ) : (
-                                <span className="bo-pip bo-pip--na">·</span>
-                              )}
-                            </span>
-                          );
-                        })}
-                        <span className="bo-ptm-cell bo-ptm-assoc">
-                          <span className={`bo-ng bo-ng--${row.level}`}>{ASSOC_LABEL[row.level]}</span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="bo-ptm-legend">
-                    Prominence percentile (100 = top, 0 = not mentioned) · Association = link strength.
-                    Claude and Perplexity will appear after the next run.
-                  </p>
-                </>
-              );
-            })()
-          ) : (
-            <div className="bo-empty">No prompt-theme coverage yet.</div>
-          )}
-        </section>
-
-        {/* Model framing — second: how models frame him when he does appear. */}
+      <div className="bo-diag">
+        {/* Top row: Model framing (left) + Prompt coverage gaps (right, narrow). */}
+        <div className="bo-diag-row">
+        {/* Model framing */}
         <section className="bo-card">
           <CardHead dots={["var(--bo-bronze)"]} spoke="narrative" onOpenSpoke={onOpenSpoke}>
             Model framing
           </CardHead>
-          {/* Cross-model readout — mirrors the landing console's .lc-card rows:
-              a logo badge, a name + sentiment row, and the evidence line below. */}
+          {/* Cross-model readout — mirrors the landing console's .lc-card rows
+              (logo · name + sentiment + frame · evidence), stacked vertically,
+              with dimmed placeholders for models not yet tracked
+              (Claude/Perplexity). */}
           <div className="bo-readout">
             {data.models.map((m) => {
               const s = SENTIMENT_STYLE[m.sentiment];
@@ -1005,14 +905,57 @@ export function OverviewDashboard({
                 </div>
               );
             })}
+            {(data.untrackedModels ?? []).map((name) => {
+              const slug = name.toLowerCase();
+              return (
+                <div key={slug} className="bo-rcard bo-rcard--ph">
+                  <ModelMark slug={slug} name={name} logo={logos?.[slug]} />
+                  <div className="bo-rbody">
+                    <div className="bo-rtop">
+                      <span className="bo-rname">{name}</span>
+                      <span className="bo-rsent bo-rsent--ph">Not yet tracked</span>
+                    </div>
+                    <p className="bo-rev">Will appear after the next model run.</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          {data.untrackedModels && data.untrackedModels.length > 0 && (
-            <p className="bo-untracked">
-              {data.models.length} of {data.models.length + data.untrackedModels.length} models
-              tracked. {formatList(data.untrackedModels)} will appear after the next run.
-            </p>
+        </section>
+        {/* Prompt coverage gaps — right column, narrow. */}
+        <section className="bo-card">
+          <CardHead dots={["var(--bo-bronze)"]} spoke="prompts" onOpenSpoke={onOpenSpoke}>
+            Prompt coverage gaps
+          </CardHead>
+          {data.themesSummary && <p className="bo-insight">{emphasizeCount(data.themesSummary)}</p>}
+          {data.coverage.rows.length > 0 ? (
+            <>
+              {/* No per-model breakout — just the theme and its association level. */}
+              <div className="bo-ptm bo-ptm--nobreak">
+                <div className="bo-ptm-row bo-ptm-head">
+                  <span className="bo-ptm-theme">Theme</span>
+                  <span className="bo-ptm-cell bo-ptm-assoc">Association</span>
+                </div>
+                {data.coverage.rows.map((row) => (
+                  <div className="bo-ptm-row" key={row.id} title={row.full}>
+                    <span className="bo-ptm-theme">
+                      <span className="bo-ptm-tt">{row.label}</span>
+                    </span>
+                    <span className="bo-ptm-cell bo-ptm-assoc">
+                      <span className={`bo-ng bo-ng--${row.level}`}>{ASSOC_LABEL[row.level]}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="bo-ptm-legend">
+                Association = link strength across the tracked prompt themes.
+              </p>
+            </>
+          ) : (
+            <div className="bo-empty">No prompt-theme coverage yet.</div>
           )}
         </section>
+        </div>
       </div>
     </div>
   );
@@ -1074,7 +1017,9 @@ const BO_CSS = `
 .bo-bottomline { margin: 0 0 16px; font-size: 15px; line-height: 1.5; color: var(--bo-ink-soft); max-width: 760px; }
 
 /* KPI strip — a grouped executive metric strip with column dividers. */
-.bo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 30px; border-top: 1px solid rgba(40,36,22,0.07); border-bottom: 1px solid rgba(40,36,22,0.07); }
+.bo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 8px; border-top: 1px solid rgba(40,36,22,0.07); border-bottom: 1px solid rgba(40,36,22,0.07); }
+/* Comparison cue under the KPI strip, bottom-left, small + muted. */
+.bo-comparison { margin: 0 0 26px; font-size: 11px; color: var(--bo-muted); }
 .bo-kpi { padding: 18px 22px; }
 .bo-kpi:first-child { padding-left: 0; }
 /* Soft, low-contrast vertical dividers — premium, not spreadsheet-like. */
@@ -1194,8 +1139,13 @@ const BO_CSS = `
 .bo-num-v { position: relative; font-variant-numeric: tabular-nums; }
 .bo-tnote { margin: 11px 2px 0; font-size: 11px; color: var(--bo-muted); }
 
+/* Diagnosis stack: full-width cards in a vertical column (Model framing row
+   above Prompt coverage gaps). */
+.bo-diag { display: flex; flex-direction: column; gap: 22px; }
+/* Diagnosis row: Model framing (wide) + Prompt coverage gaps (narrow). */
+.bo-diag-row { display: grid; grid-template-columns: 1.26fr 0.74fr; gap: 22px; align-items: start; }
 /* Cross-model readout — mirrors the landing console's .lc-card rows:
-   logo badge · (name + sentiment + frame) · evidence line below. */
+   logo badge · (name + sentiment + frame) · evidence line, stacked vertically. */
 .bo-readout { display: flex; flex-direction: column; }
 .bo-rcard { display: flex; gap: 15px; padding: 18px 0; border-top: 1px solid var(--bo-line); }
 .bo-rcard:first-child { border-top: none; }
@@ -1203,12 +1153,11 @@ const BO_CSS = `
 .bo-rtop { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; min-height: 22px; flex-wrap: wrap; }
 .bo-rname { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 .bo-rsent { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px; white-space: nowrap; opacity: 0.85; }
-/* Frame as a subtle bronze pill in the name row. */
+.bo-rsent--ph { background: var(--bo-sand); color: var(--bo-muted); opacity: 1; }
 .bo-rframe-chip { display: inline-block; font-size: 12px; font-weight: 600; color: var(--bo-bronze-deep); background: var(--bo-bronze-bg); padding: 2px 9px; border-radius: 7px; }
-/* Evidence line — the per-model readout text, like the landing .lc-text. */
 .bo-rev { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--bo-ink-soft); }
-/* Untracked-models footnote — clearly NOT evidence. */
-.bo-untracked { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid rgba(40,36,22,0.06); font-size: 11px; line-height: 1.45; color: #90909a; }
+/* Placeholder model cards (not yet tracked) — dimmed so they read as pending. */
+.bo-rcard--ph { opacity: 0.5; }
 /* Editorial intro line under a card header (insights, subtitles). */
 .bo-cardnote { margin: -4px 0 14px; font-size: 13px; line-height: 1.45; color: var(--bo-muted); }
 .bo-rtext { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--bo-ink-soft); }
@@ -1250,7 +1199,9 @@ const BO_CSS = `
 
 /* Prompt-themes coverage matrix (theme × model prominence + association). */
 .bo-ptm { display: flex; flex-direction: column; }
-.bo-ptm-row { display: grid; grid-template-columns: minmax(0,1fr) repeat(var(--bo-ptm-cols, 2), 56px) 96px; align-items: center; gap: 18px; padding: 14px 8px; margin: 0 -8px; border-top: 1px solid var(--bo-line); border-radius: 7px; }
+.bo-ptm-row { display: grid; grid-template-columns: minmax(0,1fr) repeat(var(--bo-ptm-cols, 2), 44px) 92px; align-items: center; gap: 12px; padding: 13px 8px; margin: 0 -8px; border-top: 1px solid var(--bo-line); border-radius: 7px; }
+/* No per-model breakout: just Theme + Association. */
+.bo-ptm--nobreak .bo-ptm-row { grid-template-columns: minmax(0,1fr) 110px; }
 .bo-ptm-head { border-top: none; padding-bottom: 11px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bo-muted); font-weight: 700; }
 .bo-ptm-theme { min-width: 0; font-size: 13px; font-weight: 600; color: var(--bo-ink-soft); line-height: 1.35; padding-right: 6px; }
 .bo-ptm-head .bo-ptm-theme { font-weight: 700; }
@@ -1317,7 +1268,7 @@ const BO_CSS = `
   .bo-kpi:nth-child(2) { border-left: none; }
   .bo-kpi:nth-child(odd) { padding-left: 0; }
   .bo-spine { grid-template-columns: repeat(2, 1fr); }
-  .bo-toprow, .bo-grid { grid-template-columns: 1fr; }
+  .bo-toprow, .bo-grid, .bo-diag-row { grid-template-columns: 1fr; }
   .bo-recs--cols { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 640px) {

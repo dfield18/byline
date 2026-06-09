@@ -130,12 +130,21 @@ type Spoke = {
   label: string;
   Icon: (p: IconProps) => React.ReactElement;
   built: boolean;
+  /** Path segment to link to (defaults to `key`). Lets the visible label
+   *  differ from the route — e.g. "Overview" pointing at overview-v3. */
+  routeKey?: string;
+  /** Route segments that mark this item active (defaults to [key]). */
+  activeKeys?: string[];
 };
 
+// Nav spokes. The versioned/prototype routes (Overview v2/v3, Dashboard v2)
+// are listed while v3 is still being iterated on; trim them for a
+// client-ready build once v3 is cut over to the canonical "Overview".
 const SPOKES: Spoke[] = [
   { key: "", label: "Overview", Icon: OverviewIcon, built: true },
   { key: "overview-v2", label: "Overview v2", Icon: OverviewIcon, built: true },
   { key: "overview-v3", label: "Overview v3", Icon: OverviewIcon, built: true },
+  { key: "overview-v4", label: "Overview v4", Icon: OverviewIcon, built: true },
   { key: "dashboard", label: "Dashboard", Icon: DashboardIcon, built: true },
   { key: "dashboard_v2", label: "Dashboard v2", Icon: DashboardIcon, built: true },
   { key: "visibility", label: "Visibility", Icon: VisibilityIcon, built: true },
@@ -171,9 +180,10 @@ function SpokeNav({ subjectId, active }: { subjectId: string; active: string }) 
         All subjects
       </Link>
       <div className="dash-nav-label">This subject</div>
-      {SPOKES.map(({ key, label, Icon, built }) => {
-        const isActive = active === key;
-        const href = `/subjects/${subjectId}${key ? `/${key}` : ""}`;
+      {SPOKES.map(({ key, label, Icon, built, routeKey, activeKeys }) => {
+        const isActive = (activeKeys ?? [key]).includes(active);
+        const seg = routeKey ?? key;
+        const href = `/subjects/${subjectId}${seg ? `/${seg}` : ""}`;
         if (built) {
           return (
             <Link
