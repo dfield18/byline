@@ -145,6 +145,7 @@ const SPOKES: Spoke[] = [
   { key: "overview-v2", label: "Overview v2", Icon: OverviewIcon, built: true },
   { key: "overview-v3", label: "Overview v3", Icon: OverviewIcon, built: true },
   { key: "overview-v4", label: "Overview v4", Icon: OverviewIcon, built: true },
+  { key: "overview-v5", label: "Overview v5", Icon: OverviewIcon, built: true },
   { key: "dashboard", label: "Dashboard", Icon: DashboardIcon, built: true },
   { key: "dashboard_v2", label: "Dashboard v2", Icon: DashboardIcon, built: true },
   { key: "visibility", label: "Visibility", Icon: VisibilityIcon, built: true },
